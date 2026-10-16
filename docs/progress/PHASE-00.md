@@ -1,9 +1,9 @@
 # P00 — Audit and bootstrap
 
-- Status: In progress
+- Status: Complete (local native-Windows gate)
 - Started: 2026-10-17
 - Gate owner: implementation agent; manual/external claims excluded
-- Milestone commit: pending
+- Milestone commit: `a98195a`
 
 ## Requirements and assumptions
 
@@ -74,7 +74,16 @@ Final pre-documentation run:
 - Desktop smoke: `DCx.exe` launched as PID 16864 with title `DCx / Agentic Browser`; UIA main window found; address, back, navigate, status and interactive-page elements exposed; test process closed.
 - Generated executable: `src/DCx.Desktop/bin/Release/net10.0-windows10.0.19041.0/DCx.exe`, 162,304 bytes in that run.
 
-The final locked CI-equivalent rerun and script smoke result must be added before this phase is marked complete.
+Final locked CI-equivalent run on Windows 11 build 26200.9457:
+
+- Restore: all three projects restored from committed lock files; 64–144 ms per project.
+- Release build: passed; 0 warnings, 0 errors; 0.73 seconds.
+- Unit tests: passed 14, failed 0, skipped 0; 28 ms.
+- Scripted desktop smoke: PID 9320; title `DCx / Agentic Browser`; required UIA elements 5/5; process closed cleanly.
+- Repository secret-pattern scan: no matches.
+- `git diff --check`: passed.
+
+The GitHub Actions workflow was not remotely executed because no remote repository exists. Its native Windows commands are the same commands that passed through `scripts/verify-p00.sh`; this limitation is not represented as a remote-CI pass.
 
 ## Changed files
 
@@ -98,4 +107,3 @@ The final locked CI-equivalent rerun and script smoke result must be added befor
 - Docker daemon permission is unavailable to this WSL user; relevant only from P09.
 - WinUI 3 was not built because its template/workload is absent; installing it would be unnecessary privileged setup for the selected WPF path.
 - Disk is already 88% used; P06 model selection must budget space before any download.
-

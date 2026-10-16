@@ -6,8 +6,8 @@ DCx is under construction. It is not a validated release, installer, production 
 
 | Phase | Status | Evidence summary |
 |---|---|---|
-| P00 Audit and bootstrap | In progress | Native Windows Release build: 0 warnings/errors; 14 unit cases pass; WPF/UIA smoke launch passes. Documentation and milestone commit remain. |
-| P01 Native shell + accessible browser | Not started | Bootstrap shell exists only as P00 feasibility code; P01 gates have not run. |
+| P00 Audit and bootstrap | Complete (local gate) | Locked native Windows Release build: 0 warnings/errors; 14/14 unit cases; 5/5 required UIA elements; milestone `a98195a`. Remote workflow is present but unrun because no remote exists. |
+| P01 Native shell + accessible browser | In progress | Bootstrap shell exists; full tabs/history/download/profile/accessibility gates remain. |
 | P02 Agent/browser shared control | Not started | No validated implementation. |
 | P03 External native apps/terminal broker | Not started | No validated implementation. |
 | P04 OpenAI identity and Codex | Not started | Commercial ChatGPT sign-in eligibility remains unverified; no key or paid call used. |
@@ -30,4 +30,3 @@ DCx is under construction. It is not a validated release, installer, production 
 - WSL development distro is Ubuntu 22.04.3, not the separate Ubuntu 24.04 server described by the owner.
 - D: has about 120 GB free and is 88% used; large local-model/artifact downloads require explicit capacity checks.
 - JAWS 2023–2025, NVDA 2026.1.1, and Narrator are installed. No human screen-reader pass has been recorded.
-
