@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DCx.Core/DCx.Core.csproj" />
+    <Project Path="src/DCx.Desktop/DCx.Desktop.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DCx.Core.Tests/DCx.Core.Tests.csproj" />
+  </Folder>
+</Solution>
+

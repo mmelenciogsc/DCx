@@ -1,0 +1,35 @@
+# Threat model
+
+## Protected assets
+
+User files and prompts; browser sessions; API/OAuth/PayPal credentials; private CKB/CCB; Windows input/focus; local process authority; global signing keys and catalog; contribution provenance; usage receipts; entitlement and CARE ledgers; payout approvals; audit evidence.
+
+## Trust boundaries
+
+| Boundary | Untrusted side | Trusted enforcement |
+|---|---|---|
+| WebView2 content ↔ client | Web pages, scripts, downloads, DOM text | Origin-aware browser adapter and download quarantine |
+| Documents/media ↔ parsers | Files, URLs, embedded objects, OCR text | Type/size limits, sandboxing, safe parsers, output validation |
+| Model output ↔ tools | Prompt injection, hallucinated arguments | Typed schemas, policy engine, capability grants, evidence checks |
+| UI ↔ Windows broker | Agent action requests | Allowlists, safe argument binding, focus lease, approval/cancel |
+| Client ↔ OpenAI | Optional approved task payload | Redaction, minimization, protected key storage, TLS, cancellation |
+| Client ↔ global service | Catalog updates/contributions/receipts | Signatures, nonce/idempotency, minimization, quarantine |
+| Global service ↔ PayPal | Webhooks, entitlements, payouts | Signature verification, reconciliation, owner approval, sandbox first |
+
+## Priority threats and required controls
+
+1. **Prompt injection causes an OS or financial side effect.** Content-derived instructions have no capabilities. The policy engine requires a typed user-intent grant; destructive, external, privileged, publishing, and financial actions require accessible confirmation.
+2. **Focus theft or conflicting input harms the user.** A single control coordinator issues revocable agent focus leases. Any user input pauses agent input. Handback restores a recorded UIA element when safe and otherwise announces a deterministic fallback.
+3. **Browser session theft.** WebView2 profiles are DCx-owned, ACL-protected, and never created from Chrome cookies. Secrets are excluded from logs, artifacts, screenshots, crash reports, and model context.
+4. **Command injection.** Brokers use executable plus argument-array contracts, canonical paths, workspace scopes, time/output limits, and deny shell interpolation by default.
+5. **Malicious dependencies or community code.** Pin packages, record hashes/licenses/SBOM, scan, build in quarantine, test permissions, sign approved artifacts, support revocation.
+6. **Tampered global updates.** Verify a pinned trust root, manifest signature, artifact digest, monotonic version, expiry/revocation, and atomic swap; preserve rollback.
+7. **Private-data exfiltration.** Upload defaults off. Contributions require item-level preview, ownership attestation, redaction and secret/PII/license scans. Telemetry excludes prompts and source content.
+8. **Receipt/payout fraud.** Entitlement-bound signed receipts, replay prevention, anomaly checks, audit sampling, immutable journal semantics, double-entry reconciliation, holds, and final owner approval.
+9. **Local denial of service/cost runaway.** Per-task token, time, memory, process, network and retry budgets; model unload; cancel/kill only the scoped child process.
+10. **Confused-deputy elevation.** The main app runs unelevated. A future elevation helper must be narrowly scoped, short-lived, separately authenticated, and invoked only after explicit consent.
+
+## Security gate policy
+
+Security tests must cover denial paths as well as successful paths. A mock or sandbox pass proves only that path. Production OpenAI/PayPal eligibility, code signing, legal review, external penetration testing, and the Ubuntu production deployment remain explicit blockers until separately evidenced.
+

@@ -1,0 +1,65 @@
+<Window x:Class="DCx.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="DCx / Agentic Browser"
+        Width="1280"
+        Height="820"
+        MinWidth="760"
+        MinHeight="520"
+        AutomationProperties.Name="DCx Agentic Browser main window"
+        PreviewKeyDown="OnPreviewKeyDown">
+    <DockPanel LastChildFill="True">
+        <Border DockPanel.Dock="Top" Background="#F3F3F3" Padding="8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Button x:Name="BackButton"
+                        Grid.Column="0"
+                        MinWidth="44"
+                        Margin="0,0,8,0"
+                        Content="Back"
+                        AutomationProperties.Name="Go back"
+                        Click="OnBackClick" />
+                <TextBox x:Name="AddressBox"
+                         Grid.Column="1"
+                         MinHeight="32"
+                         Padding="6,4"
+                         VerticalContentAlignment="Center"
+                         AutomationProperties.Name="Web address"
+                         AutomationProperties.HelpText="Enter an HTTP or HTTPS address. Press Control L from anywhere to focus this field."
+                         KeyDown="OnAddressKeyDown" />
+                <Button Grid.Column="2"
+                        MinWidth="64"
+                        Margin="8,0,0,0"
+                        Content="Go"
+                        AutomationProperties.Name="Navigate to web address"
+                        Click="OnGoClick" />
+                <Button x:Name="AgentDrawerButton"
+                        Grid.Column="3"
+                        MinWidth="104"
+                        Margin="8,0,0,0"
+                        Content="Agent"
+                        AutomationProperties.Name="Open agent controls"
+                        AutomationProperties.HelpText="Agent controls are not enabled in the P00 bootstrap build."
+                        IsEnabled="False" />
+            </Grid>
+        </Border>
+
+        <Border DockPanel.Dock="Bottom" Background="#F3F3F3" Padding="8,5">
+            <TextBlock x:Name="StatusText"
+                       Text="Starting DCx."
+                       AutomationProperties.Name="Browser status"
+                       AutomationProperties.LiveSetting="Polite" />
+        </Border>
+
+        <wv2:WebView2 x:Name="Browser"
+                      AutomationProperties.Name="Interactive web page"
+                      AutomationProperties.HelpText="The live web page shared by you and approved agent actions." />
+    </DockPanel>
+</Window>
+
