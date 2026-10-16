@@ -29,7 +29,14 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 9. **Local denial of service/cost runaway.** Per-task token, time, memory, process, network and retry budgets; model unload; cancel/kill only the scoped child process.
 10. **Confused-deputy elevation.** The main app runs unelevated. A future elevation helper must be narrowly scoped, short-lived, separately authenticated, and invoked only after explicit consent.
 
+## Implemented OpenAI/Codex controls through P04
+
+- The child environment is rebuilt from a small OS-variable allowlist; arbitrary parent secrets are not inherited.
+- DCx uses an isolated per-user `CODEX_HOME` and ephemeral app-server auth storage, so it does not copy or silently reuse the developer's Codex/ChatGPT session.
+- API keys live in Windows Credential Manager, never command arguments or project files. Known values and bearer credentials are redacted from bounded child diagnostics.
+- P04 threads are ephemeral and read-only; web search, apps and multi-agent features are disabled. Unhandled server tool requests receive no authority.
+- Commercial ChatGPT-plan sign-in remains compiled unavailable until eligibility is evidenced. A model catalog is never considered authorization.
+
 ## Security gate policy
 
 Security tests must cover denial paths as well as successful paths. A mock or sandbox pass proves only that path. Production OpenAI/PayPal eligibility, code signing, legal review, external penetration testing, and the Ubuntu production deployment remain explicit blockers until separately evidenced.
-
