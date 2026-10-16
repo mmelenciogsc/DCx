@@ -121,10 +121,17 @@
                             Click="OnShowDownloadsClick" />
                     <Button x:Name="AgentDrawerButton"
                             MinWidth="104"
+                            Margin="0,0,6,0"
                             Content="Agent"
                             AutomationProperties.AutomationId="AgentDrawerButton"
                             AutomationProperties.Name="Open agent controls"
                             Click="OnAgentDrawerClick" />
+                    <Button x:Name="WindowsAppButton"
+                            MinWidth="120"
+                            Content="Windows app"
+                            AutomationProperties.AutomationId="WindowsAppButton"
+                            AutomationProperties.Name="Open Windows application controls"
+                            Click="OnWindowsAppClick" />
                 </StackPanel>
             </Grid>
         </Border>

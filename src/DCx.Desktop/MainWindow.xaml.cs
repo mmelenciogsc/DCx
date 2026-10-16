@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private AgentActionLease? _agentLease;
     private BrowserTabState? _agentTab;
     private Uri? _agentTarget;
+    private NativeAppControlWindow? _nativeAppControlWindow;
 
     public MainWindow()
     {
@@ -821,6 +822,42 @@ public partial class MainWindow : Window
             AgentDrawerButton.Focus();
             SetStatus("Agent controls closed.");
         }
+    }
+
+    private void OnWindowsAppClick(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Opening Windows application controls.");
+        try
+        {
+            if (_nativeAppControlWindow is { IsVisible: true })
+            {
+                _nativeAppControlWindow.Activate();
+                return;
+            }
+
+            _nativeAppControlWindow = new NativeAppControlWindow(ResolveRepositoryRoot())
+            {
+                Owner = this,
+            };
+            _nativeAppControlWindow.Closed += (_, _) => _nativeAppControlWindow = null;
+            _nativeAppControlWindow.Show();
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"Windows application controls could not open. {exception.Message}");
+        }
+    }
+
+    private static string ResolveRepositoryRoot()
+    {
+        var configured = Environment.GetEnvironmentVariable("DCX_REPO_ROOT");
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return Path.GetFullPath(configured.Trim());
+        }
+
+        var candidate = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        return File.Exists(Path.Combine(candidate, "DCx.slnx")) ? candidate : AppContext.BaseDirectory;
     }
 
     private async void OnPreviewKeyDown(object sender, KeyEventArgs e)

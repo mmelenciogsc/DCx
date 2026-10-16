@@ -1,0 +1,113 @@
+<Window x:Class="DCx.Desktop.NativeAppControlWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Windows application control — DCx"
+        Width="620"
+        Height="700"
+        MinWidth="520"
+        MinHeight="580"
+        AutomationProperties.AutomationId="NativeAppControlWindow"
+        AutomationProperties.Name="DCx Windows application control">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="20">
+            <TextBlock FontSize="22"
+                       FontWeight="SemiBold"
+                       Text="Windows application control" />
+            <TextBlock Margin="0,8,0,16"
+                       TextWrapping="Wrap"
+                       Text="This P03 validation surface launches only a repository-owned app. UI Automation is restricted to the broker-tracked process. No elevation, shell string or pixel input is used." />
+            <TextBlock x:Name="ExternalControlModeText"
+                       Margin="0,0,0,12"
+                       FontWeight="SemiBold"
+                       Text="Control: User. No external app is active."
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="ExternalControlModeText"
+                       AutomationProperties.LiveSetting="Assertive" />
+
+            <WrapPanel Margin="0,0,0,12">
+                <Button x:Name="LaunchFixtureButton"
+                        MinWidth="170"
+                        Margin="0,0,8,8"
+                        Content="Launch controlled app"
+                        AutomationProperties.AutomationId="LaunchFixtureButton"
+                        AutomationProperties.Name="Launch controlled Windows application"
+                        Click="OnLaunchFixtureClick" />
+                <Button x:Name="InspectReadmeButton"
+                        MinWidth="170"
+                        Margin="0,0,8,8"
+                        Content="Inspect README read-only"
+                        AutomationProperties.AutomationId="InspectReadmeButton"
+                        AutomationProperties.Name="Inspect repository README with restricted PowerShell"
+                        Click="OnInspectReadmeClick" />
+            </WrapPanel>
+
+            <GroupBox x:Name="UiaApprovalPanel"
+                      Margin="0,0,0,12"
+                      Header="UI Automation approval"
+                      Visibility="Collapsed"
+                      AutomationProperties.AutomationId="UiaApprovalPanel"
+                      AutomationProperties.Name="Windows UI Automation approval required">
+                <StackPanel Margin="10">
+                    <TextBlock Margin="0,0,0,8"
+                               TextWrapping="Wrap"
+                               Text="Allow DCx to set and apply fixed fixture text in this broker-launched app, then return control and focus to its Shared text field?" />
+                    <WrapPanel>
+                        <Button x:Name="ApproveUiaButton"
+                                MinWidth="90"
+                                Margin="0,0,8,0"
+                                Content="Approve"
+                                AutomationProperties.AutomationId="ApproveUiaButton"
+                                AutomationProperties.Name="Approve scoped UI Automation"
+                                Click="OnApproveUiaClick" />
+                        <Button x:Name="RejectUiaButton"
+                                MinWidth="90"
+                                Content="Reject"
+                                AutomationProperties.AutomationId="RejectUiaButton"
+                                AutomationProperties.Name="Reject UI Automation"
+                                Click="OnRejectUiaClick" />
+                    </WrapPanel>
+                </StackPanel>
+            </GroupBox>
+
+            <TextBlock x:Name="ExternalInstructionText"
+                       Margin="0,0,0,12"
+                       Text="Launch the controlled app to begin."
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="ExternalInstructionText"
+                       AutomationProperties.LiveSetting="Assertive" />
+            <WrapPanel Margin="0,0,0,12">
+                <Button x:Name="TakeExternalControlButton"
+                        MinWidth="130"
+                        Margin="0,0,8,8"
+                        Content="Take control"
+                        IsEnabled="False"
+                        AutomationProperties.AutomationId="TakeExternalControlButton"
+                        AutomationProperties.Name="Take control of Windows application"
+                        Click="OnTakeExternalControlClick" />
+                <Button x:Name="ResumeExternalAgentButton"
+                        MinWidth="150"
+                        Margin="0,0,8,8"
+                        Content="Resume agent"
+                        IsEnabled="False"
+                        AutomationProperties.AutomationId="ResumeExternalAgentButton"
+                        AutomationProperties.Name="Hand Windows application control back to agent"
+                        Click="OnResumeExternalAgentClick" />
+                <Button x:Name="CloseFixtureButton"
+                        MinWidth="150"
+                        Margin="0,0,8,8"
+                        Content="Close controlled app"
+                        IsEnabled="False"
+                        AutomationProperties.AutomationId="CloseFixtureButton"
+                        AutomationProperties.Name="Close controlled Windows application"
+                        Click="OnCloseFixtureClick" />
+            </WrapPanel>
+
+            <TextBlock FontWeight="SemiBold" Text="Broker and handoff log" />
+            <ListBox x:Name="ExternalActionLog"
+                     Height="260"
+                     Margin="0,4,0,0"
+                     AutomationProperties.AutomationId="ExternalActionLog"
+                     AutomationProperties.Name="Windows broker and handoff log" />
+        </StackPanel>
+    </ScrollViewer>
+</Window>
