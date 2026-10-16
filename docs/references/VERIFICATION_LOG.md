@@ -18,5 +18,10 @@ Checked 2026-10-17 from the development host.
 | Open-source ChatGPT-plan sharing | https://developers.openai.com/siwc/token-sharing-open-source | HTTP 200; available path is for open-source/local clients; paid or remotely hosted apps are directed to an interest form. This is not evidence that DCx is approved. |
 | ChatGPT plan via app-server | https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server | HTTP 200; external OAuth access token, Responses provider configuration, initialize/thread/turn sequence and restart-on-token-renewal confirmed for eligible clients only. |
 | ChatGPT-plan preview limitations | https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations | HTTP 200; `store:false`, `stream:true`, explicit input history and unsupported fields/tools recorded. |
+| Ollama local API | https://docs.ollama.com/api/introduction | HTTP 200; local base URL `http://localhost:11434/api` requires no cloud key. |
+| Ollama vision | https://docs.ollama.com/capabilities/vision | HTTP 200; REST image input is base64 in a message `images` array. |
+| Ollama chat schema | https://docs.ollama.com/api/chat | HTTP 200; request/response fields, deterministic options, token/duration metrics and `keep_alive` verified. |
+| whisper.cpp | https://github.com/ggml-org/whisper.cpp | HTTP 200; upstream project exists, but no local Windows backend is installed and no binary/model license/hash has been approved. |
+| FFmpeg documentation | https://ffmpeg.org/documentation.html | Timed out from this environment on the verification attempt; the installed binary/version and enabled backends were inspected locally instead. |
 
 The remaining supplied official references are verified immediately before their associated integration phase. An HTTP success alone never proves account entitlement, commercial authorization, licensing suitability, or API availability.

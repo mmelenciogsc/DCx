@@ -14,8 +14,9 @@
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p03.ps1
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p04.ps1
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p05.ps1
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p06.ps1
    ```
 
 5. Continue only the earliest uncompleted phase. Record commands, results, changed files, blockers, and the milestone commit in its phase document. Never infer manual screen-reader or external-service success from automated tests.
 
-Current implementation includes the native browser, shared-control and Windows brokers, isolated local Codex JSONL client, protected API-key mode, and BOSS task DAG/routing/budget/evidence/checkpoint core. P00–P05 automated gates pass; real provider/auth and human screen-reader checks remain explicitly unverified. P06 is active. Consult `docs/progress/STATUS.md` and `docs/progress/PHASE-06.md` before continuing.
+Current implementation includes the native browser, shared-control and Windows brokers, isolated Codex provider boundary, BOSS orchestration, and a loopback-only Ollama vision adapter with a real Qwen3-VL benchmark. P00–P05 pass; P06 is blocked only on the absent, unapproved Whisper backend. P07 is the next unblocked phase. Consult `docs/progress/STATUS.md`, `docs/progress/PHASE-06.md` and `docs/progress/PHASE-07.md` before continuing.
