@@ -13,7 +13,7 @@ DCx is under construction. It is not a validated release, installer, production 
 | P04 OpenAI identity and Codex | Complete (offline/native mock gate) | Local JSONL app-server lifecycle, model discovery, API-key credential boundary, streaming, cancellation, redaction and reconnect pass at `8ba629c`; no real provider call. Commercial ChatGPT sign-in remains blocked pending OpenAI approval. |
 | P05 BOSS orchestration | Complete (deterministic benchmark gate) | DAG validation, eight roles, deterministic-first/privacy-aware routing, evidence, retries, cancellation, time/token budgets and JSONL checkpoints pass at `ce7ea0e`/`53af804`; fixture metrics make no savings claim. |
 | P06 Local models | BLOCKED (partial implementation) | Existing Ollama/Qwen3-VL 4B local CUDA vision benchmark passes at `463bfb6`; selection/fallback tests pass. No Whisper backend exists and install/download is not authorized, so transcription gate remains blocked. |
-| P07 Files/documents/media | In progress | Admission/YouTube policy passes in 67/67 tests at `e21c654`; accessible text/image/audio/video/folder and YouTube-handoff UI compiles at `4e8ee1f` but still needs native UIA/media validation. Structured exports/OCR remain. |
+| P07 Files/documents/media | In progress | Admission/YouTube policy passes in 67/67 tests; native text/folder/real-MP4 play-pause/lookalike-host denial/YouTube handoff UIA passes at `c47edf9`. Structured exports, OCR/geometry and frame Q&A remain. |
 | P08 Private CKB/CCB | Not started | No validated implementation. |
 | P09 Global registry/sync | Not started | Docker daemon access unavailable to current WSL user; real Ubuntu deployment forbidden without approval. |
 | P10 Contributions/governance | Not started | No validated implementation. |

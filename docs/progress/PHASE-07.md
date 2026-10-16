@@ -1,7 +1,7 @@
 # P07 — Files, documents, accessibility and media
 
 - Status: In progress
-- Partial implementation commits: `e21c654`, `4e8ee1f`
+- Partial implementation commits: `e21c654`, `4e8ee1f`, `c47edf9`
 
 Required gate includes real structured exports, OCR/geometry goldens, accessibility-tree tests and honest YouTube/live-stream limitations.
 
@@ -16,11 +16,18 @@ Required gate includes real structured exports, OCR/geometry goldens, accessibil
 
 ## Current evidence
 
-After the latest increment, the native Release build has 0 warnings/errors and 67/67 tests pass. The viewer compiled successfully, but its native UIA/media E2E has not yet run; P07 remains in progress.
+After the latest increment, the native Release build has 0 warnings/errors and 67/67 tests pass. Native UIA/media E2E also passes:
+
+- A real UTF-8 fixture is rendered through the accessible text value.
+- A folder listing exposes three test entries without absolute paths.
+- FFmpeg generates a real one-second H.264 MP4; DCx opens it paused and Play/Pause transitions pass.
+- A YouTube lookalike host is blocked.
+- A valid `youtu.be` URL with tracking data is normalized and handed to a new tab in the shared DCx WebView2 browser.
+
+P07 remains in progress because structured document exports, OCR/geometry and full video-frame Q&A are not yet complete.
 
 ## Remaining gate work
 
-- Native UIA validation for the new folder/text/image/media/YouTube surface.
 - Real structured DOCX/XLSX/PPTX and scanned-PDF wizard exports with semantic validation.
 - OCR and geometry goldens plus semantic repair overlays.
 - Safe local video pause/resume, frame Q&A and YouTube playback/limitations.
