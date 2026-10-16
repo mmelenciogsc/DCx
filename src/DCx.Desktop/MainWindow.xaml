@@ -1,65 +1,226 @@
 <Window x:Class="DCx.Desktop.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="DCx / Agentic Browser"
-        Width="1280"
-        Height="820"
-        MinWidth="760"
-        MinHeight="520"
+        Width="1360"
+        Height="860"
+        MinWidth="900"
+        MinHeight="600"
         AutomationProperties.Name="DCx Agentic Browser main window"
         PreviewKeyDown="OnPreviewKeyDown">
     <DockPanel LastChildFill="True">
         <Border DockPanel.Dock="Top" Background="#F3F3F3" Padding="8">
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
+
                 <Button x:Name="BackButton"
+                        Grid.Row="0"
                         Grid.Column="0"
-                        MinWidth="44"
-                        Margin="0,0,8,0"
+                        MinWidth="52"
+                        Margin="0,0,6,0"
                         Content="Back"
+                        IsEnabled="False"
+                        AutomationProperties.AutomationId="BackButton"
                         AutomationProperties.Name="Go back"
                         Click="OnBackClick" />
+                <Button x:Name="ForwardButton"
+                        Grid.Row="0"
+                        Grid.Column="1"
+                        MinWidth="62"
+                        Margin="0,0,6,0"
+                        Content="Forward"
+                        IsEnabled="False"
+                        AutomationProperties.AutomationId="ForwardButton"
+                        AutomationProperties.Name="Go forward"
+                        Click="OnForwardClick" />
+                <Button x:Name="ReloadButton"
+                        Grid.Row="0"
+                        Grid.Column="2"
+                        MinWidth="62"
+                        Margin="0,0,8,0"
+                        Content="Reload"
+                        IsEnabled="False"
+                        AutomationProperties.AutomationId="ReloadButton"
+                        AutomationProperties.Name="Reload page"
+                        Click="OnReloadClick" />
                 <TextBox x:Name="AddressBox"
-                         Grid.Column="1"
+                         Grid.Row="0"
+                         Grid.Column="3"
                          MinHeight="32"
                          Padding="6,4"
                          VerticalContentAlignment="Center"
+                         AutomationProperties.AutomationId="AddressBox"
                          AutomationProperties.Name="Web address"
                          AutomationProperties.HelpText="Enter an HTTP or HTTPS address. Press Control L from anywhere to focus this field."
                          KeyDown="OnAddressKeyDown" />
-                <Button Grid.Column="2"
+                <Button Grid.Row="0"
+                        Grid.Column="4"
                         MinWidth="64"
                         Margin="8,0,0,0"
                         Content="Go"
+                        AutomationProperties.AutomationId="GoButton"
                         AutomationProperties.Name="Navigate to web address"
                         Click="OnGoClick" />
-                <Button x:Name="AgentDrawerButton"
-                        Grid.Column="3"
-                        MinWidth="104"
+                <Button x:Name="NewTabButton"
+                        Grid.Row="0"
+                        Grid.Column="5"
+                        MinWidth="82"
                         Margin="8,0,0,0"
-                        Content="Agent"
-                        AutomationProperties.Name="Open agent controls"
-                        AutomationProperties.HelpText="Agent controls are not enabled in the P00 bootstrap build."
-                        IsEnabled="False" />
+                        Content="New tab"
+                        AutomationProperties.AutomationId="NewTabButton"
+                        AutomationProperties.Name="Open new tab"
+                        AutomationProperties.HelpText="Opens a tab in the selected browser profile. Shortcut Control T."
+                        Click="OnNewTabClick" />
+
+                <StackPanel Grid.Row="1"
+                            Grid.Column="0"
+                            Grid.ColumnSpan="6"
+                            Margin="0,8,0,0"
+                            Orientation="Horizontal">
+                    <TextBlock Margin="0,0,6,0" VerticalAlignment="Center" Text="New-tab profile:" />
+                    <ComboBox x:Name="ProfilesBox"
+                              MinWidth="110"
+                              Margin="0,0,8,0"
+                              AutomationProperties.AutomationId="ProfilesBox"
+                              AutomationProperties.Name="Browser profile for new tabs"
+                              SelectionChanged="OnProfileSelectionChanged" />
+                    <Button Margin="0,0,6,0"
+                            Content="Bookmark"
+                            AutomationProperties.AutomationId="BookmarkButton"
+                            AutomationProperties.Name="Bookmark current page"
+                            AutomationProperties.HelpText="Shortcut Control D."
+                            Click="OnBookmarkClick" />
+                    <Button Margin="0,0,6,0"
+                            Content="Bookmarks"
+                            AutomationProperties.AutomationId="BookmarksButton"
+                            AutomationProperties.Name="Show bookmarks"
+                            Click="OnShowBookmarksClick" />
+                    <Button Margin="0,0,6,0"
+                            Content="History"
+                            AutomationProperties.AutomationId="HistoryButton"
+                            AutomationProperties.Name="Show history"
+                            AutomationProperties.HelpText="Shortcut Control H."
+                            Click="OnShowHistoryClick" />
+                    <Button Margin="0,0,6,0"
+                            Content="Downloads"
+                            AutomationProperties.AutomationId="DownloadsButton"
+                            AutomationProperties.Name="Show downloads"
+                            AutomationProperties.HelpText="Shortcut Control J."
+                            Click="OnShowDownloadsClick" />
+                    <Button x:Name="AgentDrawerButton"
+                            MinWidth="104"
+                            Content="Agent"
+                            AutomationProperties.AutomationId="AgentDrawerButton"
+                            AutomationProperties.Name="Open agent controls"
+                            Click="OnAgentDrawerClick" />
+                </StackPanel>
             </Grid>
         </Border>
 
         <Border DockPanel.Dock="Bottom" Background="#F3F3F3" Padding="8,5">
             <TextBlock x:Name="StatusText"
                        Text="Starting DCx."
+                       AutomationProperties.AutomationId="StatusText"
                        AutomationProperties.Name="Browser status"
                        AutomationProperties.LiveSetting="Polite" />
         </Border>
 
-        <wv2:WebView2 x:Name="Browser"
-                      AutomationProperties.Name="Interactive web page"
-                      AutomationProperties.HelpText="The live web page shared by you and approved agent actions." />
+        <Border x:Name="UtilityPanel"
+                DockPanel.Dock="Bottom"
+                Height="190"
+                Padding="8"
+                Background="White"
+                BorderBrush="#808080"
+                BorderThickness="0,1,0,0"
+                Visibility="Collapsed"
+                AutomationProperties.AutomationId="UtilityPanel"
+                AutomationProperties.Name="Browser information panel">
+            <DockPanel>
+                <Button DockPanel.Dock="Right"
+                        Width="80"
+                        Height="30"
+                        Margin="8,0,0,0"
+                        VerticalAlignment="Top"
+                        Content="Close"
+                        AutomationProperties.Name="Close browser information panel"
+                        Click="OnCloseUtilityPanelClick" />
+                <TabControl x:Name="UtilityTabs"
+                            AutomationProperties.AutomationId="UtilityTabs"
+                            AutomationProperties.Name="Bookmarks history and downloads">
+                    <TabItem Header="Bookmarks" AutomationProperties.Name="Bookmarks">
+                        <ListBox x:Name="BookmarksList"
+                                 AutomationProperties.AutomationId="BookmarksList"
+                                 AutomationProperties.Name="Saved bookmarks"
+                                 MouseDoubleClick="OnBookmarksOpen"
+                                 KeyDown="OnBookmarksKeyDown" />
+                    </TabItem>
+                    <TabItem Header="History" AutomationProperties.Name="History">
+                        <ListBox x:Name="HistoryList"
+                                 AutomationProperties.AutomationId="HistoryList"
+                                 AutomationProperties.Name="Browsing history"
+                                 MouseDoubleClick="OnHistoryOpen"
+                                 KeyDown="OnHistoryKeyDown" />
+                    </TabItem>
+                    <TabItem Header="Downloads" AutomationProperties.Name="Downloads">
+                        <ListBox x:Name="DownloadsList"
+                                 AutomationProperties.AutomationId="DownloadsList"
+                                 AutomationProperties.Name="Downloads" />
+                    </TabItem>
+                </TabControl>
+            </DockPanel>
+        </Border>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TabControl x:Name="BrowserTabs"
+                        Grid.Column="0"
+                        AutomationProperties.AutomationId="BrowserTabs"
+                        AutomationProperties.Name="Browser tabs"
+                        SelectionChanged="OnBrowserTabSelectionChanged" />
+
+            <GroupBox x:Name="AgentDrawer"
+                      Grid.Column="1"
+                      Width="320"
+                      Header="Agent controls"
+                      Padding="16"
+                      Background="#F8F8F8"
+                      BorderBrush="#808080"
+                      BorderThickness="1,0,0,0"
+                      Visibility="Collapsed"
+                      AutomationProperties.AutomationId="AgentDrawer"
+                      AutomationProperties.Name="Agent controls">
+                <StackPanel>
+                    <Button x:Name="CloseAgentDrawerButton"
+                            MinWidth="64"
+                            Margin="0,0,0,12"
+                            HorizontalAlignment="Right"
+                            Content="Close"
+                            AutomationProperties.Name="Close agent controls"
+                            Click="OnAgentDrawerClick" />
+                    <TextBlock TextWrapping="Wrap"
+                               Text="Agent actions are unavailable until the shared-control safety gate in P02 passes. You retain full manual browser control." />
+                    <Button Margin="0,16,0,0"
+                            Content="Start agent task"
+                            IsEnabled="False"
+                            AutomationProperties.Name="Start agent task unavailable"
+                            AutomationProperties.HelpText="Agent execution is not enabled in this build." />
+                </StackPanel>
+            </GroupBox>
+        </Grid>
     </DockPanel>
 </Window>
-

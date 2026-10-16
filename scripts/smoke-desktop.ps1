@@ -4,7 +4,7 @@ param()
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $repoRoot "src\DCx.Desktop\bin\Release\net10.0-windows10.0.19041.0\DCx.exe"
-$requiredNames = @("Go back", "Web address", "Navigate to web address", "Browser status", "Interactive web page")
+$requiredNames = @("Go back", "Web address", "Navigate to web address", "Browser status")
 
 if (-not (Test-Path $exe)) {
     throw "Build the Release configuration before running the desktop smoke test."
@@ -41,9 +41,21 @@ try {
         }
     }
 
+    $webViewFound = $false
+    foreach ($node in $nodes) {
+        if ($node.Current.Name -like "Interactive web page, * profile" -and
+            $node.Current.AutomationId -like "WebView-*") {
+            $webViewFound = $true
+            break
+        }
+    }
+    if (-not $webViewFound) {
+        throw "A profile-specific interactive WebView UI Automation element was not found."
+    }
+
     "PID=$($process.Id)"
     "Title=$($process.MainWindowTitle)"
-    "UIA required elements=$($requiredNames.Count)/$($requiredNames.Count)"
+    "UIA required elements=$($requiredNames.Count + 1)/$($requiredNames.Count + 1)"
 }
 finally {
     if (-not $process.HasExited) {
@@ -53,4 +65,3 @@ finally {
         }
     }
 }
-

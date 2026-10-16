@@ -26,4 +26,3 @@ public sealed class BrowserProfilePathsTests
         Assert.ThrowsAny<ArgumentException>(() => paths.GetProfileDirectory(input));
     }
 }
-

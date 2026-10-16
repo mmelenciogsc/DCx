@@ -5,6 +5,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DCx.Core.Tests/DCx.Core.Tests.csproj" />
+    <Project Path="tests/DCx.WebFixtureServer/DCx.WebFixtureServer.csproj" />
   </Folder>
 </Solution>
-

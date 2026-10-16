@@ -1,3 +1,5 @@
+using DCx.Core.Storage;
+
 namespace DCx.Core.Profiles;
 
 public sealed class BrowserProfilePaths
@@ -6,8 +8,7 @@ public sealed class BrowserProfilePaths
 
     public BrowserProfilePaths(string? localApplicationData = null)
     {
-        _localApplicationData = localApplicationData
-            ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        _localApplicationData = ApplicationDataRoot.Resolve(localApplicationData);
     }
 
     public string GetProfileDirectory(string profileName)
@@ -22,10 +23,8 @@ public sealed class BrowserProfilePaths
 
         return Path.Combine(
             _localApplicationData,
-            ProductIdentity.CompanyDataDirectoryName,
             "WebView2",
             "Profiles",
             profileName);
     }
 }
-
