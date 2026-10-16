@@ -135,10 +135,17 @@
                             Click="OnWindowsAppClick" />
                     <Button x:Name="OpenAiButton"
                             MinWidth="120"
+                            Margin="0,0,6,0"
                             Content="OpenAI"
                             AutomationProperties.AutomationId="OpenAiButton"
                             AutomationProperties.Name="Open OpenAI and local Codex settings"
                             Click="OnOpenAiClick" />
+                    <Button x:Name="ContentViewerButton"
+                            MinWidth="120"
+                            Content="Files/media"
+                            AutomationProperties.AutomationId="ContentViewerButton"
+                            AutomationProperties.Name="Open files and media viewer"
+                            Click="OnContentViewerClick" />
                 </StackPanel>
             </Grid>
         </Border>

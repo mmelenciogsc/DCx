@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private Uri? _agentTarget;
     private NativeAppControlWindow? _nativeAppControlWindow;
     private OpenAiControlWindow? _openAiControlWindow;
+    private ContentViewerWindow? _contentViewerWindow;
 
     public MainWindow()
     {
@@ -871,6 +872,25 @@ public partial class MainWindow : Window
         {
             SetStatus($"OpenAI and local Codex settings could not open. {exception.Message}");
         }
+    }
+
+    private void OnContentViewerClick(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Opening files and media viewer.");
+        if (_contentViewerWindow is { IsVisible: true })
+        {
+            _contentViewerWindow.Activate();
+            return;
+        }
+
+        _contentViewerWindow = new ContentViewerWindow { Owner = this };
+        _contentViewerWindow.YouTubeNavigationRequested += async (_, uri) =>
+        {
+            await CreateTabAsync(GetSelectedProfile(), uri);
+            Activate();
+        };
+        _contentViewerWindow.Closed += (_, _) => _contentViewerWindow = null;
+        _contentViewerWindow.Show();
     }
 
     private static string ResolveRepositoryRoot()

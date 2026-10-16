@@ -1,0 +1,96 @@
+<Window x:Class="DCx.Desktop.ContentViewerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Files and media — DCx"
+        Width="880"
+        Height="720"
+        MinWidth="680"
+        MinHeight="540"
+        AutomationProperties.AutomationId="ContentViewerWindow"
+        AutomationProperties.Name="DCx files and media viewer">
+    <DockPanel Margin="16">
+        <StackPanel DockPanel.Dock="Top">
+            <TextBlock FontSize="22" FontWeight="SemiBold" Text="Files and media" />
+            <TextBlock Margin="0,6,0,12" TextWrapping="Wrap"
+                       Text="Files are checked for type, size and signature before opening. Media never plays automatically." />
+            <Label Target="{Binding ElementName=FilePathBox}" Padding="0" Content="Local file path" />
+            <DockPanel Margin="0,4,0,10">
+                <Button DockPanel.Dock="Right" MinWidth="90" Margin="8,0,0,0" Content="Browse…"
+                        AutomationProperties.AutomationId="BrowseFileButton"
+                        AutomationProperties.Name="Browse for local file" Click="OnBrowseFileClick" />
+                <Button DockPanel.Dock="Right" MinWidth="90" Margin="8,0,0,0" Content="Open"
+                        AutomationProperties.AutomationId="OpenFileButton"
+                        AutomationProperties.Name="Open validated local file" Click="OnOpenFileClick" />
+                <TextBox x:Name="FilePathBox" Padding="5"
+                         AutomationProperties.AutomationId="FilePathBox"
+                         AutomationProperties.Name="Local file path" />
+            </DockPanel>
+
+            <Label Target="{Binding ElementName=FolderPathBox}" Padding="0" Content="Folder path" />
+            <DockPanel Margin="0,4,0,10">
+                <Button DockPanel.Dock="Right" MinWidth="110" Margin="8,0,0,0" Content="List folder"
+                        AutomationProperties.AutomationId="ListFolderButton"
+                        AutomationProperties.Name="List folder contents" Click="OnListFolderClick" />
+                <TextBox x:Name="FolderPathBox" Padding="5"
+                         AutomationProperties.AutomationId="FolderPathBox"
+                         AutomationProperties.Name="Folder path" />
+            </DockPanel>
+
+            <Label Target="{Binding ElementName=YouTubeUrlBox}" Padding="0" Content="YouTube video URL" />
+            <DockPanel Margin="0,4,0,12">
+                <Button DockPanel.Dock="Right" MinWidth="130" Margin="8,0,0,0" Content="Open in browser"
+                        AutomationProperties.AutomationId="OpenYouTubeButton"
+                        AutomationProperties.Name="Open validated YouTube video in DCx browser"
+                        Click="OnOpenYouTubeClick" />
+                <TextBox x:Name="YouTubeUrlBox" Padding="5"
+                         AutomationProperties.AutomationId="YouTubeUrlBox"
+                         AutomationProperties.Name="YouTube video URL" />
+            </DockPanel>
+
+            <TextBlock x:Name="ContentStatusText" Margin="0,0,0,10" FontWeight="SemiBold"
+                       Text="No content selected." TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="ContentStatusText"
+                       AutomationProperties.LiveSetting="Assertive" />
+        </StackPanel>
+
+        <TabControl x:Name="ContentTabs" AutomationProperties.AutomationId="ContentTabs"
+                    AutomationProperties.Name="File and media content">
+            <TabItem Header="Text" AutomationProperties.Name="Text content">
+                <TextBox x:Name="DocumentText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"
+                         AutomationProperties.AutomationId="DocumentText"
+                         AutomationProperties.Name="Accessible document text" />
+            </TabItem>
+            <TabItem Header="Image" AutomationProperties.Name="Image content">
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                    <Image x:Name="ImageViewer" Stretch="Uniform" AutomationProperties.AutomationId="ImageViewer"
+                           AutomationProperties.Name="Selected image" />
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="Media" AutomationProperties.Name="Audio and video content">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <MediaElement x:Name="MediaViewer" LoadedBehavior="Manual" UnloadedBehavior="Stop"
+                                  Stretch="Uniform" ScrubbingEnabled="True"
+                                  AutomationProperties.AutomationId="MediaViewer"
+                                  AutomationProperties.Name="Local audio or video" />
+                    <WrapPanel Grid.Row="1" Margin="8">
+                        <Button MinWidth="80" Margin="0,0,8,0" Content="Play"
+                                AutomationProperties.AutomationId="MediaPlayButton" Click="OnMediaPlayClick" />
+                        <Button MinWidth="80" Margin="0,0,8,0" Content="Pause"
+                                AutomationProperties.AutomationId="MediaPauseButton" Click="OnMediaPauseClick" />
+                        <Button MinWidth="80" Content="Stop"
+                                AutomationProperties.AutomationId="MediaStopButton" Click="OnMediaStopClick" />
+                    </WrapPanel>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Folder" AutomationProperties.Name="Folder contents">
+                <ListBox x:Name="FolderItems" AutomationProperties.AutomationId="FolderItems"
+                         AutomationProperties.Name="Folder contents" />
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>
