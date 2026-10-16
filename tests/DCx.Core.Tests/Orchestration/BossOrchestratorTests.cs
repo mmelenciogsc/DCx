@@ -87,6 +87,27 @@ public sealed class BossOrchestratorTests
         Assert.Equal(BossTaskStatus.Skipped, result.Tasks[1].Status);
     }
 
+    [Fact]
+    public async Task Run_RecordsCallerCancellationAndStops()
+    {
+        var capability = new DelegateCapability(async (_, cancellationToken) =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            return new BossCapabilityResult(true, Set("accepted"));
+        });
+        var orchestrator = new BossOrchestrator([capability], new MemoryCheckpointStore());
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        var result = await orchestrator.RunAsync(
+            Graph(new BossTaskBudget(1, 10, TimeSpan.FromSeconds(5)), Set("accepted")),
+            100,
+            cancellation.Token);
+
+        var outcome = Assert.Single(result.Tasks);
+        Assert.Equal(BossTaskStatus.Cancelled, outcome.Status);
+        Assert.Equal("cancelled", outcome.FailureCode);
+    }
+
     private static BossTaskGraph Graph(BossTaskBudget budget, IReadOnlySet<string> evidence) =>
         new([new BossTaskDefinition("task", "Task", BossSpecialistRole.Validator, "fixture", [], evidence, budget)]);
 
