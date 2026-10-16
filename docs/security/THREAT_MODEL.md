@@ -37,6 +37,14 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - P04 threads are ephemeral and read-only; web search, apps and multi-agent features are disabled. Unhandled server tool requests receive no authority.
 - Commercial ChatGPT-plan sign-in remains compiled unavailable until eligibility is evidenced. A model catalog is never considered authorization.
 
+## Implemented BOSS controls through P05
+
+- Task graphs reject duplicate/unknown dependencies and cycles before execution.
+- Routing is capability- and privacy-constrained with deterministic-first precedence; unavailable private tasks do not silently route to OpenAI.
+- Evidence, attempt, elapsed-time, task-token and aggregate-token gates fail closed. The aggregate breaker prevents later capability execution after overrun.
+- Checkpoints record decision metadata and measurements but omit task prompt/output bodies.
+- Capability exceptions are classified without persisting exception messages that could contain private content.
+
 ## Security gate policy
 
 Security tests must cover denial paths as well as successful paths. A mock or sandbox pass proves only that path. Production OpenAI/PayPal eligibility, code signing, legal review, external penetration testing, and the Ubuntu production deployment remain explicit blockers until separately evidenced.

@@ -11,8 +11,8 @@ DCx is under construction. It is not a validated release, installer, production 
 | P02 Agent/browser shared control | Complete (automated native gate) | Scoped leases, approval, navigation renewal, DOM/ARIA adapter, manual takeover/handback, focus restoration and privacy-safe action log pass at `a8ee196`; human AT checklist unverified. |
 | P03 External native apps/terminal broker | Complete (automated native gate) | Typed allowlist, workspace/reparse containment, restricted PowerShell, tracked-process UIA, explicit approval/takeover/resume and focus restoration pass at `74b7be1`; human AT checklist unverified. |
 | P04 OpenAI identity and Codex | Complete (offline/native mock gate) | Local JSONL app-server lifecycle, model discovery, API-key credential boundary, streaming, cancellation, redaction and reconnect pass at `8ba629c`; no real provider call. Commercial ChatGPT sign-in remains blocked pending OpenAI approval. |
-| P05 BOSS orchestration | In progress | Designing deterministic-first task DAG, role routing, budgets, evidence and bounded recovery on the validated provider boundary. |
-| P06 Local models | Not started | Hardware measured; no install/download authorized or performed. |
+| P05 BOSS orchestration | Complete (deterministic benchmark gate) | DAG validation, eight roles, deterministic-first/privacy-aware routing, evidence, retries, cancellation, time/token budgets and JSONL checkpoints pass at `ce7ea0e`/`53af804`; fixture metrics make no savings claim. |
+| P06 Local models | In progress | Hardware is measured; verifying current Ollama/Whisper contracts and installed runtimes before selecting benchmarks. No install/download has been authorized. |
 | P07 Files/documents/media | Not started | No validated implementation. |
 | P08 Private CKB/CCB | Not started | No validated implementation. |
 | P09 Global registry/sync | Not started | Docker daemon access unavailable to current WSL user; real Ubuntu deployment forbidden without approval. |
