@@ -7,8 +7,8 @@ DCx is under construction. It is not a validated release, installer, production 
 | Phase | Status | Evidence summary |
 |---|---|---|
 | P00 Audit and bootstrap | Complete (local gate) | Locked native Windows Release build: 0 warnings/errors; 14/14 unit cases; 5/5 required UIA elements; milestone `a98195a`. Remote workflow is present but unrun because no remote exists. |
-| P01 Native shell + accessible browser | In progress | Bootstrap shell exists; full tabs/history/download/profile/accessibility gates remain. |
-| P02 Agent/browser shared control | Not started | No validated implementation. |
+| P01 Native shell + accessible browser | Complete (automated native gate) | 21/21 unit cases; real HTTPS WebView; tabs, profiles, bookmarks, history, controlled download, keyboard and UIA flow pass at `d12fc64`. Human JAWS/NVDA/Narrator checklist remains explicitly unverified. |
+| P02 Agent/browser shared control | In progress | Requirements review and design next; no validated P02 implementation yet. |
 | P03 External native apps/terminal broker | Not started | No validated implementation. |
 | P04 OpenAI identity and Codex | Not started | Commercial ChatGPT sign-in eligibility remains unverified; no key or paid call used. |
 | P05 BOSS orchestration | Not started | No validated implementation. |
