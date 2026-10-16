@@ -128,10 +128,17 @@
                             Click="OnAgentDrawerClick" />
                     <Button x:Name="WindowsAppButton"
                             MinWidth="120"
+                            Margin="0,0,6,0"
                             Content="Windows app"
                             AutomationProperties.AutomationId="WindowsAppButton"
                             AutomationProperties.Name="Open Windows application controls"
                             Click="OnWindowsAppClick" />
+                    <Button x:Name="OpenAiButton"
+                            MinWidth="120"
+                            Content="OpenAI"
+                            AutomationProperties.AutomationId="OpenAiButton"
+                            AutomationProperties.Name="Open OpenAI and local Codex settings"
+                            Click="OnOpenAiClick" />
                 </StackPanel>
             </Grid>
         </Border>

@@ -1,0 +1,145 @@
+<Window x:Class="DCx.Desktop.OpenAiControlWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OpenAI and local Codex — DCx"
+        Width="660"
+        Height="760"
+        MinWidth="540"
+        MinHeight="620"
+        AutomationProperties.AutomationId="OpenAiControlWindow"
+        AutomationProperties.Name="DCx OpenAI and local Codex settings">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="20">
+            <TextBlock FontSize="22" FontWeight="SemiBold" Text="OpenAI and local Codex" />
+            <TextBlock Margin="0,8,0,16"
+                       TextWrapping="Wrap"
+                       Text="DCx keeps provider credentials in Windows Credential Manager. A local per-user Codex app-server uses a private DCx configuration directory. Prompts and credentials are not written to the DCx action log." />
+
+            <TextBlock x:Name="ProviderAvailabilityText"
+                       Margin="0,0,0,14"
+                       FontWeight="SemiBold"
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="ProviderAvailabilityText"
+                       AutomationProperties.LiveSetting="Polite" />
+
+            <GroupBox Header="OpenAI API key" Margin="0,0,0,14">
+                <StackPanel Margin="10">
+                    <Label Target="{Binding ElementName=ApiKeyPassword}" Padding="0" Content="API key" />
+                    <PasswordBox x:Name="ApiKeyPassword"
+                                 Margin="0,4,0,8"
+                                 Padding="5"
+                                 AutomationProperties.AutomationId="ApiKeyPassword"
+                                 AutomationProperties.Name="OpenAI API key"
+                                 AutomationProperties.HelpText="The value is never displayed or logged." />
+                    <WrapPanel>
+                        <Button x:Name="SaveApiKeyButton"
+                                MinWidth="110"
+                                Margin="0,0,8,0"
+                                Content="Save key"
+                                AutomationProperties.AutomationId="SaveApiKeyButton"
+                                AutomationProperties.Name="Save API key in Windows Credential Manager"
+                                Click="OnSaveApiKeyClick" />
+                        <Button x:Name="DeleteApiKeyButton"
+                                MinWidth="110"
+                                Content="Delete key"
+                                AutomationProperties.AutomationId="DeleteApiKeyButton"
+                                AutomationProperties.Name="Delete saved API key"
+                                Click="OnDeleteApiKeyClick" />
+                    </WrapPanel>
+                </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="ChatGPT plan" Margin="0,0,0,14">
+                <StackPanel Margin="10">
+                    <TextBlock x:Name="ChatGptEligibilityText"
+                               Margin="0,0,0,8"
+                               TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="ChatGptEligibilityText" />
+                    <Button x:Name="ChatGptSignInButton"
+                            Width="180"
+                            HorizontalAlignment="Left"
+                            Content="Continue with ChatGPT"
+                            IsEnabled="False"
+                            AutomationProperties.AutomationId="ChatGptSignInButton"
+                            AutomationProperties.Name="Continue with ChatGPT unavailable" />
+                </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="Local Codex app-server" Margin="0,0,0,14">
+                <StackPanel Margin="10">
+                    <TextBlock x:Name="CodexRuntimeText"
+                               Margin="0,0,0,8"
+                               TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="CodexRuntimeText" />
+                    <WrapPanel Margin="0,0,0,10">
+                        <Button x:Name="ConnectCodexButton"
+                                MinWidth="120"
+                                Margin="0,0,8,0"
+                                Content="Connect"
+                                AutomationProperties.AutomationId="ConnectCodexButton"
+                                AutomationProperties.Name="Connect local Codex app-server"
+                                Click="OnConnectCodexClick" />
+                        <Button x:Name="DisconnectCodexButton"
+                                MinWidth="120"
+                                Content="Disconnect"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="DisconnectCodexButton"
+                                AutomationProperties.Name="Disconnect local Codex app-server"
+                                Click="OnDisconnectCodexClick" />
+                    </WrapPanel>
+                    <Label Target="{Binding ElementName=ModelsBox}" Padding="0" Content="Available model" />
+                    <ComboBox x:Name="ModelsBox"
+                              Margin="0,4,0,10"
+                              DisplayMemberPath="DisplayName"
+                              AutomationProperties.AutomationId="ModelsBox"
+                              AutomationProperties.Name="Available Codex model" />
+                    <Label Target="{Binding ElementName=PromptBox}" Padding="0" Content="Test prompt" />
+                    <TextBox x:Name="PromptBox"
+                             MinHeight="70"
+                             Margin="0,4,0,8"
+                             Padding="5"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             AutomationProperties.AutomationId="PromptBox"
+                             AutomationProperties.Name="Codex test prompt" />
+                    <WrapPanel>
+                        <Button x:Name="RunTurnButton"
+                                MinWidth="120"
+                                Margin="0,0,8,0"
+                                Content="Run turn"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="RunTurnButton"
+                                AutomationProperties.Name="Run Codex turn"
+                                Click="OnRunTurnClick" />
+                        <Button x:Name="CancelTurnButton"
+                                MinWidth="120"
+                                Content="Cancel turn"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="CancelTurnButton"
+                                AutomationProperties.Name="Cancel active Codex turn"
+                                Click="OnCancelTurnClick" />
+                    </WrapPanel>
+                </StackPanel>
+            </GroupBox>
+
+            <TextBlock FontWeight="SemiBold" Text="Connection status" />
+            <TextBlock x:Name="CodexStatusText"
+                       MinHeight="44"
+                       Margin="0,4,0,10"
+                       Text="Not connected."
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="CodexStatusText"
+                       AutomationProperties.LiveSetting="Assertive" />
+            <TextBlock FontWeight="SemiBold" Text="Response" />
+            <TextBox x:Name="CodexResponseText"
+                     Height="100"
+                     Margin="0,4,0,0"
+                     Padding="5"
+                     IsReadOnly="True"
+                     TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto"
+                     AutomationProperties.AutomationId="CodexResponseText"
+                     AutomationProperties.Name="Codex response" />
+        </StackPanel>
+    </ScrollViewer>
+</Window>

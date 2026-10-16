@@ -40,6 +40,7 @@ public partial class MainWindow : Window
     private BrowserTabState? _agentTab;
     private Uri? _agentTarget;
     private NativeAppControlWindow? _nativeAppControlWindow;
+    private OpenAiControlWindow? _openAiControlWindow;
 
     public MainWindow()
     {
@@ -845,6 +846,30 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             SetStatus($"Windows application controls could not open. {exception.Message}");
+        }
+    }
+
+    private void OnOpenAiClick(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Opening OpenAI and local Codex settings.");
+        try
+        {
+            if (_openAiControlWindow is { IsVisible: true })
+            {
+                _openAiControlWindow.Activate();
+                return;
+            }
+
+            _openAiControlWindow = new OpenAiControlWindow(ResolveRepositoryRoot())
+            {
+                Owner = this,
+            };
+            _openAiControlWindow.Closed += (_, _) => _openAiControlWindow = null;
+            _openAiControlWindow.Show();
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"OpenAI and local Codex settings could not open. {exception.Message}");
         }
     }
 
