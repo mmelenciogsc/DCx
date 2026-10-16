@@ -30,32 +30,23 @@ try {
         throw "The DCx main window was not exposed through UI Automation."
     }
 
-    $nodes = $window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition)
-    $names = @($nodes | ForEach-Object { $_.Current.Name })
-
-    foreach ($requiredName in $requiredNames) {
-        if ($requiredName -notin $names) {
-            throw "Required UI Automation element '$requiredName' was not found."
-        }
+    $surfaceReady = $false
+    for ($attempt = 0; $attempt -lt 40 -and -not $surfaceReady; $attempt++) {
+        $nodes = $window.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition)
+        $names = @($nodes | ForEach-Object { $_.Current.Name })
+        $requiredControlsFound = @($requiredNames | Where-Object { $_ -in $names }).Count -eq $requiredNames.Count
+        $statusFound = @($nodes | Where-Object { $_.Current.AutomationId -eq "StatusText" }).Count -eq 1
+        $webViewFound = @($nodes | Where-Object {
+            $_.Current.Name -like "Interactive web page, * profile" -and
+            $_.Current.AutomationId -like "WebView-*"
+        }).Count -ge 1
+        $surfaceReady = $requiredControlsFound -and $statusFound -and $webViewFound
+        if (-not $surfaceReady) { Start-Sleep -Milliseconds 250 }
     }
-
-    $statusFound = @($nodes | Where-Object { $_.Current.AutomationId -eq "StatusText" }).Count -eq 1
-    if (-not $statusFound) {
-        throw "The dynamic browser status live region was not found."
-    }
-
-    $webViewFound = $false
-    foreach ($node in $nodes) {
-        if ($node.Current.Name -like "Interactive web page, * profile" -and
-            $node.Current.AutomationId -like "WebView-*") {
-            $webViewFound = $true
-            break
-        }
-    }
-    if (-not $webViewFound) {
-        throw "A profile-specific interactive WebView UI Automation element was not found."
+    if (-not $surfaceReady) {
+        throw "The complete DCx browser UI Automation surface was not ready within the timeout."
     }
 
     "PID=$($process.Id)"

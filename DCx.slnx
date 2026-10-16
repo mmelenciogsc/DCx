@@ -4,6 +4,7 @@
     <Project Path="src/DCx.Desktop/DCx.Desktop.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/DCx.BossBenchmark/DCx.BossBenchmark.csproj" />
     <Project Path="tests/DCx.Core.Tests/DCx.Core.Tests.csproj" />
     <Project Path="tests/DCx.FakeCodexAppServer/DCx.FakeCodexAppServer.csproj" />
     <Project Path="tests/DCx.NativeFixture/DCx.NativeFixture.csproj" />
