@@ -9,8 +9,8 @@ DCx is under construction. It is not a validated release, installer, production 
 | P00 Audit and bootstrap | Complete (local gate) | Locked native Windows Release build: 0 warnings/errors; 14/14 unit cases; 5/5 required UIA elements; milestone `a98195a`. Remote workflow is present but unrun because no remote exists. |
 | P01 Native shell + accessible browser | Complete (automated native gate) | 21/21 unit cases; real HTTPS WebView; tabs, profiles, bookmarks, history, controlled download, keyboard and UIA flow pass at `d12fc64`. Human JAWS/NVDA/Narrator checklist remains explicitly unverified. |
 | P02 Agent/browser shared control | Complete (automated native gate) | Scoped leases, approval, navigation renewal, DOM/ARIA adapter, manual takeover/handback, focus restoration and privacy-safe action log pass at `a8ee196`; human AT checklist unverified. |
-| P03 External native apps/terminal broker | In progress | Broker contracts/design next; no validated P03 implementation yet. |
-| P04 OpenAI identity and Codex | Not started | Commercial ChatGPT sign-in eligibility remains unverified; no key or paid call used. |
+| P03 External native apps/terminal broker | Complete (automated native gate) | Typed allowlist, workspace/reparse containment, restricted PowerShell, tracked-process UIA, explicit approval/takeover/resume and focus restoration pass at `74b7be1`; human AT checklist unverified. |
+| P04 OpenAI identity and Codex | In progress | Verifying current official OpenAI auth/model/app-server contracts before provider implementation; commercial ChatGPT sign-in eligibility remains unverified and no key or paid call has been used. |
 | P05 BOSS orchestration | Not started | No validated implementation. |
 | P06 Local models | Not started | Hardware measured; no install/download authorized or performed. |
 | P07 Files/documents/media | Not started | No validated implementation. |

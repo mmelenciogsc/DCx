@@ -9,9 +9,11 @@
    cd /mnt/d/DCx
    ./scripts/verify-p00.sh
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\smoke-desktop.ps1
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p01.ps1
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p02.ps1
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p03.ps1
    ```
 
 5. Continue only the earliest uncompleted phase. Record commands, results, changed files, blockers, and the milestone commit in its phase document. Never infer manual screen-reader or external-service success from automated tests.
 
-Current implementation includes a native WPF/WebView2 bootstrap shell, safe HTTP(S)-only address policy, isolated DCx WebView2 profile path, native build, unit tests, and a UIA smoke test. Consult `docs/progress/STATUS.md` for the exact active gate.
-
+Current implementation includes the native WPF/WebView2 browser, isolated profiles and controlled downloads, shared browser control with explicit handoff, and the P03 typed process/PowerShell/tracked-process UIA broker. P00–P03 automated native gates pass. P04 is the active phase. Consult `docs/progress/STATUS.md` and `docs/progress/PHASE-04.md` before continuing.
