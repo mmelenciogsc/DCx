@@ -23,9 +23,15 @@ app.MapGet("/", () => Results.Content(
         <h1>DCx accessible fixture</h1>
         <label for="approval-code">Approval code</label>
         <input id="approval-code" autocomplete="off">
-        <button id="continue">Continue</button>
+        <button id="continue" type="button">Continue</button>
         <a href="/download">Download fixture</a>
+        <p id="result" role="status" aria-live="polite"></p>
       </main>
+      <script>
+        document.getElementById('continue').addEventListener('click', () => {
+          document.getElementById('result').textContent = 'Agent resumed after user handback.';
+        });
+      </script>
     </body>
     </html>
     """,
@@ -36,4 +42,3 @@ app.MapGet("/download", () => Results.File(
     "dcx-fixture.txt"));
 
 await app.RunAsync();
-

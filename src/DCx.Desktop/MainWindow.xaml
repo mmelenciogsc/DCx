@@ -7,7 +7,8 @@
         MinWidth="900"
         MinHeight="600"
         AutomationProperties.Name="DCx Agentic Browser main window"
-        PreviewKeyDown="OnPreviewKeyDown">
+        PreviewKeyDown="OnPreviewKeyDown"
+        PreviewMouseDown="OnPreviewMouseDown">
     <DockPanel LastChildFill="True">
         <Border DockPanel.Dock="Top" Background="#F3F3F3" Padding="8">
             <Grid>
@@ -132,7 +133,6 @@
             <TextBlock x:Name="StatusText"
                        Text="Starting DCx."
                        AutomationProperties.AutomationId="StatusText"
-                       AutomationProperties.Name="Browser status"
                        AutomationProperties.LiveSetting="Polite" />
         </Border>
 
@@ -204,22 +204,104 @@
                       Visibility="Collapsed"
                       AutomationProperties.AutomationId="AgentDrawer"
                       AutomationProperties.Name="Agent controls">
-                <StackPanel>
-                    <Button x:Name="CloseAgentDrawerButton"
-                            MinWidth="64"
-                            Margin="0,0,0,12"
-                            HorizontalAlignment="Right"
-                            Content="Close"
-                            AutomationProperties.Name="Close agent controls"
-                            Click="OnAgentDrawerClick" />
-                    <TextBlock TextWrapping="Wrap"
-                               Text="Agent actions are unavailable until the shared-control safety gate in P02 passes. You retain full manual browser control." />
-                    <Button Margin="0,16,0,0"
-                            Content="Start agent task"
-                            IsEnabled="False"
-                            AutomationProperties.Name="Start agent task unavailable"
-                            AutomationProperties.HelpText="Agent execution is not enabled in this build." />
-                </StackPanel>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <Button x:Name="CloseAgentDrawerButton"
+                                MinWidth="64"
+                                Margin="0,0,0,12"
+                                HorizontalAlignment="Right"
+                                Content="Close"
+                                AutomationProperties.Name="Close agent controls"
+                                Click="OnAgentDrawerClick" />
+                        <TextBlock x:Name="AgentControlModeText"
+                                   Margin="0,0,0,12"
+                                   FontWeight="SemiBold"
+                                   Text="Control: User"
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="AgentControlModeText"
+                                   AutomationProperties.LiveSetting="Assertive" />
+                        <TextBlock Margin="0,0,0,12"
+                                   TextWrapping="Wrap"
+                                   Text="This deterministic handoff demo works only with a loopback test page. Every agent action requires the approved tab, origin, page generation and active lease." />
+                        <Label Target="{Binding ElementName=AgentTargetBox}"
+                               Padding="0"
+                               Content="Controlled demo URL" />
+                        <TextBox x:Name="AgentTargetBox"
+                                 Margin="0,4,0,8"
+                                 Padding="5"
+                                 AutomationProperties.AutomationId="AgentTargetBox"
+                                 AutomationProperties.Name="Controlled agent demo URL"
+                                 AutomationProperties.HelpText="For P02 validation, enter a loopback HTTP or HTTPS fixture URL." />
+                        <Button x:Name="RequestAgentDemoButton"
+                                Margin="0,0,0,12"
+                                Content="Request agent control"
+                                AutomationProperties.AutomationId="RequestAgentDemoButton"
+                                AutomationProperties.Name="Request agent control for browser handoff demo"
+                                Click="OnRequestAgentDemoClick" />
+
+                        <GroupBox x:Name="AgentApprovalPanel"
+                                  Margin="0,0,0,12"
+                                  Header="Approval required"
+                                  Visibility="Collapsed"
+                                  AutomationProperties.AutomationId="AgentApprovalPanel"
+                                  AutomationProperties.Name="Agent control approval required">
+                            <StackPanel Margin="8">
+                                <TextBlock x:Name="AgentApprovalText"
+                                           Margin="0,0,0,8"
+                                           TextWrapping="Wrap" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button x:Name="ApproveAgentButton"
+                                            MinWidth="80"
+                                            Margin="0,0,8,0"
+                                            Content="Approve"
+                                            AutomationProperties.AutomationId="ApproveAgentButton"
+                                            AutomationProperties.Name="Approve scoped agent control"
+                                            Click="OnApproveAgentClick" />
+                                    <Button x:Name="RejectAgentButton"
+                                            MinWidth="80"
+                                            Content="Reject"
+                                            AutomationProperties.AutomationId="RejectAgentButton"
+                                            AutomationProperties.Name="Reject agent control"
+                                            Click="OnRejectAgentClick" />
+                                </StackPanel>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <TextBlock x:Name="AgentUserInstruction"
+                                   Margin="0,0,0,12"
+                                   Text="No agent task is active."
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="AgentUserInstruction"
+                                   AutomationProperties.LiveSetting="Assertive" />
+                        <Button x:Name="TakeControlButton"
+                                Margin="0,0,0,6"
+                                Content="Take control"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="TakeControlButton"
+                                AutomationProperties.Name="Take control from agent"
+                                Click="OnTakeControlClick" />
+                        <Button x:Name="HandBackButton"
+                                Margin="0,0,0,6"
+                                Content="Hand back to agent"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="HandBackButton"
+                                AutomationProperties.Name="Hand control back to agent"
+                                Click="OnHandBackClick" />
+                        <Button x:Name="CancelAgentButton"
+                                Margin="0,0,0,12"
+                                Content="Cancel agent task"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="CancelAgentButton"
+                                AutomationProperties.Name="Cancel agent task"
+                                Click="OnCancelAgentClick" />
+                        <TextBlock FontWeight="SemiBold" Text="Action log" />
+                        <ListBox x:Name="AgentActionLog"
+                                 Height="180"
+                                 Margin="0,4,0,0"
+                                 AutomationProperties.AutomationId="AgentActionLog"
+                                 AutomationProperties.Name="Agent action log" />
+                    </StackPanel>
+                </ScrollViewer>
             </GroupBox>
         </Grid>
     </DockPanel>

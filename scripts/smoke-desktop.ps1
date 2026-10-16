@@ -4,7 +4,7 @@ param()
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $repoRoot "src\DCx.Desktop\bin\Release\net10.0-windows10.0.19041.0\DCx.exe"
-$requiredNames = @("Go back", "Web address", "Navigate to web address", "Browser status")
+$requiredNames = @("Go back", "Web address", "Navigate to web address")
 
 if (-not (Test-Path $exe)) {
     throw "Build the Release configuration before running the desktop smoke test."
@@ -41,6 +41,11 @@ try {
         }
     }
 
+    $statusFound = @($nodes | Where-Object { $_.Current.AutomationId -eq "StatusText" }).Count -eq 1
+    if (-not $statusFound) {
+        throw "The dynamic browser status live region was not found."
+    }
+
     $webViewFound = $false
     foreach ($node in $nodes) {
         if ($node.Current.Name -like "Interactive web page, * profile" -and
@@ -55,7 +60,7 @@ try {
 
     "PID=$($process.Id)"
     "Title=$($process.MainWindowTitle)"
-    "UIA required elements=$($requiredNames.Count + 1)/$($requiredNames.Count + 1)"
+    "UIA required elements=$($requiredNames.Count + 2)/$($requiredNames.Count + 2)"
 }
 finally {
     if (-not $process.HasExited) {
