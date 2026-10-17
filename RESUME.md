@@ -15,8 +15,9 @@
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p04.ps1
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p05.ps1
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p06.ps1
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p07.ps1
    ```
 
 5. Continue only the earliest uncompleted phase. Record commands, results, changed files, blockers, and the milestone commit in its phase document. Never infer manual screen-reader or external-service success from automated tests.
 
-Current implementation includes the native browser, shared-control and Windows brokers, isolated Codex provider boundary, BOSS orchestration, and a loopback-only Ollama vision adapter with a real Qwen3-VL benchmark. P00–P05 pass; P06 is blocked only on the absent, unapproved Whisper backend. P07 is active: content admission/YouTube policy is at `e21c654`, the accessible local content/media UI at `4e8ee1f`, and its native UIA/media gate at `c47edf9`. Structured document exports and OCR/geometry are the immediate resume point. Consult the status and P06/P07 phase documents before continuing.
+Current implementation includes the native browser, shared-control and Windows brokers, isolated Codex provider boundary, BOSS orchestration, a loopback-only Ollama vision adapter, and the validated P07 local content/document/media surface. P00–P05 and P07 pass their stated automated gates; P06 is blocked only on the absent, unapproved Whisper backend. P07's structured HTML/DOCX exports, OCR/geometry, local frame description and hostile-input tests are at `c618254`; human assistive-technology testing, universal YouTube playback/frame capture and transcription are not claimed. P08 private local CKB/CCB storage is active. Consult the status and P08 phase document before continuing.

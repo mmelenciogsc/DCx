@@ -45,6 +45,15 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - Checkpoints record decision metadata and measurements but omit task prompt/output bodies.
 - Capability exceptions are classified without persisting exception messages that could contain private content.
 
+## Implemented content controls through P07
+
+- Local admission canonicalizes paths, rejects direct reparse files, applies per-kind size ceilings and verifies binary signatures before viewer/parser dispatch.
+- Office ZIP/XML extraction caps entry count and expanded data, prohibits DTDs and external XML resolution, and never executes embedded code or objects.
+- OCR-derived geometry and repaired semantics must validate before export; display-only content is not silently converted into an editable field.
+- YouTube admission requires HTTPS, an exact supported host and a valid video identifier; credentials, lookalikes and unsupported page types are denied.
+- Media does not autoplay. FFmpeg receives typed arguments and a bounded timeout; temporary frames are removed. Frame descriptions use only loopback Ollama and leave playback paused for user-controlled resume.
+- HTML/DOCX exports are newly generated semantic artifacts rather than modified untrusted source packages. Human review remains necessary before relying on OCR or model descriptions.
+
 ## Security gate policy
 
 Security tests must cover denial paths as well as successful paths. A mock or sandbox pass proves only that path. Production OpenAI/PayPal eligibility, code signing, legal review, external penetration testing, and the Ubuntu production deployment remain explicit blockers until separately evidenced.
