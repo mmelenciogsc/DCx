@@ -46,6 +46,8 @@ The recorded development host has one approved vision fixture alias but no insta
 pwsh.exe -NoProfile -File .\scripts\validate-p06.ps1
 ```
 
+The **CARE recipients** window is a local-only owner-preparation surface. It requires exact pseudonym, email and digest review; uses separate default-unchecked approvals for save and revoke; stores the exact binding only in current-user Windows Credential Manager; and writes only minimized non-email metadata to its index. It never establishes PayPal verification or eligibility and exposes no payment, payout or network action. The P11 native validator uses a generated fixture address and deletes both the snapshot and protected credential in a `finally` cleanup path.
+
 ## Ubuntu service
 
 No real-server deployment is authorized. The bounded command below uses the preconfigured `ubuntu-server` SSH alias only for fixed read-only, nonprivileged capability checks; it must not be expanded into file transfer, build, container or service actions without approval.

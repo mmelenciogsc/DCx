@@ -1,7 +1,7 @@
 # P11 — PayPal subscriptions and CARE
 
 - Status: BLOCKED (verified-event mapping and durable local accounting pass; credentialed PayPal sandbox acceptance, eligibility, product/plan provisioning and production policy remain unavailable)
-- Implementation/validation commits: `2f97540`, `3984c6b`, `4b05cc0`, `dc25a87`, `c021520`, `df1c0b8`, `9877a60`, `faf6b71`, `1631ebb`, `599cee9`, `ec37d1f`
+- Implementation/validation commits: `2f97540`, `3984c6b`, `4b05cc0`, `dc25a87`, `c021520`, `df1c0b8`, `9877a60`, `faf6b71`, `1631ebb`, `599cee9`, `ec37d1f`, `a662abb`, `8583b29`
 - Documentation commit: recorded by the commit containing this file
 
 No PayPal credential was accessed, no PayPal API request was made, and no subscription, payment or payout was attempted. The only PayPal network activity was six bounded read-only GET requests to official developer documentation/schema URLs.
@@ -22,6 +22,9 @@ No PayPal credential was accessed, no PayPal API request was made, and no subscr
 - Current documented subscription lifecycle events require exact resource type, status, plan ID, subscription ID and RFC 3339 occurrence time. Activation binds the provider subscription to the one configured plan; payment cannot create that binding and fails closed until activation has established it.
 - A completed US$3 sale binds its provider sale ID to that subscription. Refunds/reversals must resolve through the durable sale binding, cannot substitute a subscription, and cannot cumulatively exceed recorded sale or subscription receipts. Rejected corrections roll back their identifiers and mappings atomically.
 - Each owner-approved payout item now binds a unique immutable recipient-snapshot ID and SHA-256 of the exact destination. At send time, the verified/eligible sandbox directory record must match snapshot ID, contributor and destination digest before credentials are acquired. The durable preview stores no plaintext email address.
+- The native CARE recipient window reviews the exact contributor, email and digest; input edits invalidate review. Save and revocation have separate initially unchecked approvals and six distinct keyboard-focusable access keys. The exact email is cleared from the UI after save.
+- The current-user Windows Credential Manager contains the exact destination and complete binding under an opaque random target. The bounded atomic JSON index contains only pseudonym, digest, target, lifecycle and UTC audit metadata. Pending-write recovery removes orphaned credentials; protected/index mismatch, duplicate active contributor/destination, malformed schema and reparse paths fail closed. Revocation makes the binding unusable before deleting the secret.
+- Owner approval is not provider verification: the concrete directory always returns `IsVerifiedAndEligible = false`. The UI and store have no PayPal credential, network or payout action.
 - Payout submission requires unique syntactically valid email addresses, exact USD amounts and bounded batch totals. Stable `sender_batch_id`, sender item IDs and a hashed `PayPal-Request-Id` make retries deterministic. Lookup also verifies each returned receiver against the approved destination digest.
 - A schema-v6 repository stores subscription-to-plan, sale-to-subscription, correction-object and cumulative financial bindings in addition to the unique local-to-provider payout reference, result digest, paid total, exact per-item outcomes and immutable later-return adjustments. A crash after PayPal acceptance but before local return reconciles through the provider reference instead of resending.
 - `PENDING`, `PROCESSING` and pending/unclaimed/on-hold item states remain reserved and never post cash. A completed mixed result posts only successful item amounts, retains failed amounts in contributor payable, persists item status, and becomes `partially_succeeded`; no automatic retry occurs.
@@ -45,13 +48,14 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\audit-paypal-contrac
 ## Measured result
 
 - Locked Release build: 0 warnings, 0 errors.
-- P11 exact-namespace tests: passed 44, failed 0, skipped 0; about 1 second.
-- P11 evidence: `artifacts/test-results/p11-47aa6ffab85d40ee9a58177b015d1f6a/p11-finance.trx` (generated from the implementation committed as `ec37d1f` and intentionally not committed).
-- Full native suite: passed 315, failed 0, skipped 0; about 8 seconds in the recorded post-commit run.
+- P11 exact-namespace tests: passed 52, failed 0, skipped 0; about 1 second.
+- P11 evidence: `artifacts/test-results/p11-1e9e9692ff03435a8a9186be2cc9b58a/` with `p11-finance.trx` and `recipient-snapshot-uia.json` (generated from the source committed as `8583b29` and intentionally not committed).
+- Full native suite: passed 323, failed 0, skipped 0; about 10 seconds in the recorded post-commit run.
 - Official-contract evidence: `artifacts/test-results/paypal-contract-c2619695def04e9c9302b09f203d5538/paypal-contract-audit.json`; official sources 6, credentials used 0, PayPal API requests 0, subscription/payment/payout attempts 0.
 - Adapter tests cover exact request shapes, sandbox-origin pinning, redirect/origin denial, bounded JSON, duplicate properties, credential/provider-text non-disclosure, recipient-snapshot substitution before credential use, idempotent retry, durable reference recovery, pending state, complete success, receiver/amount mismatch and mixed item outcomes.
 - Repository tests prove a 500-cent success plus 700-cent failure posts only 500 cents to cash, leaves 700 cents payable, survives reopen with exact item states, accepts exact replay and denies a conflicting terminal result.
 - Post-terminal tests prove an initially successful 500-cent and 700-cent batch can later record a 500-cent return and then a 700-cent reversal exactly once, restoring cash from -1,200 to 0 and contributor payable from 0 to -1,200 while remaining balanced across reopen. Promotion, rewrite, missing-provider and resend paths are denied; provider send calls remain zero.
+- Eight recipient-store tests cover default-off approval, exact protected binding, plaintext exclusion, restart, duplicate prevention, tamper denial, revocation, canceled/failed writes, orphan recovery and malformed identities. Native UIA proves review invalidation, default-off save/revoke, distinct access keys, Credential Manager reopen, cleared input, minimized list/state, false provider eligibility, deletion on revoke, network requests 0 and payout attempts 0.
 - Verified-event tests prove activation→US$3 sale→partial refund across repository reopen, deny wrong-plan activation, malformed/unverified events and excessive corrections, then accept a corrected reuse of an identifier whose rejected transaction was rolled back.
 - Payment, refund, entitlement, balanced-entry and payout state survive repository reopen. Conflicting replay IDs fail closed, and a rejected invalid event does not consume identifiers.
 
@@ -61,15 +65,17 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\audit-paypal-contrac
 - Pending-aware payout contract and coordinator: `src/DCx.Core/Finance/PayoutSafety.cs`.
 - Durable schema-v6 plan/sale/correction, recipient/result binding, partial posting, later-return adjustment and migration quarantine: `server/DCx.GlobalService/DurableCareRepository.cs`.
 - Compensating payout-return journal: `src/DCx.Core/Finance/CareLedgerJournal.cs`; one-way policy: `docs/architecture/adr/0037-idempotent-post-terminal-payout-returns.md`.
+- Protected owner snapshot store and policy: `src/DCx.Core/Finance/PayoutRecipientSnapshotStore.cs`, `docs/architecture/adr/0038-protected-owner-approved-recipient-snapshots.md`.
+- Accessible workflow and native gate: `src/DCx.Desktop/CareRecipientsWindow.xaml`, `src/DCx.Desktop/CareRecipientsWindow.xaml.cs`, `scripts/validate-p11-recipient-ui.ps1`.
 - Adapter, causality, replay, migration and denial coverage: `tests/DCx.Core.Tests/Finance/PayPalSandboxHttpAdapterTests.cs`, `tests/DCx.Core.Tests/Finance/DurableCareRepositoryTests.cs`.
 - Exact-namespace and official-reference gates: `scripts/validate-p11.ps1`, `scripts/audit-paypal-contract.ps1`.
 - Contract record: `docs/finance/PAYPAL_SANDBOX_CONTRACT.md`, `docs/architecture/adr/0035-fail-closed-paypal-sandbox-boundary.md`, `docs/architecture/adr/0036-verified-paypal-subscription-bindings.md`.
 
 ## Blockers and limits
 
-- No PayPal sandbox client ID/secret, webhook ID, Business/Payouts eligibility evidence or verified recipient directory is available. The adapter is intentionally unconfigured and unwired; official sandbox acceptance has not occurred.
+- No PayPal sandbox client ID/secret, webhook ID, Business/Payouts eligibility evidence or provider-verified recipient directory is available. The adapter is intentionally unconfigured and unwired; official sandbox acceptance has not occurred.
 - Verified provider-event-to-local-subscription mapping now exists, but no official product/plan creation or retrieval adapter, approved exact sandbox product/plan ID, credentialed delivery, out-of-order-event quarantine/retry queue or provider acceptance evidence exists. Payment before the bound activation intentionally fails closed.
-- The immutable snapshot ID and destination digest are now durable, but no production snapshot directory, protected destination store or keyboard/screen-reader-accessible preparation/owner-approval UI is wired. Those controls must exist before credentials are provisioned.
+- A protected local owner-approval directory and automated keyboard/UIA gate now exist, but provider verification is structurally false. Production retention/subject-rights policy, recipient notice, eligibility evidence and human JAWS/NVDA/Narrator acceptance remain absent. Metadata and protected recipient credentials are intentionally outside the current backup roots.
 - Initial mixed outcomes are accounted item by item without automatic retry. A separately approved retry/hold/remediation and contributor-notification workflow is absent. Later-return reconciliation is callable and tested, but production scheduling and credentialed provider acceptance remain absent.
 - Profit definition, reserves, cost attribution, thresholds, held balances, post-close adjustments, tax reporting, contributor classification, privacy retention and regional payout rules require accounting/legal approval.
-- Unblock only after explicit approval to provision sandbox credentials, configure and validate the exact US$3 sandbox product/plan, evidence merchant/Payouts eligibility, implement the accessible recipient-snapshot workflow and separately approved failed-item/event remediation, then run authorized sandbox happy/failure/refund/chargeback/duplicate/crash-window/later-return acceptance. Live mode remains disabled pending separate production approval.
+- Unblock only after explicit approval to provision sandbox credentials, configure and validate the exact US$3 sandbox product/plan, evidence merchant/Payouts and recipient eligibility, approve a provider-verification/retention policy for protected snapshots and separately approved failed-item/event remediation, then run authorized sandbox happy/failure/refund/chargeback/duplicate/crash-window/later-return acceptance. Live mode remains disabled pending separate production approval.
