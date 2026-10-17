@@ -29,7 +29,12 @@ cd /mnt/d/DCx
 
 Build outputs are under each project's `bin/Release` directory and are ignored by Git. Do not commit credentials, local browser profiles, package caches, signing keys, or test-result artifacts.
 
+## Already-installed local models
+
+The current P06 gate expects a Windows-native Ollama service at the loopback origin `http://localhost:11434/`. DCx does not download, install or retag models. In the native app, open **Local models**, select a unique name ending in its matching SHA-256 digest, read the complete license text, check the default-off approval, and choose the eligible vision or embedding role. The per-user selection can be cleared independently for each role.
+
+The recorded development host has one approved vision fixture alias but no installed embedding model or real Whisper backend. Do not add either dependency without owner approval and recorded source, version, license, digest, resource and quality evidence. A malformed selection file fails closed; it must not be replaced with an environment-variable bypass.
+
 ## Ubuntu service
 
 No real-server deployment is authorized. P09 must first provide a local Compose simulation and a reviewed deployment manifest. Connecting to, installing on, or changing the owner's Ubuntu server requires explicit approval.
-

@@ -38,17 +38,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 ## Measured result
 
-Recorded evidence directory: `artifacts/test-results/p13-5d88516b601f4a439576fe195d714391/` (generated and intentionally not committed).
+Recorded evidence directory: `artifacts/test-results/p13-c2c2f8b4a5f8464b8b4de7411d94689b/` (generated and intentionally not committed).
 
 - Locked Release build: 0 warnings, 0 errors.
 - Reliability tests: passed 23, failed 0, skipped 0; exact counters parsed from the retained TRX.
-- Current full suite after P06 digest-bound inference hardening: passed 201, failed 0, skipped 0; about 8 seconds.
-- Publish trees: 42 files, 62,924,707 bytes each; no path/length/SHA-256 differences.
-- Reproducible staging ZIP SHA-256: `8900cbca44e9530f2a593c84946f01880d2ecf428be55db53d5761ee17a2b0fa`.
+- Current full suite after P06 persisted-selection hardening: passed 208, failed 0, skipped 0; about 7 seconds.
+- Publish trees: 42 files, 62,971,811 bytes each; no path/length/SHA-256 differences.
+- Reproducible staging ZIP SHA-256: `2fa1a8999c2c5d2076a1825df9085d5bd2b517a4f4d23a076c149b5855fee8a9`.
 - CycloneDX components: 7; third-party license records: 7.
 - Unexpected secret matches: 0; exact synthetic scanner-fixture matches: 2.
 - Authenticode: `NotSigned`.
-- Offline UIA heading: `DCx is ready offline`; startup 2,499 ms; working set 461.5 MiB under the provisional 1 GiB ceiling.
+- Offline UIA heading: `DCx is ready offline`; startup 2,102 ms; working set 463.2 MiB under the provisional 1 GiB ceiling.
 - Crash-diagnostics UIA heading: `Privacy and crash diagnostics`; consent defaulted unchecked, explicit opt-in persisted notice version 1, purge preserved enabled consent, opt-out disabled and purged, and network transfers remained zero.
 - Recovery UIA heading: `DCx backup and recovery`; main-app launcher, path input, create, default-unchecked approval, restore and assertive status are exposed.
 - Backup while main DCx held the lease was denied and wrote no archive. After main exit, backup and approved restore passed; restore without approval was denied; excluded synthetic WebView2 cookie data remained unchanged.
