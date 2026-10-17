@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using DCx.Core.LocalModels;
 
@@ -11,6 +12,8 @@ public sealed class OllamaLocalClientTests
     private const string OtherDigest = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
     private const string VisionModel = "fixture-vlm:" + VisionDigest;
     private const string EmbeddingModel = "fixture-embed:" + EmbeddingDigest;
+    private static readonly string LicenseDigest = Convert.ToHexStringLower(
+        SHA256.HashData(Encoding.UTF8.GetBytes("Apache-2.0")));
 
     [Fact]
     public void Constructor_RejectsNonLoopbackEndpoint()
@@ -51,7 +54,8 @@ public sealed class OllamaLocalClientTests
             new FixtureHandler(),
             new Uri("http://localhost:11434/"));
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            client.DescribeImagePinnedAsync(VisionModel, "not-a-digest", "missing.png", "Describe."));
+            client.DescribeImagePinnedAsync(
+                VisionModel, "not-a-digest", LicenseDigest, "missing.png", "Describe."));
     }
 
     [Fact]
@@ -65,7 +69,7 @@ public sealed class OllamaLocalClientTests
         {
             var models = await client.ListModelsAsync();
             var result = await client.DescribeImagePinnedAsync(
-                VisionModel, VisionDigest, image, "Describe shapes.");
+                VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes.");
 
             var vision = Assert.Single(models, candidate => candidate.Name == VisionModel);
             Assert.True(vision.SupportsVision);
@@ -91,7 +95,7 @@ public sealed class OllamaLocalClientTests
 
         var inspection = await client.InspectModelAsync(EmbeddingModel);
         var result = await client.EmbedPinnedAsync(
-            EmbeddingModel, EmbeddingDigest, ["first", "second"]);
+            EmbeddingModel, EmbeddingDigest, LicenseDigest, ["first", "second"]);
 
         Assert.Contains("embedding", inspection.Capabilities);
         Assert.Equal("Apache-2.0", inspection.License);
@@ -109,11 +113,13 @@ public sealed class OllamaLocalClientTests
         using var client = new OllamaLocalClient(handler, new Uri("http://localhost:11434/"));
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            client.EmbedPinnedAsync(EmbeddingModel, EmbeddingDigest, []));
+            client.EmbedPinnedAsync(EmbeddingModel, EmbeddingDigest, LicenseDigest, []));
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            client.EmbedPinnedAsync(EmbeddingModel, EmbeddingDigest, [new string('x', 8193)]));
+            client.EmbedPinnedAsync(
+                EmbeddingModel, EmbeddingDigest, LicenseDigest, [new string('x', 8193)]));
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            client.EmbedPinnedAsync(EmbeddingModel, EmbeddingDigest, ["one", "two"]));
+            client.EmbedPinnedAsync(
+                EmbeddingModel, EmbeddingDigest, LicenseDigest, ["one", "two"]));
     }
 
     [Fact]
@@ -127,7 +133,7 @@ public sealed class OllamaLocalClientTests
         {
             await Assert.ThrowsAsync<ArgumentException>(() =>
                 client.DescribeImagePinnedAsync(
-                    VisionModel, VisionDigest, image, "Describe shapes."));
+                    VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."));
             Assert.Empty(handler.ChatRequest);
         }
         finally
@@ -147,7 +153,7 @@ public sealed class OllamaLocalClientTests
         {
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 client.DescribeImagePinnedAsync(
-                    VisionModel, VisionDigest, image, "Describe shapes."));
+                    VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."));
         }
         finally
         {
@@ -168,14 +174,21 @@ public sealed class OllamaLocalClientTests
                 new Uri("http://localhost:11434/"));
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 duplicate.DescribeImagePinnedAsync(
-                    VisionModel, VisionDigest, image, "Describe shapes."));
+                    VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."));
 
             using var changed = new OllamaLocalClient(
                 new FixtureHandler { ChangeVisionBindingAfterInference = true },
                 new Uri("http://localhost:11434/"));
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 changed.DescribeImagePinnedAsync(
-                    VisionModel, VisionDigest, image, "Describe shapes."));
+                    VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."));
+
+            using var changedLicense = new OllamaLocalClient(
+                new FixtureHandler { ChangeLicenseAfterInference = true },
+                new Uri("http://localhost:11434/"));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                changedLicense.DescribeImagePinnedAsync(
+                    VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."));
         }
         finally
         {
@@ -191,9 +204,11 @@ public sealed class OllamaLocalClientTests
         public bool ReturnIncompleteVision { get; init; }
         public bool DuplicateVisionBinding { get; init; }
         public bool ChangeVisionBindingAfterInference { get; init; }
+        public bool ChangeLicenseAfterInference { get; init; }
         public bool ReturnMalformedInventory { get; init; }
         public Uri? ResponseUri { get; init; }
         private int inventoryCalls;
+        private int inspectionCalls;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -220,7 +235,14 @@ public sealed class OllamaLocalClientTests
 
             if (request.RequestUri?.AbsolutePath == "/api/show")
             {
-                return Json("{\"license\":\"Apache-2.0\",\"capabilities\":[\"embedding\"],\"details\":{\"family\":\"bert\",\"parameter_size\":\"300M\",\"quantization_level\":\"F16\"}}", request);
+                inspectionCalls++;
+                var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+                var license = ChangeLicenseAfterInference && inspectionCalls > 1
+                    ? "Changed-License"
+                    : "Apache-2.0";
+                return Json(body.Contains(VisionModel, StringComparison.Ordinal)
+                    ? $"{{\"license\":\"{license}\",\"capabilities\":[\"completion\",\"vision\"],\"details\":{{\"family\":\"vlm\",\"parameter_size\":\"1B\",\"quantization_level\":\"Q4\"}}}}"
+                    : "{\"license\":\"Apache-2.0\",\"capabilities\":[\"embedding\"],\"details\":{\"family\":\"bert\",\"parameter_size\":\"300M\",\"quantization_level\":\"F16\"}}", request);
             }
 
             if (request.RequestUri?.AbsolutePath == "/api/embed")

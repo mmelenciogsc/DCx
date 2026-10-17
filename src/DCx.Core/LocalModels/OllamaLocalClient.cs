@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace DCx.Core.LocalModels;
@@ -159,11 +161,13 @@ public sealed class OllamaLocalClient : IDisposable
     public async Task<OllamaEmbeddingResult> EmbedPinnedAsync(
         string model,
         string expectedDigest,
+        string expectedLicenseSha256,
         IReadOnlyList<string> inputs,
         CancellationToken cancellationToken = default)
     {
         ValidateModelName(model);
         ValidateDigest(expectedDigest, nameof(expectedDigest));
+        ValidateDigest(expectedLicenseSha256, nameof(expectedLicenseSha256));
         ArgumentNullException.ThrowIfNull(inputs);
         if (inputs.Count is 0 or > MaximumEmbeddingInputs || inputs.Any(input =>
                 string.IsNullOrWhiteSpace(input) || input.Length > MaximumEmbeddingInputCharacters || input.Contains('\0')))
@@ -172,7 +176,8 @@ public sealed class OllamaLocalClient : IDisposable
         }
 
         await RequireBoundModelAsync(
-            model, expectedDigest, requireVision: false, requireEmbedding: true, cancellationToken).ConfigureAwait(false);
+            model, expectedDigest, expectedLicenseSha256,
+            requireVision: false, requireEmbedding: true, cancellationToken).ConfigureAwait(false);
 
         using var response = await _httpClient.PostAsJsonAsync(
             "api/embed",
@@ -222,19 +227,22 @@ public sealed class OllamaLocalClient : IDisposable
             root.TryGetProperty("total_duration", out var duration) ? duration.GetInt64() : 0,
             root.TryGetProperty("load_duration", out var loadDuration) ? loadDuration.GetInt64() : 0);
         await RequireBoundModelAsync(
-            model, expectedDigest, requireVision: false, requireEmbedding: true, cancellationToken).ConfigureAwait(false);
+            model, expectedDigest, expectedLicenseSha256,
+            requireVision: false, requireEmbedding: true, cancellationToken).ConfigureAwait(false);
         return result;
     }
 
     public async Task<OllamaVisionResult> DescribeImagePinnedAsync(
         string model,
         string expectedDigest,
+        string expectedLicenseSha256,
         string imagePath,
         string prompt,
         CancellationToken cancellationToken = default)
     {
         ValidateModelName(model);
         ValidateDigest(expectedDigest, nameof(expectedDigest));
+        ValidateDigest(expectedLicenseSha256, nameof(expectedLicenseSha256));
         ArgumentException.ThrowIfNullOrWhiteSpace(imagePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         if (prompt.Length > MaximumPromptCharacters || prompt.Contains('\0'))
@@ -247,9 +255,6 @@ public sealed class OllamaLocalClient : IDisposable
         {
             throw new ArgumentException("The image must exist and be between 1 byte and 20 MiB.", nameof(imagePath));
         }
-
-        await RequireBoundModelAsync(
-            model, expectedDigest, requireVision: true, requireEmbedding: false, cancellationToken).ConfigureAwait(false);
 
         var imageBytes = new byte[checked((int)file.Length)];
         await using (var stream = new FileStream(
@@ -267,6 +272,10 @@ public sealed class OllamaLocalClient : IDisposable
         {
             throw new ArgumentException("The image must be PNG, JPEG or WebP data.", nameof(imagePath));
         }
+
+        await RequireBoundModelAsync(
+            model, expectedDigest, expectedLicenseSha256,
+            requireVision: true, requireEmbedding: false, cancellationToken).ConfigureAwait(false);
 
         var image = Convert.ToBase64String(imageBytes);
         var body = new
@@ -303,7 +312,8 @@ public sealed class OllamaLocalClient : IDisposable
             root.TryGetProperty("eval_count", out var outputTokens) ? outputTokens.GetInt32() : 0,
             root.TryGetProperty("total_duration", out var duration) ? duration.GetInt64() : 0);
         await RequireBoundModelAsync(
-            model, expectedDigest, requireVision: true, requireEmbedding: false, cancellationToken).ConfigureAwait(false);
+            model, expectedDigest, expectedLicenseSha256,
+            requireVision: true, requireEmbedding: false, cancellationToken).ConfigureAwait(false);
         return result;
     }
 
@@ -331,6 +341,7 @@ public sealed class OllamaLocalClient : IDisposable
     private async Task<LocalModelDescriptor> RequireBoundModelAsync(
         string model,
         string expectedDigest,
+        string expectedLicenseSha256,
         bool requireVision,
         bool requireEmbedding,
         CancellationToken cancellationToken)
@@ -346,6 +357,19 @@ public sealed class OllamaLocalClient : IDisposable
         {
             throw new InvalidOperationException(
                 "The requested Ollama model is not uniquely bound to the expected digest and capability.");
+        }
+
+        var inspection = await InspectModelAsync(model, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(inspection.License) ||
+            !string.Equals(
+                Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(inspection.License))),
+                expectedLicenseSha256,
+                StringComparison.OrdinalIgnoreCase) ||
+            requireVision && !inspection.Capabilities.Contains("vision") ||
+            requireEmbedding && !inspection.Capabilities.Contains("embedding"))
+        {
+            throw new InvalidOperationException(
+                "The requested Ollama model license or inspected capability changed after approval.");
         }
 
         return matches[0];

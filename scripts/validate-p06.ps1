@@ -82,6 +82,11 @@ function Get-TextSha256([string]$value) {
     finally { $sha.Dispose() }
 }
 
+$licenseText = [string]$selectedShow.license
+if ([string]::IsNullOrWhiteSpace($licenseText)) { throw "The selected installed model has no inspectable license metadata." }
+$licenseSha256 = Get-TextSha256 $licenseText
+$licenseSummary = (@($licenseText -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) | Select-Object -First 1).Trim()
+
 Add-Type -AssemblyName System.Drawing
 $bitmap = New-Object System.Drawing.Bitmap 640, 360
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
@@ -115,6 +120,7 @@ try {
     $productionResult = $client.DescribeImagePinnedAsync(
         $model,
         $modelDigest,
+        $licenseSha256,
         $fixtureImage,
         "Describe the colored shapes and read the short text. Use one direct sentence.",
         [Threading.CancellationToken]::None).GetAwaiter().GetResult()
@@ -181,9 +187,6 @@ if (-not $unloaded) { throw "The selected Ollama model did not unload within the
 
 $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue | Select-Object -First 1
 $whisper = Get-Command whisper-cli -ErrorAction SilentlyContinue | Select-Object -First 1
-$licenseText = [string]$selectedShow.license
-if ([string]::IsNullOrWhiteSpace($licenseText)) { throw "The selected installed model has no inspectable license metadata." }
-$licenseSummary = (@($licenseText -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) | Select-Object -First 1).Trim()
 $manifest = [ordered]@{
     captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
     gpu_name = $gpuParts[0]
@@ -196,7 +199,7 @@ $manifest = [ordered]@{
     mutable_names_with_multiple_digests = @($ambiguousMutableNames)
     selected_model_capabilities = @($selectedShow.capabilities)
     selected_model_license_summary = [string]$licenseSummary
-    selected_model_license_sha256 = Get-TextSha256 $licenseText
+    selected_model_license_sha256 = $licenseSha256
     model_size_bytes = [long]$loaded.size
     model_vram_bytes = [long]$loaded.size_vram
     production_adapter_prompt_tokens = [int]$productionResult.PromptTokens

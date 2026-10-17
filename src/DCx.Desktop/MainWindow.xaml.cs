@@ -10,9 +10,11 @@ using DCx.Core;
 using DCx.Core.Browsing;
 using DCx.Core.Control;
 using DCx.Core.Downloads;
+using DCx.Core.LocalModels;
 using DCx.Core.Navigation;
 using DCx.Core.Profiles;
 using DCx.Core.Reliability;
+using DCx.Core.Storage;
 using DCx.Desktop.Automation;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
@@ -45,9 +47,11 @@ public partial class MainWindow : Window
     private Uri? _agentTarget;
     private NativeAppControlWindow? _nativeAppControlWindow;
     private OpenAiControlWindow? _openAiControlWindow;
+    private LocalModelsWindow? _localModelsWindow;
     private ContentViewerWindow? _contentViewerWindow;
     private ContributionsWindow? _contributionsWindow;
     private CrashDiagnosticsWindow? _crashDiagnosticsWindow;
+    private Task<LocalModelSelectionStore>? _localModelSelectionStore;
 
     public MainWindow()
     {
@@ -901,7 +905,31 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnContentViewerClick(object sender, RoutedEventArgs e)
+    private async void OnLocalModelsClick(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Opening installed local model settings. Nothing will be downloaded automatically.");
+        try
+        {
+            if (_localModelsWindow is { IsVisible: true })
+            {
+                _localModelsWindow.Activate();
+                return;
+            }
+
+            _localModelsWindow = new LocalModelsWindow(await GetLocalModelSelectionStoreAsync())
+            {
+                Owner = this,
+            };
+            _localModelsWindow.Closed += (_, _) => _localModelsWindow = null;
+            _localModelsWindow.Show();
+        }
+        catch
+        {
+            SetStatus("Local model settings could not open safely. No selection changed and nothing was downloaded.");
+        }
+    }
+
+    private async void OnContentViewerClick(object sender, RoutedEventArgs e)
     {
         SetStatus("Opening files and media viewer.");
         if (_contentViewerWindow is { IsVisible: true })
@@ -910,7 +938,18 @@ public partial class MainWindow : Window
             return;
         }
 
-        _contentViewerWindow = new ContentViewerWindow { Owner = this };
+        try
+        {
+            _contentViewerWindow = new ContentViewerWindow(await GetLocalModelSelectionStoreAsync())
+            {
+                Owner = this,
+            };
+        }
+        catch
+        {
+            SetStatus("Files and media viewer could not open because local model settings are unavailable.");
+            return;
+        }
         _contentViewerWindow.YouTubeNavigationRequested += async (_, uri) =>
         {
             await CreateTabAsync(GetSelectedProfile(), uri);
@@ -993,6 +1032,9 @@ public partial class MainWindow : Window
         var candidate = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         return File.Exists(Path.Combine(candidate, "DCx.slnx")) ? candidate : AppContext.BaseDirectory;
     }
+
+    private Task<LocalModelSelectionStore> GetLocalModelSelectionStoreAsync() =>
+        _localModelSelectionStore ??= LocalModelSelectionStore.OpenAsync(ApplicationDataRoot.Resolve());
 
     private Uri? GetNewTabAddress() => _offlineStartup ? null : StartPage;
 

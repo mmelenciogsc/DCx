@@ -13,6 +13,7 @@ public sealed class MediaFrameDescriptionService
         TimeSpan position,
         string model,
         string modelDigest,
+        string modelLicenseSha256,
         CancellationToken cancellationToken = default)
     {
         var ffmpeg = FindExecutable("ffmpeg.exe")
@@ -61,6 +62,7 @@ public sealed class MediaFrameDescriptionService
             return await ollama.DescribeImagePinnedAsync(
                 model,
                 modelDigest,
+                modelLicenseSha256,
                 framePath,
                 "Directly describe this paused video frame in one concise sentence. Mention meaningful subjects, action, setting, and text. Do not begin with 'the image' or 'the scene'.",
                 cancellationToken);

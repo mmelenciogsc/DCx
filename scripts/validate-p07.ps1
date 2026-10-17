@@ -9,7 +9,6 @@ $magick = (Get-Command magick -ErrorAction Stop).Source
 $previousRepoRoot = $env:DCX_REPO_ROOT
 $previousDataRoot = $env:DCX_DATA_ROOT
 $previousExportRoot = $env:DCX_EXPORT_ROOT
-$previousVisionModel = $env:DCX_VISION_MODEL
 $runRoot = Join-Path $repoRoot "artifacts\test-results\p07-$([Guid]::NewGuid().ToString('N'))"
 $textFixture = Join-Path $runRoot "accessible-fixture.txt"
 $videoFixture = Join-Path $runRoot "media-fixture.mp4"
@@ -72,8 +71,9 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path $pdfFixture)) { throw "ImageMagick c
 $env:DCX_REPO_ROOT = $repoRoot
 $env:DCX_DATA_ROOT = Join-Path $runRoot "data"
 $env:DCX_EXPORT_ROOT = $exportRoot
-$env:DCX_VISION_MODEL_SHA256 = "ef33995bb2ac37689e49c1a15cd627354d05a3c21d1f4bdcd6a5c83825349c1f"
-$env:DCX_VISION_MODEL = "llamacpp:$($env:DCX_VISION_MODEL_SHA256)"
+$visionDigest = "ef33995bb2ac37689e49c1a15cd627354d05a3c21d1f4bdcd6a5c83825349c1f"
+$visionModel = "llamacpp:$visionDigest"
+$licenseDigest = "d0fa3710cf6cf8e18009051c28988e4aa8114b0d4cd6e3f102bb9ccba50d7cc7"
 $process = Start-Process $exe -PassThru
 try {
     $mainWindow = Wait-For {
@@ -90,7 +90,77 @@ try {
         $value.Current.Value -eq "https://example.com/"
     } "The initial browser did not finish loading."
 
-    $openViewer = Find-ById $mainWindow "ContentViewerButton"
+    $localModelsButton = Find-ById $mainWindow "LocalModelsButton"
+    if ($null -eq $localModelsButton) { throw "The main window did not expose local model settings." }
+    $localModelsButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $localModelsWindow = Wait-For {
+        Find-WindowByProcessAndId $process.Id "LocalModelsWindow"
+    } "The accessible local model settings window did not open."
+    $localModelsStatus = Wait-For {
+        $candidate = Find-ById $localModelsWindow "LocalModelsStatus"
+        if ($null -ne $candidate -and $candidate.Current.Name -like "Found * installed model records.*") { $candidate }
+    } "Local model inventory did not finish."
+    $approval = Wait-For {
+        Find-ById $localModelsWindow "ApproveLocalModelSelectionBox"
+    } "The explicit local model approval checkbox was not exposed."
+    $approvalToggle = $approval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+    if ($approvalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "Local model approval did not default to unchecked."
+    }
+    $modelList = Wait-For {
+        Find-ById $localModelsWindow "InstalledLocalModelsList"
+    } "The installed local model list was not exposed."
+    $listItemCondition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::ListItem)
+    $modelItems = $modelList.FindAll([System.Windows.Automation.TreeScope]::Descendants, $listItemCondition)
+    if ($modelItems.Count -lt 1) { throw "No installed local model identity was exposed through UI Automation." }
+    $selectedModelItem = @($modelItems | Where-Object { $_.Current.Name -like "*$visionModel*" }) | Select-Object -First 1
+    if ($null -eq $selectedModelItem) { throw "The digest-bound vision-model identity was not exposed in the installed list." }
+    $selectedModelItem.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    $modelDetails = Wait-For {
+        $candidate = Find-ById $localModelsWindow "LocalModelDetails"
+        if ($null -ne $candidate -and $candidate.Current.Name -like "*License SHA-256: $licenseDigest*") { $candidate }
+    } "The selected model's exact license digest was not exposed for review."
+    $modelLicense = Wait-For {
+        $candidate = Find-ById $localModelsWindow "LocalModelLicenseText"
+        if ($null -ne $candidate) {
+            $pattern = $candidate.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+            if (-not [string]::IsNullOrWhiteSpace($pattern.Current.Value) -and
+                $pattern.Current.Value -notlike "Select an installed model*") { $candidate }
+        }
+    } "The selected model's complete license text was not exposed for review."
+    $approvalToggle.Toggle()
+    $useVision = Wait-For {
+        $candidate = Find-ById $localModelsWindow "UseLocalModelForVisionButton"
+        if ($null -ne $candidate -and $candidate.Current.IsEnabled) { $candidate }
+    } "The eligible digest-bound model could not be selected for vision."
+    $useVision.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $candidate = Find-ById $localModelsWindow "LocalModelsStatus"
+        $null -ne $candidate -and $candidate.Current.Name -like "The exact digest-bound local vision model selection was saved.*"
+    } "The explicitly approved local vision selection was not saved."
+    $currentVision = Wait-For {
+        $candidate = Find-ById $localModelsWindow "CurrentVisionModel"
+        if ($null -ne $candidate -and $candidate.Current.Name -like "Vision: $visionModel.*") { $candidate }
+    } "The persisted digest-bound vision selection was not exposed through UI Automation."
+    if ($approvalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "Local model approval was not reset after selection."
+    }
+    if ($null -ne (Find-ById $localModelsWindow "DownloadLocalModelButton")) {
+        throw "The local model settings unexpectedly exposed a download action."
+    }
+    $closeLocalModels = Wait-For {
+        Find-ById $localModelsWindow "CloseLocalModelsButton"
+    } "The local model settings close button was not exposed."
+    $closeLocalModels.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $null -eq (Find-WindowByProcessAndId $process.Id "LocalModelsWindow")
+    } "The local model settings window did not close."
+
+    $openViewer = Wait-For {
+        Find-ById $mainWindow "ContentViewerButton"
+    } "The files and media viewer button was not exposed after closing local model settings."
     $openViewer.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $viewer = Wait-For { Find-WindowByProcessAndId $process.Id "ContentViewerWindow" } "The content viewer did not open."
     $status = Find-ById $viewer "ContentStatusText"
@@ -222,6 +292,10 @@ try {
     "Local MP4 initial state=paused"
     "Local MP4 play/pause=PASS"
     "Local VLM frame description=$frameDescriptionValue"
+    "Persisted local model selection UIA=PASS"
+    "Complete local model license text UIA=PASS"
+    "Local model approval default unchecked=True"
+    "Local model download action absent=True"
     "Frame description leaves video paused=True"
     "User resume after description=PASS"
     "Local WAV play/pause=PASS"
@@ -244,5 +318,4 @@ finally {
     $env:DCX_REPO_ROOT = $previousRepoRoot
     $env:DCX_DATA_ROOT = $previousDataRoot
     $env:DCX_EXPORT_ROOT = $previousExportRoot
-    $env:DCX_VISION_MODEL = $previousVisionModel
 }

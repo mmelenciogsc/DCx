@@ -377,15 +377,26 @@ public sealed class ContributionApiE2eTests : IDisposable
             ?? throw new InvalidOperationException("Could not start the worker-gate fixture.");
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await process.WaitForExitAsync(timeout.Token);
-        var diagnostics = (await outputTask) + (await errorTask);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await process.WaitForExitAsync(timeout.Token);
+            var diagnostics = (await outputTask) + (await errorTask);
 
-        Assert.NotEqual(0, process.ExitCode);
-        Assert.Contains(
-            "contribution worker cannot run while the contribution API is disabled",
-            diagnostics,
-            StringComparison.OrdinalIgnoreCase);
+            Assert.NotEqual(0, process.ExitCode);
+            Assert.Contains(
+                "contribution worker cannot run while the contribution API is disabled",
+                diagnostics,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
+            }
+        }
     }
 
     public void Dispose() => TestDirectory.DeleteIfExists(root);

@@ -140,6 +140,14 @@
                             AutomationProperties.AutomationId="OpenAiButton"
                             AutomationProperties.Name="Open OpenAI and local Codex settings"
                             Click="OnOpenAiClick" />
+                    <Button x:Name="LocalModelsButton"
+                            MinWidth="120"
+                            Margin="0,0,6,0"
+                            Content="Local models"
+                            AutomationProperties.AutomationId="LocalModelsButton"
+                            AutomationProperties.Name="Open local model settings"
+                            AutomationProperties.HelpText="Review and select already-installed digest-bound local models. No model is downloaded automatically."
+                            Click="OnLocalModelsClick" />
                     <Button x:Name="ContentViewerButton"
                             MinWidth="120"
                             Margin="0,0,6,0"

@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Media.Imaging;
 using DCx.Core.Content;
 using DCx.Core.Documents;
+using DCx.Core.LocalModels;
 using DCx.Desktop.Media;
 using Microsoft.Win32;
 
@@ -15,10 +16,13 @@ public partial class ContentViewerWindow : Window
     private readonly YouTubeUrlPolicy _youTubePolicy = new();
     private readonly OfficeTextExtractor _officeTextExtractor = new();
     private readonly MediaFrameDescriptionService _frameDescriptionService = new();
+    private readonly LocalModelSelectionStore _localModelSelectionStore;
     private CancellationTokenSource? _frameDescriptionCancellation;
 
-    public ContentViewerWindow()
+    public ContentViewerWindow(LocalModelSelectionStore localModelSelectionStore)
     {
+        _localModelSelectionStore = localModelSelectionStore
+            ?? throw new ArgumentNullException(nameof(localModelSelectionStore));
         InitializeComponent();
     }
 
@@ -179,27 +183,29 @@ public partial class ContentViewerWindow : Window
     private async void OnDescribeFrameClick(object sender, RoutedEventArgs e)
     {
         if (MediaViewer.Source is null) return;
-        var model = Environment.GetEnvironmentVariable("DCX_VISION_MODEL");
-        var modelDigest = Environment.GetEnvironmentVariable("DCX_VISION_MODEL_SHA256");
-        if (string.IsNullOrWhiteSpace(model) || string.IsNullOrWhiteSpace(modelDigest))
-        {
-            SetStatus("No digest-pinned local vision model is configured. Complete P06 model selection first.");
-            return;
-        }
-
         MediaViewer.Pause();
         DescribeFrameButton.IsEnabled = false;
         _frameDescriptionCancellation?.Cancel();
         _frameDescriptionCancellation?.Dispose();
         _frameDescriptionCancellation = new CancellationTokenSource();
-        SetStatus("Media paused. Local vision model is describing the current frame.");
+        SetStatus("Media paused. Checking the approved local vision-model selection.");
         try
         {
+            var binding = (await _localModelSelectionStore.GetStateAsync(
+                _frameDescriptionCancellation.Token)).Vision;
+            if (binding is null)
+            {
+                SetStatus("No local vision model is selected. Open Local models, review an exact digest and license, then approve a vision model.");
+                return;
+            }
+
+            SetStatus("Media paused. The approved local vision model is describing the current frame.");
             var result = await _frameDescriptionService.DescribeAsync(
                 MediaViewer.Source.LocalPath,
                 MediaViewer.Position,
-                model,
-                modelDigest,
+                binding.Name,
+                binding.Digest,
+                binding.LicenseSha256,
                 _frameDescriptionCancellation.Token);
             FrameDescriptionText.Text = result.Text;
             SetStatus($"Frame description complete. {result.PromptTokens} prompt tokens and {result.OutputTokens} output tokens; video remains paused.");
