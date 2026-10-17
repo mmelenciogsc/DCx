@@ -61,6 +61,16 @@
                 <ComboBoxItem Content="Apache-2.0" />
                 <ComboBoxItem Content="Unknown or other" />
             </ComboBox>
+            <Label Target="{Binding ElementName=ContributorPseudonymBox}"
+                   Content="Contributor pseudonym expected by the local simulation"
+                   Padding="0" />
+            <TextBox x:Name="ContributorPseudonymBox"
+                     Margin="0,4,0,12"
+                     Padding="5"
+                     Text="contributor:local-simulation"
+                     AutomationProperties.AutomationId="ContributionPseudonymBox"
+                     AutomationProperties.Name="Contributor pseudonym expected by the local simulation"
+                     TextChanged="OnCandidateChanged" />
 
             <Button x:Name="ReviewButton"
                     Width="180"
@@ -108,9 +118,63 @@
                     AutomationProperties.AutomationId="PrepareContributionButton"
                     AutomationProperties.Name="Prepare approved item in local quarantine"
                     Click="OnPrepareClick" />
+
+            <GroupBox Margin="0,18,0,0" Header="Optional local simulation submission">
+                <StackPanel Margin="12,8">
+                    <TextBlock TextWrapping="Wrap"
+                               Text="This test-only action sends the exact prepared item to a loopback DCx simulation API. It cannot contact a remote host. The token is used once and is not saved. Server acceptance means quarantine only, never publication." />
+                    <Label Margin="0,10,0,0"
+                           Target="{Binding ElementName=SimulationEndpointBox}"
+                           Content="Loopback simulation origin" Padding="0" />
+                    <TextBox x:Name="SimulationEndpointBox"
+                             Margin="0,4,0,8"
+                             Padding="5"
+                             Text="http://127.0.0.1:5087/"
+                             AutomationProperties.AutomationId="ContributionSimulationEndpointBox"
+                             AutomationProperties.Name="Loopback contribution simulation origin"
+                             AutomationProperties.HelpText="Only a root HTTP origin on a literal loopback IP address is accepted."
+                             TextChanged="OnSubmissionSettingsChanged" />
+                    <Label Target="{Binding ElementName=ContributorTokenBox}"
+                           Content="One-time local simulation contributor token" Padding="0" />
+                    <PasswordBox x:Name="ContributorTokenBox"
+                                 Margin="0,4,0,8"
+                                 Padding="5"
+                                 AutomationProperties.AutomationId="ContributionSimulationTokenBox"
+                                 AutomationProperties.Name="One-time local simulation contributor token"
+                                 AutomationProperties.HelpText="This token is not saved or logged and is cleared after a submission attempt."
+                                 PasswordChanged="OnSubmissionSettingsChanged" />
+                    <CheckBox x:Name="SubmissionApprovalBox"
+                              Margin="0,6,0,10"
+                              IsChecked="False"
+                              IsEnabled="False"
+                              Content="I approve sending this exact prepared item to this loopback simulation now"
+                              AutomationProperties.AutomationId="ContributionSubmissionApprovalBox"
+                              AutomationProperties.Name="Approve sending this exact prepared contribution to the loopback simulation now, initially unchecked"
+                              AutomationProperties.HelpText="This approval is separate from local preparation and resets when the item, endpoint, or token changes."
+                              Checked="OnSubmissionApprovalChanged"
+                              Unchecked="OnSubmissionApprovalChanged" />
+                    <WrapPanel>
+                        <Button x:Name="SubmitSimulationButton"
+                                MinWidth="210"
+                                Margin="0,0,10,0"
+                                Content="Send to local _simulation"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="SubmitContributionSimulationButton"
+                                AutomationProperties.Name="Send exact prepared item to local contribution simulation"
+                                Click="OnSubmitSimulationClick" />
+                        <Button x:Name="CancelSubmissionButton"
+                                MinWidth="130"
+                                Content="_Cancel send"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="CancelContributionSubmissionButton"
+                                AutomationProperties.Name="Cancel local contribution simulation submission"
+                                Click="OnCancelSubmissionClick" />
+                    </WrapPanel>
+                </StackPanel>
+            </GroupBox>
             <TextBlock x:Name="ContributionStatusText"
                        Margin="0,12,0,0"
-                       Text="Preparation is off. No network upload is available."
+                       Text="Preparation is off. No network request occurs without a separate explicit loopback send approval."
                        TextWrapping="Wrap"
                        AutomationProperties.AutomationId="ContributionStatusText"
                        AutomationProperties.LiveSetting="Assertive" />

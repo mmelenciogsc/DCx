@@ -159,9 +159,12 @@ public sealed class ContributionApiE2eTests : IDisposable
                     HttpStatusCode.Conflict,
                     "item_approval_invalid_or_expired");
             }
-            using (var accepted = await SendIntakeAsync(client, intakeUri, valid, contributorToken))
+            using (var submissionClient = new ContributionSubmissionClient(endpoint, TimeSpan.FromSeconds(5)))
             {
-                Assert.Equal(HttpStatusCode.Accepted, accepted.StatusCode);
+                var accepted = await submissionClient.SubmitAsync(valid, contributorToken);
+                Assert.Equal(
+                    new ContributionSubmissionResult(valid.SubmissionId, ContributionState.Quarantined),
+                    accepted);
             }
             using (var duplicate = await SendIntakeAsync(client, intakeUri, valid, contributorToken))
             {
