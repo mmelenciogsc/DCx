@@ -20,7 +20,7 @@ DCx is under construction. It is not a validated release, installer, production 
 | P11 PayPal/CARE | BLOCKED (durable local sandbox) | At `3984c6b`, 10/10 finance tests pass: restart-safe SQLite ledger/webhook/entitlement/payout state, balanced CARE allocation, Net60 and sandbox-only payout gates. Official PayPal sandbox verification/reconciliation, merchant eligibility and legal/accounting approval remain absent. |
 | P12 Full vertical E2E | BLOCKED (eight local fixtures) | At `10ac274`, eight composed validators pass with zero production actions, including a clearly non-Facebook WebView2/UIA old-post fixture and sandbox-shaped data to genuine XLSX. Live Facebook, QuickBooks OAuth/API, YouTube frame Q&A, package install, Compose/CCB sandbox and real PayPal acceptance remain absent. |
 | P13 Packaging/security/reliability | BLOCKED (partial implementation) | At `82452fe`, 12 reliability tests, two reproducible 42-file publish trees/ZIPs, seven-component CycloneDX/license inventory, binary secret scan and offline UIA startup pass. Output is `NotSigned`; no installer, vulnerability scan, clean-VM lifecycle or human AT signoff is claimed. |
-| P14 Pilot/release readiness | Not started | Production activation off. |
+| P14 Pilot/release readiness | BLOCKED / NO_GO (local controls) | At `01539fd`, four readiness tests pass; 7/7 current critical/major issues are triaged, 7 remain blocking, 12 privacy-minimized pilot metrics are defined and production activation is false. No pilot/admin console/policy approval is claimed. |
 
 ## Environment facts affecting the program
 

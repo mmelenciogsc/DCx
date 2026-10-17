@@ -101,6 +101,13 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - Two publish trees and ZIPs are compared by path/length/digest. Published files receive binary secret-pattern scanning. Synthetic hostile-input fixtures are allowlisted only in their two source test files.
 - These controls do not replace code signing, AV/vulnerability scans, clean-VM lifecycle testing or human assistive-technology acceptance.
 
+## Implemented readiness controls through partial P14
+
+- A `GO` decision requires zero nonvalidated critical/major issues and a separate explicit production-activation approval. Approval cannot override a blocker.
+- Readiness entries fail closed without a unique ID, owner role, next action and evidence reference. The current report assigns all seven critical/major blockers and remains `NO_GO`.
+- Proposed pilot metrics are content-minimized typed aggregates. Collection is not active and still requires approved consent, retention and incident procedures.
+- Incident stop conditions include credential/private-data exposure, unauthorized side effects, reconciliation variance, signing failure, inaccessible critical flows and user-control safety failures.
+
 ## Security gate policy
 
 Security tests must cover denial paths as well as successful paths. A mock or sandbox pass proves only that path. Production OpenAI/PayPal eligibility, code signing, legal review, external penetration testing, and the Ubuntu production deployment remain explicit blockers until separately evidenced.
