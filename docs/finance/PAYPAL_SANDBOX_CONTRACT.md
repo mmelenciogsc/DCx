@@ -6,17 +6,21 @@ Verified from official PayPal developer resources on 2026-10-17. This is a devel
 
 | Contract | Official URL | SHA-256 at audit |
 |---|---|---|
-| REST OAuth authentication | https://developer.paypal.com/api/rest/authentication/ | `b2ab9761c24c931a778bc82c4eccf9338a572a65155c7adb48fa5c919abe5c99` |
+| REST OAuth authentication | https://developer.paypal.com/api/rest/authentication/ | `01561b9bb771909f8d46ee11ae128eb6e46b692cd0e6deaddb6b1cccd113dbbb` |
 | Webhooks v1 schema | https://developer.paypal.com/api/webhooks/v1/schema.json | `a10f9d6d44b4732393bf07001979110e0f6a584efad07e31d0d4ad76d6300ca3` |
+| Subscriptions v1 schema | https://developer.paypal.com/api/subscriptions/v1/schema.json | `f8535d303786f248a474df720317928f4b06f6e6a29e90fe0043b9b349251dd9` |
+| Subscription webhook catalog | https://developer.paypal.com/subscriptions/webhooks.md | `a3ca634d2c9a4156b8dcd3ddb90940826da85a113465025afcfda36434eefaeb` |
+| Sale/refund v1 resource schema | https://developer.paypal.com/api/deprecated/payments/v1/schema.json | `7d122ce21bffccf13181fe9b5240f00e8ebe18da230e6dd8f158abec4ea5a88e` |
 | Payouts batch v1 schema | https://developer.paypal.com/api/payments.payouts-batch/v1/schema.json | `d0e01b9cb185a9ed9f1ace47a94796869ffee3dd754bb41cd50baed575b34298` |
 
-The audit performed only three HTTPS GET requests to these documentation resources. It used no credentials and made no request to a PayPal API origin.
+The latest audit performed only six HTTPS GET requests to these documentation resources. Its retained evidence is `artifacts/test-results/paypal-contract-c2619695def04e9c9302b09f203d5538/paypal-contract-audit.json`. It used no credentials and made no request to a PayPal API origin.
 
 ## Implemented sandbox operations
 
 - Fixed origin: `https://api-m.sandbox.paypal.com`.
 - OAuth: `POST /v1/oauth2/token`, HTTP Basic client credentials and `grant_type=client_credentials`.
 - Webhook evidence: `POST /v1/notifications/verify-webhook-signature` with `auth_algo`, `cert_url`, `transmission_id`, `transmission_sig`, `transmission_time`, `webhook_id` and the exact parsed event; admitted results are `SUCCESS` and `FAILURE`.
+- Verified subscription mapping: the immutable event object sent for verification is mapped only after `SUCCESS`. Exact documented lifecycle resource/status/plan fields bind a subscription to one configured plan. A US$3 completed sale requires that prior binding and records its sale ID. Refund/reversal events must resolve through that sale and cannot exceed its gross or aggregate recorded receipts.
 - Payout submission: `POST /v1/payments/payouts` with stable sender batch/item IDs and exact USD values.
 - Reconciliation: `GET /v1/payments/payouts/{provider-batch-id}` with items requested. Batch states are `DENIED`, `PENDING`, `PROCESSING`, `SUCCESS` and `CANCELED`.
 
@@ -26,4 +30,4 @@ The production class exposes sandbox behavior only. Live payout mode has no tran
 
 The local handler-backed tests establish serialization, validation, idempotency and accounting behavior without contacting PayPal. They do not establish that an account can use Subscriptions or Payouts, that recipients are eligible, that webhooks are configured correctly, or that regional/legal requirements are met.
 
-Credentialed sandbox acceptance is blocked pending owner authorization and credentials. Before it can run, DCx also needs an accessible owner-approval surface backed by a protected immutable recipient-snapshot directory, subscription mapping, separately approved failed-item retry/remediation and continued reconciliation for later returned/refunded/reversed items. No real payment, payout or subscription should be initiated from this implementation.
+Credentialed sandbox acceptance is blocked pending owner authorization and credentials. Before it can run, DCx also needs approved exact US$3 product/plan configuration, an accessible owner-approval surface backed by a protected immutable recipient-snapshot directory, out-of-order event remediation, separately approved failed-item retry/remediation and continued reconciliation for later returned/refunded/reversed payout items. No real payment, payout or subscription should be initiated from this implementation.
