@@ -37,7 +37,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 - Locked restore and native Release build passed with 0 warnings/errors.
 - P09 exact filtered tests: passed 12, failed 0, skipped 0; about 1 second, with exact counters parsed from retained TRX.
-- Current full suite: passed 223, failed 0, skipped 0; about 7 seconds.
+- Current full suite: passed 228, failed 0, skipped 0; about 9 seconds.
 - A real child Kestrel process served three chained trust-policy revisions and a signed SQLite-backed release over loopback HTTP; a fresh production client transport caught up all revisions, synchronized and searched it.
 - Two distinct client roots synchronized the same chain; the P08 private sentinel remained present and absent from global results.
 - Wrong-key release activation was rejected with no active pointer.
@@ -48,7 +48,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - A transfer interrupted after its first 64 KiB chunk resumed at a nonzero offset and downloaded fewer bytes on retry than the full release.
 - Lazy 150,000-byte artifact retrieval, deprecation, offline search and explicit rollback passed.
 - Publication retry used reordered equivalent changes and a later timestamp after repository reopen, returned the byte-identical original descriptor and kept the chain at sequence 1; a changed request under the same operation ID was rejected.
-- Latest evidence: `artifacts/test-results/p09-40d6c5faff224d30b48b4cb1f2cea16c/` containing `p09-global-knowledge.trx` and `storage-forecast.json` (generated and intentionally not committed).
+- Latest evidence: `artifacts/test-results/p09-91a274d9b130461bae0102d35e24f5e4/` containing `p09-global-knowledge.trx` and `storage-forecast.json` (generated and intentionally not committed).
 
 ## Measured storage/bandwidth fixture
 

@@ -66,7 +66,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 - Locked native Release build: 0 warnings, 0 errors; 2.32 seconds in the recorded dedicated run.
 - P10 exact-namespace tests: passed 52, failed 0, skipped 0; about 8 seconds, with exact counters parsed from retained TRX.
-- Current full suite: passed 223, failed 0, skipped 0; about 7 seconds.
+- Current full suite: passed 228, failed 0, skipped 0; about 9 seconds.
 - Eligible CKB item: quarantined, absent from catalog before review, approved into a signed release, synchronized by a client, then withdrawn/deprecated.
 - Secret/PII/dummy item: remained quarantined and reviewer publication failed closed.
 - Receipt: one qualified event; replay, contributor self-use and invalid integrity excluded.
@@ -74,7 +74,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - Native CCB UIA: type selection exposed the package controls; exact schema-v2 text, manifest identity/version and path-clearing status were accessible; the selected full path was absent after admission. The separately approved send placed the exact bytes in `Quarantined`, cleared local bytes/review text, locked candidate identity and reconciled minimized status without a body. No reviewer approval or publication was attempted.
 - WSL-hosted Ubuntu local simulation: Bubblewrap 0.6.1 SHA-256 `bf6cf3d4456665f5d80c14eb79a76e0ce87b39a0883e614a161658b4ec33492c`; static BusyBox SHA-256 `b3c1009e1b5c927e537487c80639cdf404f69e3eb49371d9be5d841672be3ff9`.
 - Benign transformation passed. Host/repository and `/etc`/`/usr` reads, an external network request, root write, inherited secret environment, outside-quarantine workspace, symlink, workspace-digest substitution, timeout and output overflow were denied.
-- Latest combined P10 evidence: `artifacts/test-results/p10-1196af664b5b4e84aba9260a328831a2/`, including `p10-contributions.trx`, `uia-ccb-package.zip` and `sandbox-evidence.json` (generated and intentionally not committed).
+- Latest combined P10 evidence: `artifacts/test-results/p10-eae9f7e60ce6450981f3b25f33efcb37/`, including `p10-contributions.trx`, `uia-ccb-package.zip` and `sandbox-evidence.json` (generated and intentionally not committed).
 - Post-run scanning found neither ephemeral bearer token in server diagnostics, application data or retained P10 evidence.
 - Schema-v2 success path executed two declared tests, persisted two passing evidence rows, published the exact artifact into a signed release, synchronized it to a separate global replica and lazily retrieved byte-identical content.
 - Denial coverage includes missing executor, package/digest/metadata mismatch, undeclared files/fields, invalid UTF-8/base64/null input, malicious entrypoint or test-input text, expected-output mismatch and post-intake quarantine tampering.

@@ -38,17 +38,17 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 ## Measured result
 
-Recorded evidence directory: `artifacts/test-results/p13-39fea432688e456a927303ea9ec5436f/` (generated and intentionally not committed).
+Recorded evidence directory: `artifacts/test-results/p13-5f3586cd7aef40a7a3e2983d309d51c9/` (generated and intentionally not committed).
 
 - Locked Release build: 0 warnings, 0 errors.
 - Reliability tests: passed 23, failed 0, skipped 0; exact counters parsed from the retained TRX.
-- Current full suite: passed 223, failed 0, skipped 0; about 7 seconds.
-- Publish trees: 42 files, 63,071,651 bytes each; no path/length/SHA-256 differences.
-- Reproducible staging ZIP SHA-256: `f1ec492d5ea36cd14b5e101c89c9b5f3d79d24f66e153497029404337d6abd3d`.
+- Current full suite: passed 228, failed 0, skipped 0; about 9 seconds.
+- Publish trees: 42 files, 63,119,779 bytes each; no path/length/SHA-256 differences.
+- Reproducible staging ZIP SHA-256: `fb4f2bccb134073a0f2140ccf61e90d22398100fdf83ff6fbf99b8bbfe2730f2` (25,247,628 bytes).
 - CycloneDX components: 7; third-party license records: 7.
 - Unexpected secret matches: 0; exact synthetic scanner-fixture matches: 2.
 - Authenticode: `NotSigned`.
-- Offline UIA heading: `DCx is ready offline`; startup 2,303 ms; working set 462.6 MiB under the provisional 1 GiB ceiling.
+- Offline UIA heading: `DCx is ready offline`; startup 4,180 ms; working set 466.2 MiB under the provisional 1 GiB ceiling.
 - Crash-diagnostics UIA heading: `Privacy and crash diagnostics`; consent defaulted unchecked, explicit opt-in persisted notice version 1, purge preserved enabled consent, opt-out disabled and purged, and network transfers remained zero.
 - Recovery UIA heading: `DCx backup and recovery`; main-app launcher, path input, create, default-unchecked approval, restore and assertive status are exposed.
 - Backup while main DCx held the lease was denied and wrote no archive. After main exit, backup and approved restore passed; restore without approval was denied; excluded synthetic WebView2 cookie data remained unchanged.
