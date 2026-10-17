@@ -40,7 +40,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 - Decision: `NO_GO`.
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled consent state, blocker list, metric-definition list and refresh action. The validator confirmed that no control named `Activate production` exists.
-- Evidence: `artifacts/test-results/p14-8885b9a242db41878d224f34f0d4a223/go-no-go.json` with `p14-readiness.trx` beside it, generated from committed source at `acc8e62` and intentionally not committed.
+- Evidence: `artifacts/test-results/p14-0a53bc3e66c34fa28fa6f122f8c239aa/go-no-go.json` with `p14-readiness.trx` beside it, generated from committed source at `bcfe167` and intentionally not committed.
 
 ## Changed files in the latest milestone
 

@@ -39,7 +39,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 - Windows OCR recognized the golden `DCX`/`42` content and returned normalized geometry.
 - Semantic repair, HTML export, real OPC DOCX export and DOCX viewer round-trip passed.
 - Native UIA script result: `P07 content viewer UIA validation=PASS`.
-- Latest evidence directory: `artifacts/test-results/p07-15ebf4df5ff14865b6e6944ce062fedd/` (generated and intentionally not committed). The disposable profile explicitly registered the real installed FFmpeg candidate, proved the local blue-frame result through that exact binding, and did not retain approval. Composed P06 evidence at `artifacts/test-results/p06-ec2254a02625414ea7fe8eb09ba23453/` contains WAV/MP3 transcription and FFmpeg-registration/clear-denial UIA fixtures.
+- Latest evidence directory: `artifacts/test-results/p07-0a3c791833884f67bfa554162c81538a/` (generated and intentionally not committed). The disposable profile explicitly registered the real installed FFmpeg candidate, proved the local blue-frame result through that exact binding, and did not retain approval. Composed P06 evidence at `artifacts/test-results/p06-87811a7e3abf4db090d236332cf0557b/` contains WAV/MP3 transcription, real deterministic audio extraction and FFmpeg-registration/clear-denial evidence.
 
 ## Security, accessibility and limitations
 
