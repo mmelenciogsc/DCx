@@ -5,6 +5,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $repoRoot "src\DCx.Desktop\bin\Release\net10.0-windows10.0.19041.0\DCx.exe"
 $ffmpeg = (Get-Command ffmpeg -ErrorAction Stop).Source
+$ffmpegLicense = Join-Path (Split-Path -Parent (Split-Path -Parent $ffmpeg)) "LICENSE"
 $magick = (Get-Command magick -ErrorAction Stop).Source
 $previousRepoRoot = $env:DCX_REPO_ROOT
 $previousDataRoot = $env:DCX_DATA_ROOT
@@ -60,6 +61,9 @@ function Get-EphemeralPort {
 }
 
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+if (-not (Test-Path -LiteralPath $ffmpegLicense -PathType Leaf)) {
+    throw "The installed FFmpeg candidate lacks its co-located complete license file."
+}
 [IO.File]::WriteAllText($textFixture, "Accessible fixture line one.`r`nSecond line.")
 & $ffmpeg -hide_banner -loglevel error -f lavfi -i "color=c=blue:s=320x180:d=1" -c:v libx264 -pix_fmt yuv420p -y $videoFixture
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $videoFixture)) { throw "FFmpeg could not create the local video fixture." }
@@ -188,6 +192,39 @@ try {
     }
     if ($null -ne (Find-ById $localModelsWindow "DownloadLocalModelButton")) {
         throw "The local model settings unexpectedly exposed a download action."
+    }
+
+    $ffmpegDigest = (Get-FileHash -LiteralPath $ffmpeg -Algorithm SHA256).Hash.ToLowerInvariant()
+    $ffmpegLicenseDigest = (Get-FileHash -LiteralPath $ffmpegLicense -Algorithm SHA256).Hash.ToLowerInvariant()
+    (Find-ById $localModelsWindow "FfmpegExecutablePath").GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern).SetValue($ffmpeg)
+    (Find-ById $localModelsWindow "FfmpegLicensePath").GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern).SetValue($ffmpegLicense)
+    (Find-ById $localModelsWindow "ReviewFfmpegBackendButton").GetCurrentPattern(
+        [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $ffmpegDetails = Wait-For {
+        $candidate = Find-ById $localModelsWindow "FfmpegBackendDetails"
+        if ($null -ne $candidate -and
+            $candidate.Current.Name -like "*SHA-256 $ffmpegDigest*" -and
+            $candidate.Current.Name -like "*License SHA-256 $ffmpegLicenseDigest*" -and
+            $candidate.Current.Name -like "*Windows signature status*") { $candidate }
+    } "The exact installed FFmpeg executable, license and signature evidence were not exposed." 160
+    $ffmpegApproval = Find-ById $localModelsWindow "ApproveFfmpegBackendBox"
+    $ffmpegApprovalToggle = $ffmpegApproval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+    if ($ffmpegApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "FFmpeg approval did not default to unchecked."
+    }
+    $ffmpegApprovalToggle.Toggle()
+    (Find-ById $localModelsWindow "SaveFfmpegBackendButton").GetCurrentPattern(
+        [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $currentFfmpeg = Wait-For {
+        $candidate = Find-ById $localModelsWindow "CurrentFfmpegBackend"
+        if ($null -ne $candidate -and
+            $candidate.Current.Name -like "Media processor: ffmpeg.exe.*" -and
+            $candidate.Current.Name -like "*Executable digest $ffmpegDigest*") { $candidate }
+    } "The isolated test profile did not retain the explicitly approved FFmpeg binding."
+    if ($ffmpegApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "FFmpeg approval was not reset after saving."
     }
     $closeLocalModels = Wait-For {
         Find-ById $localModelsWindow "CloseLocalModelsButton"
@@ -374,6 +411,8 @@ try {
     "Complete local model license text UIA=PASS"
     "Local model approval default unchecked=True"
     "Local model download action absent=True"
+    "Explicit FFmpeg executable/license binding UIA=PASS"
+    "Local frame extraction uses approved digest-bound FFmpeg=PASS"
     "Frame description leaves video paused=True"
     "User resume after description=PASS"
     "Local WAV play/pause=PASS"

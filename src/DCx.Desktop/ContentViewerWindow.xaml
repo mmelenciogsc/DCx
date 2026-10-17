@@ -127,22 +127,22 @@
                                 AutomationProperties.HelpText="Uses the optional paused-frame question above. The local video remains paused for follow-up questions."
                                 Click="OnDescribeFrameClick" />
                         <Button x:Name="TranscribeWavButton" MinWidth="160" Margin="8,0,0,0"
-                                Content="_Transcribe WAV" IsEnabled="False"
+                                Content="_Transcribe media" IsEnabled="False"
                                 AutomationProperties.AutomationId="TranscribeWavButton"
-                                AutomationProperties.Name="Pause and transcribe selected WAV audio"
-                                AutomationProperties.HelpText="Uses only the explicitly approved local Whisper backend. MP3 and MP4 extraction is not yet available."
+                                AutomationProperties.Name="Pause and transcribe selected media"
+                                AutomationProperties.HelpText="WAV uses the explicitly approved Whisper backend. MP3 and MP4 also require the explicitly approved FFmpeg media processor."
                                 Click="OnTranscribeWavClick" />
                         <Button x:Name="CancelTranscriptionButton" MinWidth="160" Margin="8,0,0,0"
                                 Content="C_ancel transcription" IsEnabled="False"
                                 AutomationProperties.AutomationId="CancelTranscriptionButton"
-                                AutomationProperties.Name="Cancel local WAV transcription"
+                                AutomationProperties.Name="Cancel local media transcription"
                                 Click="OnCancelTranscriptionClick" />
                     </WrapPanel>
                     <TextBlock x:Name="FrameDescriptionText" Grid.Row="2" Margin="8,0,8,8" TextWrapping="Wrap"
                                AutomationProperties.AutomationId="FrameDescriptionText"
                                AutomationProperties.Name="{Binding Text, RelativeSource={RelativeSource Self}}"
                                AutomationProperties.LiveSetting="Assertive" />
-                    <GroupBox Grid.Row="3" Margin="8,0,8,8" Header="Local WAV transcript">
+                    <GroupBox Grid.Row="3" Margin="8,0,8,8" Header="Local media transcript">
                         <TextBox x:Name="MediaTranscriptText"
                                  MinHeight="90"
                                  MaxHeight="200"
@@ -152,7 +152,7 @@
                                  TextWrapping="Wrap"
                                  VerticalScrollBarVisibility="Auto"
                                  AutomationProperties.AutomationId="MediaTranscriptText"
-                                 AutomationProperties.Name="Local WAV transcript text" />
+                                 AutomationProperties.Name="Local media transcript text" />
                     </GroupBox>
                 </Grid>
             </TabItem>

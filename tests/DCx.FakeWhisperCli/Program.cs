@@ -1,3 +1,24 @@
+var ffmpegMode = args.Contains("-i", StringComparer.Ordinal) &&
+    (args.Contains("-frames:v", StringComparer.Ordinal) || args.Contains("-c:a", StringComparer.Ordinal));
+if (ffmpegMode)
+{
+    var inputIndex = Array.IndexOf(args, "-i");
+    if (inputIndex < 0 || inputIndex + 1 >= args.Length || args.Length == 0) return 4;
+    var input = args[inputIndex + 1];
+    var output = args[^1];
+    if (!File.Exists(input)) return 5;
+    if (Path.GetFileName(input).StartsWith("timeout", StringComparison.OrdinalIgnoreCase))
+        await Task.Delay(TimeSpan.FromSeconds(10));
+    Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+    if (Path.GetFileName(input).StartsWith("invalid-output", StringComparison.OrdinalIgnoreCase))
+        await File.WriteAllBytesAsync(output, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    else if (args.Contains("-frames:v", StringComparer.Ordinal))
+        await File.WriteAllBytesAsync(output, [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0d, 0x0a, 0x1a, 0x0a, 0]);
+    else
+        await File.WriteAllBytesAsync(output, [(byte)'R', (byte)'I', (byte)'F', (byte)'F', 4, 0, 0, 0, (byte)'W', (byte)'A', (byte)'V', (byte)'E']);
+    return 0;
+}
+
 var arguments = args
     .Select((value, index) => (value, index))
     .ToDictionary(item => item.value, item => item.index, StringComparer.Ordinal);

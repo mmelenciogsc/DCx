@@ -16,6 +16,15 @@ public sealed record ApprovedFfmpegBinding(
     string? SignerCertificateSha256,
     DateTimeOffset ApprovedUtc)
 {
+    public FfmpegMediaProcessor CreateProcessor(TimeSpan timeout)
+    {
+        WhisperBackendReviewer.VerifyApprovedLicenseFile(LicensePath, LicenseSha256, "FFmpeg license");
+        return new(new FfmpegMediaProcessorConfiguration(
+            ExecutablePath,
+            ExecutableSha256,
+            timeout));
+    }
+
     public bool HasSameIdentity(ApprovedFfmpegBinding other) =>
         other is not null &&
         string.Equals(ExecutablePath, other.ExecutablePath, StringComparison.OrdinalIgnoreCase) &&

@@ -27,6 +27,7 @@ $modelLicense = Join-Path $runRoot "model-license.md"
 $ffmpegLicense = Join-Path $runRoot "ffmpeg-license.txt"
 $audio = Join-Path $runRoot "fixture.wav"
 $timeoutAudio = Join-Path $runRoot "timeout.wav"
+$mp3Audio = Join-Path $runRoot "fixture.mp3"
 $evidencePath = Join-Path $runRoot "whisper-registration-evidence.json"
 $previousDataRoot = $env:DCX_DATA_ROOT
 $previousOfflineStartup = $env:DCX_OFFLINE_STARTUP
@@ -82,6 +83,8 @@ New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
     [byte][char]'R', [byte][char]'I', [byte][char]'F', [byte][char]'F', 4, 0, 0, 0,
     [byte][char]'W', [byte][char]'A', [byte][char]'V', [byte][char]'E'))
 [IO.File]::Copy($audio, $timeoutAudio)
+[IO.File]::WriteAllBytes($mp3Audio, [byte[]]@(
+    [byte][char]'I', [byte][char]'D', [byte][char]'3', 4, 0, 0, 0, 0, 0, 0))
 
 $executableDigest = (Get-FileHash -LiteralPath $fakeWhisper -Algorithm SHA256).Hash.ToLowerInvariant()
 $modelDigest = (Get-FileHash -LiteralPath $model -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -233,7 +236,7 @@ try {
     $transcribeAccessKey = $transcribeButton.Current.AccessKey
     if (-not $transcribeButton.Current.IsKeyboardFocusable -or
         [string]::IsNullOrWhiteSpace($transcribeAccessKey)) {
-        throw "The WAV transcription action lacks a keyboard-focusable access key."
+        throw "The media transcription action lacks a keyboard-focusable access key."
     }
     $transcribeButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $cancelButton = Wait-For {
@@ -248,8 +251,8 @@ try {
     $cancelButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For {
         $status = Find-ById $contentViewer "ContentStatusText"
-        $null -ne $status -and $status.Current.Name -like "WAV transcription canceled.*"
-    } "User cancellation did not stop local WAV transcription."
+        $null -ne $status -and $status.Current.Name -like "Media transcription canceled.*"
+    } "User cancellation did not stop local media transcription."
     $canceledTranscript = Find-ById $contentViewer "MediaTranscriptText"
     if (-not [string]::IsNullOrEmpty($canceledTranscript.GetCurrentPattern(
             [System.Windows.Automation.ValuePattern]::Pattern).Current.Value)) {
@@ -265,7 +268,7 @@ try {
     $transcribeButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For {
         $status = Find-ById $contentViewer "ContentStatusText"
-        $null -ne $status -and $status.Current.Name -like "WAV transcription complete in *Media remains paused."
+        $null -ne $status -and $status.Current.Name -like "Media transcription complete in *Media remains paused."
     } "The accessible local WAV transcription did not complete."
     $transcriptElement = Find-ById $contentViewer "MediaTranscriptText"
     $viewerTranscript = $transcriptElement.GetCurrentPattern(
@@ -351,11 +354,43 @@ try {
     if ($ffmpegApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
         throw "FFmpeg approval was not reset after saving."
     }
+
+    $ffmpegStore = [DCx.Core.LocalModels.FfmpegBackendSelectionStore]::OpenAsync(
+        $dataRoot, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    $ffmpegState = $ffmpegStore.GetStateAsync([Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    if ($null -eq $ffmpegState.Backend) { throw "The native UI did not persist the approved FFmpeg binding." }
+    $null = $store.SetAsync($state.Backend, $true, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+
+    Set-Value $contentViewer "FilePathBox" $mp3Audio
+    Invoke-ById $contentViewer "OpenFileButton" | Out-Null
+    $transcribeButton = Wait-For {
+        $candidate = Find-ById $contentViewer "TranscribeWavButton"
+        if ($null -ne $candidate -and $candidate.Current.IsEnabled) { $candidate }
+    } "The admitted MP3 did not expose the local transcription action."
+    $transcribeButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $status = Find-ById $contentViewer "ContentStatusText"
+        $null -ne $status -and $status.Current.Name -like "Media transcription complete in *Media remains paused."
+    } "The approved FFmpeg-to-Whisper MP3 pipeline did not complete."
+    $mp3Transcript = (Find-ById $contentViewer "MediaTranscriptText").GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    if ($mp3Transcript -ne "DCx transcription fixture 42.") {
+        throw "The approved FFmpeg-to-Whisper MP3 pipeline returned an unexpected transcript."
+    }
+
     Invoke-ById $localModelsWindow "ClearFfmpegBackendButton" | Out-Null
     $null = Wait-For {
         $candidate = Find-ById $localModelsWindow "CurrentFfmpegBackend"
         $null -ne $candidate -and $candidate.Current.Name -eq "Media processor: none selected."
     } "The FFmpeg registration was not cleared."
+    Set-Value $contentViewer "FilePathBox" $mp3Audio
+    Invoke-ById $contentViewer "OpenFileButton" | Out-Null
+    Invoke-ById $contentViewer "TranscribeWavButton" | Out-Null
+    $null = Wait-For {
+        $status = Find-ById $contentViewer "ContentStatusText"
+        $null -ne $status -and $status.Current.Name -like "No local FFmpeg media processor is registered.*"
+    } "The admitted MP3 did not fail closed after FFmpeg registration was cleared."
+    $null = $store.ClearAsync([Threading.CancellationToken]::None).GetAwaiter().GetResult()
     if (-not (Test-Path -LiteralPath $fakeWhisper -PathType Leaf) -or
         -not (Test-Path -LiteralPath $ffmpegLicense -PathType Leaf)) {
         throw "Clearing FFmpeg registration deleted a source file."
@@ -381,6 +416,7 @@ try {
         download_or_install_action_exposed = $false
         production_adapter_transcript = $transcription.Text
         accessible_viewer_wav_transcript = $viewerTranscript
+        accessible_viewer_mp3_transcript = $mp3Transcript
         accessible_viewer_cancellation = $true
         canceled_partial_transcript_retained = $false
         cleared_backend_consumer_denied = $true
@@ -390,6 +426,8 @@ try {
         ffmpeg_real_windows_status = "NotSigned"
         ffmpeg_save_without_approval_denied = $true
         ffmpeg_source_files_preserved = $true
+        ffmpeg_whisper_mp3_pipeline = "pass"
+        cleared_ffmpeg_consumer_denied = $true
         transcript_focus_after_completion = $true
         cleared_registration = $true
         source_files_preserved = $true
@@ -404,6 +442,7 @@ try {
     "UI-approved production adapter transcript=$($transcription.Text)"
     "Accessible viewer WAV transcription and focus=PASS"
     "Accessible viewer WAV cancellation=PASS"
+    "Accessible viewer approved MP3 extraction and transcription=PASS"
     "Accessible FFmpeg exact-file/license/signature registration=PASS"
     "Clear registration preserves source files=PASS"
     "Whisper download/install action absent=PASS"

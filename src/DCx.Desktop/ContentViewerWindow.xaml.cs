@@ -19,6 +19,7 @@ public partial class ContentViewerWindow : Window
     private readonly MediaFrameDescriptionService _frameDescriptionService = new();
     private readonly LocalModelSelectionStore _localModelSelectionStore;
     private readonly WhisperBackendSelectionStore _whisperBackendSelectionStore;
+    private readonly FfmpegBackendSelectionStore _ffmpegBackendSelectionStore;
     private CancellationTokenSource? _frameDescriptionCancellation;
     private CancellationTokenSource? _webVideoCancellation;
     private CancellationTokenSource? _transcriptionCancellation;
@@ -26,12 +27,15 @@ public partial class ContentViewerWindow : Window
 
     public ContentViewerWindow(
         LocalModelSelectionStore localModelSelectionStore,
-        WhisperBackendSelectionStore whisperBackendSelectionStore)
+        WhisperBackendSelectionStore whisperBackendSelectionStore,
+        FfmpegBackendSelectionStore ffmpegBackendSelectionStore)
     {
         _localModelSelectionStore = localModelSelectionStore
             ?? throw new ArgumentNullException(nameof(localModelSelectionStore));
         _whisperBackendSelectionStore = whisperBackendSelectionStore
             ?? throw new ArgumentNullException(nameof(whisperBackendSelectionStore));
+        _ffmpegBackendSelectionStore = ffmpegBackendSelectionStore
+            ?? throw new ArgumentNullException(nameof(ffmpegBackendSelectionStore));
         InitializeComponent();
         Closed += (_, _) =>
         {
@@ -144,9 +148,7 @@ public partial class ContentViewerWindow : Window
         }
 
         var mediaNotice = admission.Kind is ContentKind.Audio or ContentKind.Video
-            ? IsCurrentWav()
-                ? " Media is paused until Play is activated. Approved local WAV transcription is available."
-                : " Media is paused until Play is activated. Direct transcription currently supports admitted WAV files only."
+            ? " Media is paused until Play is activated. Approved local media transcription is available after required backends are registered."
             : string.Empty;
         SetStatus($"Opened {Path.GetFileName(admission.CanonicalPath)} as {admission.Kind}.{mediaNotice}");
     }
@@ -217,7 +219,7 @@ public partial class ContentViewerWindow : Window
 
     private async void OnTranscribeWavClick(object sender, RoutedEventArgs e)
     {
-        if (!IsCurrentWav() || _currentMediaPath is null) return;
+        if (!IsCurrentTranscribableMedia() || _currentMediaPath is null) return;
         MediaViewer.Pause();
         _transcriptionCancellation?.Cancel();
         var operation = new CancellationTokenSource();
@@ -234,35 +236,54 @@ public partial class ContentViewerWindow : Window
                 return;
             }
 
-            SetStatus("Media paused. The approved local Whisper backend is transcribing the selected WAV. Cancel transcription remains available.");
             var transcriber = binding.CreateTranscriber(TimeSpan.FromMinutes(10));
-            var result = await transcriber.TranscribeWavAsync(_currentMediaPath, cancellationToken: operation.Token);
+            WhisperTranscriptionResult result;
+            if (IsCurrentWav())
+            {
+                SetStatus("Media paused. The approved local Whisper backend is transcribing the selected WAV. Cancel transcription remains available.");
+                result = await transcriber.TranscribeWavAsync(_currentMediaPath, cancellationToken: operation.Token);
+            }
+            else
+            {
+                var ffmpegBinding = (await _ffmpegBackendSelectionStore.GetStateAsync(operation.Token)).Backend;
+                if (ffmpegBinding is null)
+                {
+                    SetStatus("No local FFmpeg media processor is registered. Open Local models, review its exact executable, complete license and signature evidence, then explicitly approve registration.");
+                    return;
+                }
+
+                SetStatus("Media paused. The approved local media processor is extracting bounded WAV audio. Cancel transcription remains available.");
+                var processor = ffmpegBinding.CreateProcessor(TimeSpan.FromMinutes(10));
+                await using var extracted = await processor.ExtractWaveAsync(_currentMediaPath, operation.Token);
+                SetStatus("Media paused. Audio extraction completed. The approved local Whisper backend is transcribing it. Cancel transcription remains available.");
+                result = await transcriber.TranscribeWavAsync(extracted.Path, cancellationToken: operation.Token);
+            }
             MediaTranscriptText.Text = result.Text;
             var workingSet = result.PeakWorkingSetBytes is > 0
                 ? $" Peak working set {result.PeakWorkingSetBytes.Value / 1024d / 1024d:0.0} MiB."
                 : " Peak working set was unavailable for this process duration.";
-            SetStatus($"WAV transcription complete in {result.Elapsed.TotalSeconds:0.###} seconds.{workingSet} Media remains paused.");
+            SetStatus($"Media transcription complete in {result.Elapsed.TotalSeconds:0.###} seconds.{workingSet} Media remains paused.");
             MediaTranscriptText.Focus();
         }
         catch (OperationCanceledException)
         {
             if (ReferenceEquals(_transcriptionCancellation, operation))
-                SetStatus("WAV transcription canceled. Media remains paused and no partial transcript was retained.");
+                SetStatus("Media transcription canceled. Media remains paused and no partial transcript was retained.");
         }
         catch (TimeoutException)
         {
             if (ReferenceEquals(_transcriptionCancellation, operation))
-                SetStatus("WAV transcription exceeded its approved time limit and was stopped. Media remains paused.");
+                SetStatus("Media transcription exceeded its approved time limit and was stopped. Media remains paused.");
         }
         catch (ArgumentException)
         {
             if (ReferenceEquals(_transcriptionCancellation, operation))
-                SetStatus("WAV transcription was blocked because a selected file or approved binding is invalid. Media remains paused.");
+                SetStatus("Media transcription was blocked because a selected file or approved binding is invalid. Media remains paused.");
         }
         catch
         {
             if (ReferenceEquals(_transcriptionCancellation, operation))
-                SetStatus("WAV transcription failed safely without exposing process diagnostics. Review the exact approved backend files. Media remains paused.");
+                SetStatus("Media transcription failed safely without exposing process diagnostics. Review the exact approved backend files. Media remains paused.");
         }
         finally
         {
@@ -280,7 +301,7 @@ public partial class ContentViewerWindow : Window
         if (_transcriptionCancellation is null) return;
         _transcriptionCancellation.Cancel();
         CancelTranscriptionButton.IsEnabled = false;
-        SetStatus("Canceling local WAV transcription. Media remains paused.");
+        SetStatus("Canceling local media transcription. Media remains paused.");
     }
 
     private async void OnDescribeFrameClick(object sender, RoutedEventArgs e)
@@ -291,7 +312,7 @@ public partial class ContentViewerWindow : Window
         _frameDescriptionCancellation?.Cancel();
         _frameDescriptionCancellation?.Dispose();
         _frameDescriptionCancellation = new CancellationTokenSource();
-        SetStatus("Media paused. Checking the approved local vision-model selection.");
+        SetStatus("Media paused. Checking the approved local vision-model and media-processor selections.");
         try
         {
             var binding = (await _localModelSelectionStore.GetStateAsync(
@@ -302,10 +323,19 @@ public partial class ContentViewerWindow : Window
                 return;
             }
 
-            SetStatus("Media paused. The approved local vision model is describing the current frame.");
+            var ffmpegBinding = (await _ffmpegBackendSelectionStore.GetStateAsync(
+                _frameDescriptionCancellation.Token)).Backend;
+            if (ffmpegBinding is null)
+            {
+                SetStatus("No local FFmpeg media processor is registered. Open Local models, review its exact executable, complete license and signature evidence, then explicitly approve registration.");
+                return;
+            }
+
+            SetStatus("Media paused. The approved media processor is capturing the current frame for the approved local vision model.");
             var result = await _frameDescriptionService.DescribeAsync(
                 MediaViewer.Source.LocalPath,
                 MediaViewer.Position,
+                ffmpegBinding,
                 binding.Name,
                 binding.Digest,
                 binding.LicenseSha256,
@@ -436,9 +466,15 @@ public partial class ContentViewerWindow : Window
         _currentMediaPath is not null &&
         string.Equals(Path.GetExtension(_currentMediaPath), ".wav", StringComparison.OrdinalIgnoreCase);
 
+    private bool IsCurrentTranscribableMedia() =>
+        _currentMediaPath is not null && Path.GetExtension(_currentMediaPath) is var extension &&
+        (string.Equals(extension, ".wav", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(extension, ".mp3", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(extension, ".mp4", StringComparison.OrdinalIgnoreCase));
+
     private void UpdateTranscriptionControls()
     {
-        TranscribeWavButton.IsEnabled = _transcriptionCancellation is null && IsCurrentWav();
+        TranscribeWavButton.IsEnabled = _transcriptionCancellation is null && IsCurrentTranscribableMedia();
         CancelTranscriptionButton.IsEnabled = _transcriptionCancellation is not null;
     }
 

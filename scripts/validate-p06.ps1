@@ -56,6 +56,8 @@ try {
         $whisperRegistrationEvidence.cleared_backend_consumer_denied -ne $true -or
         $whisperRegistrationEvidence.ffmpeg_registration_native_uia -ne "pass" -or
         $whisperRegistrationEvidence.ffmpeg_real_windows_status -ne "NotSigned" -or
+        $whisperRegistrationEvidence.ffmpeg_whisper_mp3_pipeline -ne "pass" -or
+        $whisperRegistrationEvidence.cleared_ffmpeg_consumer_denied -ne $true -or
         $whisperRegistrationEvidence.transcript_focus_after_completion -ne $true -or
         $whisperRegistrationEvidence.download_or_install_action_exposed -ne $false -or
         $whisperRegistrationEvidence.source_files_preserved -ne $true -or
@@ -264,6 +266,9 @@ $manifest = [ordered]@{
     whisper_registration_complete_licenses_exposed = $true
     whisper_registration_download_or_install_action_exposed = $false
     whisper_registration_source_files_preserved_after_clear = $true
+    ffmpeg_registration_native_uia_passed = $true
+    ffmpeg_whisper_mp3_pipeline_passed = $true
+    cleared_ffmpeg_consumer_denied = $true
     whisper_registration_evidence = $whisperRegistrationEvidencePath
     local_model_contract_tests = $localModelTestsPassed
     model_unload_verified = $unloaded
@@ -290,6 +295,7 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Accessible already-installed Whisper registration and complete-license review=PASS"
 "Whisper registration defaults unchecked and exposes no download/install action=PASS"
 "Whisper registration clear preserves all source files=PASS"
+"Approved FFmpeg-to-Whisper MP3 pipeline and cleared-binding denial=PASS"
 "Bounded Ollama embedding adapter fixture=PASS"
 "Ollama redirect/cookie/proxy denial and response-origin validation=PASS"
 "Low-resource and local-first fallback tests=PASS"

@@ -1076,7 +1076,8 @@ public partial class MainWindow : Window
         {
             _contentViewerWindow = new ContentViewerWindow(
                 await GetLocalModelSelectionStoreAsync(),
-                await GetWhisperBackendSelectionStoreAsync())
+                await GetWhisperBackendSelectionStoreAsync(),
+                await GetFfmpegBackendSelectionStoreAsync())
             {
                 Owner = this,
             };
