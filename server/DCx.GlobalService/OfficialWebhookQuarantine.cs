@@ -50,8 +50,89 @@ public sealed partial class DurableCareRepository
             DateTimeOffset now,
             CancellationToken cancellationToken = default)
     {
-        var nowUtc = now.ToUniversalTime();
         await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        return await ReadWebhookQuarantineHealthAsync(
+                connection, now.ToUniversalTime(), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    internal async Task<CareOperationsProcessResult>
+        ProcessReviewedOfficialWebhookQuarantineAsync(
+            CareOperationsHealth reviewedHealth,
+            bool explicitlyApproved,
+            bool processingCapabilityEnabled,
+            DateTimeOffset now,
+            int limit = CareOperationsPolicy.MaximumProcessBatch,
+            CancellationToken cancellationToken = default)
+    {
+        CareOperationsPolicy.RequireHealth(reviewedHealth);
+        if (!explicitlyApproved)
+        {
+            throw new InvalidOperationException(
+                "Explicit approval is required to process verified CARE events.");
+        }
+
+        if (!processingCapabilityEnabled)
+        {
+            throw new InvalidOperationException(
+                "CARE verified-event processing capability is disabled.");
+        }
+
+        if (limit is < 1 or > CareOperationsPolicy.MaximumProcessBatch)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit));
+        }
+
+        var nowUtc = now.ToUniversalTime();
+        await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var currentHealth = DurableCareOperationsSource.ToCareOperationsHealth(
+                await ReadWebhookQuarantineHealthAsync(connection, nowUtc, cancellationToken)
+                    .ConfigureAwait(false),
+                processingCapabilityEnabled);
+            if (currentHealth != reviewedHealth)
+            {
+                throw new InvalidOperationException(
+                    "The reviewed CARE operations state changed before processing.");
+            }
+
+            if (!currentHealth.CanProcessDue)
+            {
+                throw new InvalidOperationException(
+                    "The reviewed CARE operations state has no processable events.");
+            }
+
+            var summary = await ReprocessQuarantinedOfficialWebhooksLockedAsync(
+                    connection, nowUtc, limit, cancellationToken)
+                .ConfigureAwait(false);
+            var resultingHealth = DurableCareOperationsSource.ToCareOperationsHealth(
+                await ReadWebhookQuarantineHealthAsync(connection, nowUtc, cancellationToken)
+                    .ConfigureAwait(false),
+                processingCapabilityEnabled);
+            var result = new CareOperationsProcessResult(
+                summary.Scanned,
+                summary.Completed,
+                summary.StillPending,
+                summary.Blocked,
+                ProviderCalls: 0,
+                resultingHealth);
+            CareOperationsPolicy.RequireProcessResult(result);
+            return result;
+        }
+        finally
+        {
+            mutationLock.Release();
+        }
+    }
+
+    private static async Task<WebhookQuarantineHealthSnapshot>
+        ReadWebhookQuarantineHealthAsync(
+            SqliteConnection connection,
+            DateTimeOffset nowUtc,
+            CancellationToken cancellationToken)
+    {
         var command = connection.CreateCommand();
         command.CommandText = """
             SELECT
@@ -131,8 +212,25 @@ public sealed partial class DurableCareRepository
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-            var command = connection.CreateCommand();
-            command.CommandText = """
+            return await ReprocessQuarantinedOfficialWebhooksLockedAsync(
+                    connection, nowUtc, limit, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            mutationLock.Release();
+        }
+    }
+
+    private static async Task<WebhookQuarantineReprocessSummary>
+        ReprocessQuarantinedOfficialWebhooksLockedAsync(
+            SqliteConnection connection,
+            DateTimeOffset nowUtc,
+            int limit,
+            CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = """
                 SELECT event_id
                 FROM webhook_event_quarantine
                 WHERE state = 'pending' AND next_attempt_utc <= $now
@@ -142,128 +240,123 @@ public sealed partial class DurableCareRepository
                     event_id
                 LIMIT $limit;
                 """;
-            command.Parameters.AddWithValue("$now", nowUtc.ToString("O"));
-            command.Parameters.AddWithValue("$limit", limit);
-            var eventIds = new List<string>();
-            await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
-            {
-                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-                {
-                    eventIds.Add(reader.GetString(0));
-                }
-            }
-
-            var completed = 0;
-            var stillPending = 0;
-            var blocked = 0;
-            foreach (var eventId in eventIds)
-            {
-                await using var transaction = await connection.BeginTransactionAsync(cancellationToken)
-                    .ConfigureAwait(false);
-                var sqliteTransaction = (SqliteTransaction)transaction;
-                var record = await ReadWebhookQuarantineAsync(
-                        connection, sqliteTransaction, eventId, cancellationToken)
-                    .ConfigureAwait(false);
-                if (record is null || record.State != "pending" ||
-                    record.NextAttemptUtc is null || record.NextAttemptUtc > nowUtc)
-                {
-                    await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
-                    continue;
-                }
-
-                ValidateWebhookQuarantineRecord(record);
-                var existing = await ReadWebhookAsync(
-                        connection,
-                        sqliteTransaction,
-                        record.EventId,
-                        record.TransmissionId,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                if (existing is not null)
-                {
-                    if (existing.EventId == record.EventId &&
-                        existing.TransmissionId == record.TransmissionId &&
-                        string.Equals(existing.PayloadSha256, record.PayloadSha256, StringComparison.Ordinal))
-                    {
-                        await MarkWebhookQuarantineCompletedAsync(
-                                connection, sqliteTransaction, record, nowUtc, cancellationToken)
-                            .ConfigureAwait(false);
-                        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-                        completed++;
-                        continue;
-                    }
-
-                    await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
-                    await MarkWebhookQuarantineFailureAsync(
-                            connection,
-                            record,
-                            "paypal_sandbox_quarantine_identity_conflict",
-                            keepPending: false,
-                            nowUtc,
-                            cancellationToken)
-                        .ConfigureAwait(false);
-                    blocked++;
-                    continue;
-                }
-
-                var verified = ToVerifiedWebhook(record);
-                PayPalSandboxWebhookEvent? normalized = null;
-                string? failureCode = null;
-                try
-                {
-                    normalized = await NormalizeOfficialWebhookAsync(
-                            connection,
-                            sqliteTransaction,
-                            verified,
-                            record.ExpectedPlanId,
-                            cancellationToken)
-                        .ConfigureAwait(false);
-                }
-                catch (PayPalSandboxException exception)
-                {
-                    failureCode = exception.Code;
-                }
-
-                if (failureCode is not null)
-                {
-                    await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
-                    var keepPending = IsQuarantinableWebhookDependency(failureCode);
-                    await MarkWebhookQuarantineFailureAsync(
-                            connection,
-                            record,
-                            keepPending
-                                ? failureCode
-                                : "paypal_sandbox_quarantine_reprocess_blocked",
-                            keepPending,
-                            nowUtc,
-                            cancellationToken)
-                        .ConfigureAwait(false);
-                    if (keepPending) stillPending++;
-                    else blocked++;
-                    continue;
-                }
-
-                await ApplyNormalizedWebhookAsync(
-                        connection,
-                        sqliteTransaction,
-                        normalized!,
-                        record.PayloadSha256,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                await MarkWebhookQuarantineCompletedAsync(
-                        connection, sqliteTransaction, record, nowUtc, cancellationToken)
-                    .ConfigureAwait(false);
-                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-                completed++;
-            }
-
-            return new WebhookQuarantineReprocessSummary(
-                eventIds.Count, completed, stillPending, blocked);
-        }
-        finally
+        command.Parameters.AddWithValue("$now", nowUtc.ToString("O"));
+        command.Parameters.AddWithValue("$limit", limit);
+        var eventIds = new List<string>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
-            mutationLock.Release();
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                eventIds.Add(reader.GetString(0));
+            }
         }
+
+        var completed = 0;
+        var stillPending = 0;
+        var blocked = 0;
+        foreach (var eventId in eventIds)
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken)
+                .ConfigureAwait(false);
+            var sqliteTransaction = (SqliteTransaction)transaction;
+            var record = await ReadWebhookQuarantineAsync(
+                    connection, sqliteTransaction, eventId, cancellationToken)
+                .ConfigureAwait(false);
+            if (record is null || record.State != "pending" ||
+                record.NextAttemptUtc is null || record.NextAttemptUtc > nowUtc)
+            {
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            ValidateWebhookQuarantineRecord(record);
+            var existing = await ReadWebhookAsync(
+                    connection,
+                    sqliteTransaction,
+                    record.EventId,
+                    record.TransmissionId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (existing is not null)
+            {
+                if (existing.EventId == record.EventId &&
+                    existing.TransmissionId == record.TransmissionId &&
+                    string.Equals(existing.PayloadSha256, record.PayloadSha256, StringComparison.Ordinal))
+                {
+                    await MarkWebhookQuarantineCompletedAsync(
+                            connection, sqliteTransaction, record, nowUtc, cancellationToken)
+                        .ConfigureAwait(false);
+                    await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                    completed++;
+                    continue;
+                }
+
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                await MarkWebhookQuarantineFailureAsync(
+                        connection,
+                        record,
+                        "paypal_sandbox_quarantine_identity_conflict",
+                        keepPending: false,
+                        nowUtc,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                blocked++;
+                continue;
+            }
+
+            var verified = ToVerifiedWebhook(record);
+            PayPalSandboxWebhookEvent? normalized = null;
+            string? failureCode = null;
+            try
+            {
+                normalized = await NormalizeOfficialWebhookAsync(
+                        connection,
+                        sqliteTransaction,
+                        verified,
+                        record.ExpectedPlanId,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (PayPalSandboxException exception)
+            {
+                failureCode = exception.Code;
+            }
+
+            if (failureCode is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                var keepPending = IsQuarantinableWebhookDependency(failureCode);
+                await MarkWebhookQuarantineFailureAsync(
+                        connection,
+                        record,
+                        keepPending
+                            ? failureCode
+                            : "paypal_sandbox_quarantine_reprocess_blocked",
+                        keepPending,
+                        nowUtc,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (keepPending) stillPending++;
+                else blocked++;
+                continue;
+            }
+
+            await ApplyNormalizedWebhookAsync(
+                    connection,
+                    sqliteTransaction,
+                    normalized!,
+                    record.PayloadSha256,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await MarkWebhookQuarantineCompletedAsync(
+                    connection, sqliteTransaction, record, nowUtc, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            completed++;
+        }
+
+        return new WebhookQuarantineReprocessSummary(
+            completed + stillPending + blocked, completed, stillPending, blocked);
     }
 
     private static async Task ApplyNormalizedWebhookAsync(

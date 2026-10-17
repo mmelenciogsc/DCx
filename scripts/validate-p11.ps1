@@ -60,6 +60,7 @@ try {
     "Privacy-minimized aggregate quarantine health and operator-action state=PASS"
     "Provider-neutral CARE operations contract and unavailable production default=PASS"
     "Accessible fixture-only bounded CARE operations review and approval=PASS"
+    "Durable CARE operations exact-review approval capability and concurrent-replay gates=PASS"
     "Quarantine reprocessing provider calls=0"
     "Malformed/unverified event denial before ledger mutation=PASS"
     "Stable PayPal request ID and sender batch retry fixture=PASS"

@@ -38,6 +38,164 @@ public sealed class PayPalSandboxHttpAdapterTests
     }
 
     [Fact]
+    public async Task DurableOperationsSource_DefaultCapabilityDeniesDueProcessing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"dcx-care-operations-disabled-{Guid.NewGuid():N}");
+        try
+        {
+            var handler = VerifiedWebhookHandler();
+            using var adapter = Adapter(handler);
+            var repository = await DurableCareRepository.OpenAsync(root);
+            var received = DateTimeOffset.Parse("2026-10-18T01:00:00Z");
+            var payment = OfficialWebhook(
+                "WH-OPERATIONS-DISABLED",
+                "PAYMENT.SALE.COMPLETED",
+                "sale",
+                "{\"id\":\"SALE-OPERATIONS-DISABLED\",\"state\":\"completed\",\"billing_agreement_id\":\"I-OPERATIONS\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}");
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter,
+                Evidence("transmission:operations-disabled"),
+                payment,
+                "P-DCX300",
+                received));
+            var source = new DurableCareOperationsSource(
+                repository,
+                timeProvider: new FixedTimeProvider(received));
+
+            var health = await source.RefreshAsync();
+
+            Assert.Equal("retry_due", health.StatusCode);
+            Assert.Equal(1, health.Due);
+            Assert.False(health.CanProcessDue);
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                source.ProcessDueAsync(health, explicitlyApproved: true));
+            Assert.Contains("capability is disabled", error.Message, StringComparison.Ordinal);
+            Assert.Equal(0, (await repository.GetOfficialWebhookQuarantineAsync(
+                "WH-OPERATIONS-DISABLED"))!.AttemptCount);
+            Assert.Equal(0, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.Equal(2, handler.Calls);
+        }
+        finally
+        {
+            TestDirectory.DeleteIfExists(root);
+        }
+    }
+
+    [Fact]
+    public async Task DurableOperationsSource_RequiresApprovalAndExactReviewThenReplaysLocallyOnce()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"dcx-care-operations-reviewed-{Guid.NewGuid():N}");
+        try
+        {
+            var handler = VerifiedWebhookHandler();
+            using var adapter = Adapter(handler);
+            var repository = await DurableCareRepository.OpenAsync(root);
+            const string planId = "P-DCX300";
+            var received = DateTimeOffset.Parse("2026-10-18T02:00:00Z");
+            var firstPayment = OfficialWebhook(
+                "WH-OPERATIONS-FIRST",
+                "PAYMENT.SALE.COMPLETED",
+                "sale",
+                "{\"id\":\"SALE-OPERATIONS-FIRST\",\"state\":\"completed\",\"billing_agreement_id\":\"I-OPERATIONS\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}");
+            var secondPayment = OfficialWebhook(
+                "WH-OPERATIONS-SECOND",
+                "PAYMENT.SALE.COMPLETED",
+                "sale",
+                "{\"id\":\"SALE-OPERATIONS-SECOND\",\"state\":\"completed\",\"billing_agreement_id\":\"I-OPERATIONS\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}");
+            var activation = OfficialWebhook(
+                "WH-OPERATIONS-ACTIVE",
+                "BILLING.SUBSCRIPTION.ACTIVATED",
+                "subscription",
+                "{\"id\":\"I-OPERATIONS\",\"plan_id\":\"P-DCX300\",\"status\":\"ACTIVE\"}");
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter,
+                Evidence("transmission:operations-first"),
+                firstPayment,
+                planId,
+                received));
+            var source = new DurableCareOperationsSource(
+                repository,
+                processingCapabilityEnabled: true,
+                timeProvider: new FixedTimeProvider(received));
+            var firstReview = await source.RefreshAsync();
+            Assert.True(firstReview.CanProcessDue);
+
+            var approvalError = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                source.ProcessDueAsync(firstReview, explicitlyApproved: false));
+            Assert.Contains("Explicit approval", approvalError.Message, StringComparison.Ordinal);
+            Assert.Equal(0, (await repository.GetOfficialWebhookQuarantineAsync(
+                "WH-OPERATIONS-FIRST"))!.AttemptCount);
+
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter,
+                Evidence("transmission:operations-second"),
+                secondPayment,
+                planId,
+                received));
+            var staleError = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                source.ProcessDueAsync(firstReview, explicitlyApproved: true));
+            Assert.Contains("state changed", staleError.Message, StringComparison.Ordinal);
+            Assert.Equal(0, (await repository.GetOfficialWebhookQuarantineAsync(
+                "WH-OPERATIONS-FIRST"))!.AttemptCount);
+            Assert.Equal(0, (await repository.GetOfficialWebhookQuarantineAsync(
+                "WH-OPERATIONS-SECOND"))!.AttemptCount);
+
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter,
+                Evidence("transmission:operations-active"),
+                activation,
+                planId,
+                received));
+            Assert.Equal(6, handler.Calls);
+            var exactReview = await source.RefreshAsync();
+            var concurrentAttempts = new[]
+            {
+                source.ProcessDueAsync(exactReview, explicitlyApproved: true),
+                source.ProcessDueAsync(exactReview, explicitlyApproved: true),
+            };
+            var successes = new List<CareOperationsProcessResult>();
+            var failures = new List<InvalidOperationException>();
+            foreach (var attempt in concurrentAttempts)
+            {
+                try
+                {
+                    successes.Add(await attempt);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    failures.Add(exception);
+                }
+            }
+
+            var result = Assert.Single(successes);
+            Assert.Contains(
+                "state changed",
+                Assert.Single(failures).Message,
+                StringComparison.Ordinal);
+
+            Assert.Equal(2, result.Scanned);
+            Assert.Equal(2, result.Completed);
+            Assert.Equal(0, result.StillPending);
+            Assert.Equal(0, result.Blocked);
+            Assert.Equal(0, result.ProviderCalls);
+            Assert.Equal("clear", result.Health.StatusCode);
+            Assert.False(result.Health.CanProcessDue);
+            Assert.Equal(600, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.Equal(6, handler.Calls);
+
+            var replayError = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                source.ProcessDueAsync(exactReview, explicitlyApproved: true));
+            Assert.Contains("state changed", replayError.Message, StringComparison.Ordinal);
+            Assert.Equal(600, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.Equal(6, handler.Calls);
+        }
+        finally
+        {
+            TestDirectory.DeleteIfExists(root);
+        }
+    }
+
+    [Fact]
     public async Task VerifyWebhook_UsesOfficialSandboxContractAndExactEventObject()
     {
         var calls = 0;
@@ -1108,10 +1266,10 @@ public sealed class PayPalSandboxHttpAdapterTests
         HttpRequestMessage request,
         HttpStatusCode status,
         string body) => new(status)
-    {
-        RequestMessage = request,
-        Content = new StringContent(body, Encoding.UTF8, "application/json"),
-    };
+        {
+            RequestMessage = request,
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        };
 
     private sealed class StaticCredentialSource : IPayPalSandboxCredentialSource
     {
@@ -1174,6 +1332,11 @@ public sealed class PayPalSandboxHttpAdapterTests
             HttpRequestMessage request,
             CancellationToken cancellationToken) =>
             send(Interlocked.Increment(ref calls) - 1, request, cancellationToken);
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 
     private sealed class CancellationHandler : HttpMessageHandler
