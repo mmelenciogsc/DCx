@@ -1,7 +1,7 @@
 # P10 — Contributions, governance and provenance
 
 - Status: BLOCKED (local server-side CCB orchestration and hostile-code policy pass; production publication remains unavailable)
-- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`
+- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`
 - Documentation commit: recorded by the commit containing this file
 
 No contribution was sent externally or published to a production catalog.
@@ -28,6 +28,7 @@ No contribution was sent externally or published to a production catalog.
 - Accepted ZIPs enter a digest-addressed quarantine. Approval rereads and rehashes the exact artifact, safely extracts only admitted files into an ephemeral workspace, recomputes its canonical digest and sends every declared test to the injected server-side sandbox executor.
 - Each result must cryptographically bind policy, artifact, workspace, test suite, launcher, backend, runtime and output. Minimized evidence hashes/codes are persisted without request or output bodies. A failed test, output mismatch, changed package, forged binding or missing executor prevents publication.
 - Only after every test passes is the original digest-verified ZIP added to the P09 artifact store and referenced by a signed global release. A replica test verifies signed synchronization and lazy byte-identical artifact retrieval.
+- Approval and withdrawal use digest-derived stable publication-operation IDs. The registry atomically binds each ID to the canonical change set and release; a retry after the registry commit but before governance-state update returns the original release instead of appending a duplicate.
 
 ## Reproduction
 
@@ -40,8 +41,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 ## Measured result
 
 - Locked native Release build: 0 warnings, 0 errors; 1.23 seconds in the recorded dedicated run.
-- P10 tests: passed 18, failed 0, skipped 0; 993 ms in the recorded native gate.
-- Full suite: passed 161, failed 0, skipped 0; about 1 second.
+- P10 tests: passed 19, failed 0, skipped 0; about 1 second in the recorded native gate.
+- Full suite: passed 163, failed 0, skipped 0; about 1 second.
 - Eligible CKB item: quarantined, absent from catalog before review, approved into a signed release, synchronized by a client, then withdrawn/deprecated.
 - Secret/PII/dummy item: remained quarantined and reviewer publication failed closed.
 - Receipt: one qualified event; replay, contributor self-use and invalid integrity excluded.
@@ -49,9 +50,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - WSL-hosted Ubuntu local simulation: Bubblewrap 0.6.1 SHA-256 `bf6cf3d4456665f5d80c14eb79a76e0ce87b39a0883e614a161658b4ec33492c`; static BusyBox SHA-256 `b3c1009e1b5c927e537487c80639cdf404f69e3eb49371d9be5d841672be3ff9`.
 - Benign transformation passed. Host/repository and `/etc`/`/usr` reads, an external network request, root write, inherited secret environment, outside-quarantine workspace, symlink, workspace-digest substitution, timeout and output overflow were denied.
 - Evidence: `artifacts/test-results/p10-dd1f4845e5854d1bb060280d6a66ffa0/sandbox-evidence.json` (generated and intentionally not committed).
-- Latest orchestration-era hostile evidence: `artifacts/test-results/p10-d864befaa5f6473e9964e98943f49e51/sandbox-evidence.json` (generated and intentionally not committed).
+- Latest orchestration-era hostile evidence: `artifacts/test-results/p10-8a9a316263d34dfc8c5f9f325bb2ceee/sandbox-evidence.json` (generated and intentionally not committed).
 - Schema-v2 success path executed two declared tests, persisted two passing evidence rows, published the exact artifact into a signed release, synchronized it to a separate global replica and lazily retrieved byte-identical content.
 - Denial coverage includes missing executor, package/digest/metadata mismatch, undeclared files/fields, invalid UTF-8/base64/null input, malicious entrypoint or test-input text, expected-output mismatch and post-intake quarantine tampering.
+- Cross-database crash simulations pre-commit approval and withdrawal releases, then verify governance retries reuse sequences 1 and 2 and synchronize one correctly deprecated resource rather than producing duplicate releases.
 
 ## Changed files in the latest milestone
 
@@ -70,6 +72,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - Docker/Compose remains unavailable as recorded in P09. Production CCB publication must remain unavailable until approved Ubuntu 24.04 deployment, authenticated intake/reviewer APIs, the remaining isolation controls and external security gates pass.
 - Regex scanners are defense-in-depth, not a guarantee that content lacks secrets/PII or that the contributor owns it. Human/policy review remains mandatory.
 - An HMAC proves receipt integrity/installation association, not that an untrusted customer device reported honest usage. Server anomaly analysis, audit sampling and entitlement/account correlation remain required.
-- The simulation publishes to the registry and then updates governance state across separate SQLite databases. Production requires an idempotent transactional outbox/reconciliation design.
+- The registry release and operation record are atomic, and explicit governance retries safely reconcile the remaining cross-database state update. No automatic recovery worker currently enumerates and retries stalled quarantine/approval rows after a process crash.
 - The current approval lock is held while tests execute, serializing governance mutations; production requires a durable queued worker/lease model before concurrent hostile workloads.
 - Human JAWS/NVDA/Narrator testing remains unverified; see `docs/accessibility/P10_CONTRIBUTION_CHECKLIST.md`.

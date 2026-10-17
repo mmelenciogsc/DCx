@@ -1,7 +1,7 @@
 # P09 — Global registry and synchronization
 
 - Status: BLOCKED (native process/HTTP simulation passes; required Docker Compose execution unavailable)
-- Partial implementation commits: `1be3f9e`, `b1608cd`
+- Partial implementation commits: `1be3f9e`, `b1608cd`, `9123a81`
 - Documentation commit: recorded by the commit containing this file
 
 No connection or deployment to the owner's Ubuntu server was attempted.
@@ -20,6 +20,7 @@ No connection or deployment to the owner's Ubuntu server was attempted.
 - Durable authoritative trust-policy history and bounded HTTP descriptor/chunk endpoints; clients catch up every missed revision and verify the complete hash-linked policy chain before releases.
 - Policy replay/conflict and unauthorized old-key releases fail closed. Rollback candidates are fully verified under the current policy before the active pointer changes.
 - Read-only hardened Compose definition, non-root container, loopback host port, no-new-privileges, excluded secrets/build artifacts and externally supplied signing key.
+- Atomic publication-operation records bind a stable operation ID to the canonical ordered change-set digest and signed release sequence. An identical retry after repository reopen returns the original descriptor; reuse with changed content fails closed.
 
 ## Reproduction
 
@@ -32,8 +33,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 ## Measured result
 
 - Locked restore and native Release build passed with 0 warnings/errors.
-- P09 filtered tests: passed 8, failed 0, skipped 0; 951 ms in the recorded validation.
-- Current full suite after P10 package-orchestration hardening: passed 161, failed 0, skipped 0; about 1 second.
+- P09 filtered tests: passed 9, failed 0, skipped 0; about 1 second in the recorded validation.
+- Current full suite after contribution publication-retry hardening: passed 163, failed 0, skipped 0; about 1 second.
 - A real child Kestrel process served three chained trust-policy revisions and a signed SQLite-backed release over loopback HTTP; a fresh production client transport caught up all revisions, synchronized and searched it.
 - Two distinct client roots synchronized the same chain; the P08 private sentinel remained present and absent from global results.
 - Wrong-key release activation was rejected with no active pointer.
@@ -41,6 +42,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - A rollback to a generation invalidated by an emergency revocation was rejected before pointer replacement, leaving the active sequence usable across reopen.
 - A transfer interrupted after its first 64 KiB chunk resumed at a nonzero offset and downloaded fewer bytes on retry than the full release.
 - Lazy 150,000-byte artifact retrieval, deprecation, offline search and explicit rollback passed.
+- Publication retry used reordered equivalent changes and a later timestamp after repository reopen, returned the byte-identical original descriptor and kept the chain at sequence 1; a changed request under the same operation ID was rejected.
+- Latest storage evidence: `artifacts/test-results/p09-ddf3db708412445b969ddeb2bfa202ee/storage-forecast.json` (generated and intentionally not committed).
 
 ## Measured storage/bandwidth fixture
 
