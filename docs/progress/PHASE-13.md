@@ -1,7 +1,7 @@
 # P13 — Packaging, security and reliability
 
 - Status: BLOCKED (substantial local reliability/release-staging checks pass; installer/signing/scanner/clean-VM/human-AT gates absent)
-- Implementation commits: `82452fe`, `3e9b172`, `1b32cdf`
+- Implementation commits: `82452fe`, `3e9b172`, `1b32cdf`, `26da605`
 - Documentation commit: recorded by the commit containing this file
 
 The generated ZIP is an unsigned framework-dependent staging artifact. It is not an installer or production release.
@@ -22,6 +22,11 @@ The generated ZIP is an unsigned framework-dependent staging artifact. It is not
 - Each local crash record has exactly six fields: schema version, UTC time, closed component category, closed error category, terminating flag and application version. Messages, stack traces, dumps, prompts, URLs, paths, keystrokes, accounts and user identifiers are structurally absent.
 - Reports remain under the per-user application-data root, reject reparse boundaries, use atomic bounded JSON writes and retain at most 20. There is no network transport.
 - A keyboard/UIA-accessible privacy dialog exposes the default-unchecked setting, exact data notice, retained count, explicit purge that preserves the current setting and opt-out that purges reports.
+- A strict controlled-update envelope canonically binds product identity, four-part MSIX version, issue/expiry times, HTTPS package URI, exact length/SHA-256, package identity and publisher. ECDSA P-256 verification is mandatory before policy or package retrieval.
+- Update admission rejects equal/downgrade versions, manifests issued over five minutes in the future or valid longer than 30 days, expired manifests, cross-origin packages, query/user-info/fragment-bearing URIs, non-MSIX paths and noncanonical/unknown JSON.
+- The hardened HTTP transport is HTTPS-only and exact-origin, disables redirects, cookies, decompression and proxies, requires reviewed manifest/package media types and enforces 64 KiB manifest and 1 GiB package ceilings while streaming.
+- Package staging requires exact byte length/digest plus an injected signature/identity/publisher/version verifier under the same no-write read lease. Reused files are reverified; roots/reparse points are rejected; only the verified package and exact signed manifest are atomically retained. Nothing invokes installation, elevation or package activation.
+- P13/P14 validators now emit TRX and fail unless exact selected counters prove every test passed. P14 uses its exact test namespace instead of a drifting substring match.
 
 ## Reproduction
 
@@ -33,33 +38,36 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 ## Measured result
 
-Recorded evidence directory: `artifacts/test-results/p13-527182fd8a264fbd94d4691bf8a22474/` (generated and intentionally not committed).
+Recorded evidence directory: `artifacts/test-results/p13-2511066658df448589787549037209bc/` (generated and intentionally not committed).
 
 - Locked Release build: 0 warnings, 0 errors.
-- Reliability tests: passed 18, failed 0, skipped 0.
-- Current full suite after P10 simulation API pressure hardening: passed 188, failed 0, skipped 0; about 8 seconds.
-- Publish trees: 42 files, 62,882,211 bytes each; no path/length/SHA-256 differences.
-- Reproducible staging ZIP SHA-256: `c1eaa197121418bae9f7830ca7b781aead3aee73c27d2b12ca5a6231fc526d46`.
+- Reliability tests: passed 23, failed 0, skipped 0; exact counters parsed from the retained TRX.
+- Current full suite after controlled-update admission hardening: passed 193, failed 0, skipped 0; about 8 seconds.
+- Publish trees: 42 files, 62,913,955 bytes each; no path/length/SHA-256 differences.
+- Reproducible staging ZIP SHA-256: `81b33853b7242764dcea1946fdecfba0a3bffa852f3c08192a4589ac49cb95b5`.
 - CycloneDX components: 7; third-party license records: 7.
 - Unexpected secret matches: 0; exact synthetic scanner-fixture matches: 2.
 - Authenticode: `NotSigned`.
-- Offline UIA heading: `DCx is ready offline`; startup 2,615 ms; working set 464.2 MiB under the provisional 1 GiB ceiling.
+- Offline UIA heading: `DCx is ready offline`; startup 2,142 ms; working set 464.3 MiB under the provisional 1 GiB ceiling.
 - Crash-diagnostics UIA heading: `Privacy and crash diagnostics`; consent defaulted unchecked, explicit opt-in persisted notice version 1, purge preserved enabled consent, opt-out disabled and purged, and network transfers remained zero.
 - Recovery UIA heading: `DCx backup and recovery`; main-app launcher, path input, create, default-unchecked approval, restore and assertive status are exposed.
 - Backup while main DCx held the lease was denied and wrote no archive. After main exit, backup and approved restore passed; restore without approval was denied; excluded synthetic WebView2 cookie data remained unchanged.
+- Five update-admission tests passed. They cover successful inert staging/reuse, wrong signing key, equal version, expiry, cross-origin package, malformed/noncanonical envelopes, invalid four-part versions, digest and package-trust failure, post-stage tampering, redirect/origin/media/size transport policy and exact package streaming. All update bytes and trust evidence were synthetic; no external request or installer action occurred.
 - Production actions: 0.
 
 ## Changed files in the latest milestone
 
-- Minimized local store and policy: `src/DCx.Core/Reliability/LocalCrashReportStore.cs`.
-- Non-suppressing exception hooks and accessible privacy surface: `src/DCx.Desktop/App.xaml.cs`, `src/DCx.Desktop/MainWindow.xaml`, `src/DCx.Desktop/MainWindow.xaml.cs`, `src/DCx.Desktop/CrashDiagnosticsWindow.xaml`, `src/DCx.Desktop/CrashDiagnosticsWindow.xaml.cs`.
-- Privacy, retention, purge and hostile-filesystem tests: `tests/DCx.Core.Tests/Reliability/LocalCrashReportStoreTests.cs`.
-- Native consent/purge evidence: `scripts/validate-p13.ps1`.
+- Canonical signed update policy: `src/DCx.Core/Reliability/ControlledUpdateManifest.cs`.
+- Exact-origin bounded HTTP source: `src/DCx.Core/Reliability/ControlledUpdateTransport.cs`.
+- Inert digest/trust-gated package staging: `src/DCx.Core/Reliability/ControlledUpdateStager.cs`.
+- Denial and reuse coverage: `tests/DCx.Core.Tests/Reliability/ControlledUpdateStagerTests.cs`.
+- Exact-counter release gates: `scripts/validate-p13.ps1`, `scripts/validate-p14.ps1`.
 
 ## Blockers and limits
 
 - `makeappx.exe`, `signtool.exe`, MSIXMgr and WiX are absent. No code-signing identity is available. Installing tooling or acquiring a certificate requires approval.
-- The staging ZIP requires the pinned .NET desktop runtime and WebView2 runtime and provides no install, update, uninstall or runtime bootstrap behavior.
+- The staging ZIP requires the pinned .NET desktop runtime and WebView2 runtime and provides no install, update activation, uninstall or runtime bootstrap behavior.
+- Controlled-update admission is an unwired core boundary. No production update origin/signing-root custody or rotation, real Windows MSIX/Authenticode package verifier, accessible update UI, scheduler, activation, restart coordination, installer integration or rollback exists. The package must be signature/digest/identity reverified again immediately before a future install; admission is not installation authority.
 - No supported vulnerability scanner is installed; SBOM/license generation is not a vulnerability result.
 - No clean Windows 11 VM installation/uninstallation/upgrade/rollback run occurred.
 - Live SQLite/WAL snapshotting is not claimed; the exclusive lease deliberately requires main DCx to be closed during backup and restore.

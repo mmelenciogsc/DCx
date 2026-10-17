@@ -129,6 +129,8 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - Crash capture is versioned-consent/default-off and records closed categories rather than exception content. Its six-field schema excludes messages, stacks, dumps, prompts, URLs, paths and identities; strict bounded atomic files remain local and retain at most 20.
 - UI, task and process exception hooks do not mark exceptions handled or alter runtime failure semantics. Recording failure is swallowed only at the optional diagnostic boundary so it cannot prevent normal startup or mask the original crash.
 - Accessible deletion preserves the current setting, while opt-out purges retained reports. No upload/export transport exists; local consent cannot authorize a future transfer.
+- Controlled update admission requires canonical ECDSA P-256 metadata before package retrieval, exact HTTPS origin with redirects/cookies/proxy/decompression disabled, newer bounded four-part versions, short validity, exact length/SHA-256 and matching injected package signature/identity/publisher/version evidence. Digest and package trust checks share a no-write read lease; reuses are reverified and the package remains inert.
+- The update core has only synthetic fixtures and is not wired to the application. It has no production signing-root custody/rotation, real MSIX/Authenticode verifier, activation, installer transaction or rollback. A future activation path must reverify the exact final file and pass signed clean-VM lifecycle gates.
 - These controls do not replace code signing, AV/vulnerability scans, clean-VM lifecycle testing or human assistive-technology acceptance.
 
 ## Implemented readiness controls through partial P14

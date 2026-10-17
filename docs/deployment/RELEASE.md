@@ -13,7 +13,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-p13.p
 
 The validator performs a locked Release build, reliability tests, two publish runs, path/length/SHA-256 comparison, two fixed-timestamp ZIP builds, CycloneDX and license inventory, repository and published-binary secret scans, Authenticode inspection, and a real offline WebView2/UIA startup. Generated evidence stays under ignored `artifacts/test-results/p13-*` directories.
 
-The output currently requires compatible .NET Desktop and Microsoft Edge WebView2 runtimes already installed. It has no bootstrapper, package identity, updater, uninstall registration or signature.
+The output currently requires compatible .NET Desktop and Microsoft Edge WebView2 runtimes already installed. It has no bootstrapper, package identity, wired updater/activation, uninstall registration or signature.
+
+## Controlled update admission boundary
+
+The core now admits an inert update only after verifying a canonical ECDSA P-256 manifest, a newer four-part MSIX version, a short validity window, an exact-origin HTTPS package, byte length/SHA-256 and injected package signature/identity/publisher/version evidence. The HTTP adapter refuses redirects, cookies, proxies, automatic decompression, unreviewed media types and oversized responses. Staged bytes are never executed or installed.
+
+Tests use an ephemeral manifest key, synthetic package bytes, an in-memory package-trust verifier and a non-network HTTP handler. There is no production feed, protected signing root/rotation, real Windows package-trust adapter, user-facing update control, activation or rollback. A future installer must reverify the final package immediately before activation; this admission record is not enduring install authority.
 
 ## Backup and restore constraint
 

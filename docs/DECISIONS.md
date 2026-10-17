@@ -21,5 +21,6 @@
 | [0017](architecture/adr/0017-minimized-publication-retry-dead-letter.md) | Retry immutable publication intents with bounded, body-free failure state | Accepted for local simulation | 2026-10-17 |
 | [0018](architecture/adr/0018-durable-pre-sandbox-ccb-review-jobs.md) | Claim digest-bound CCB review jobs before hostile package execution | Accepted for local simulation | 2026-10-17 |
 | [0019](architecture/adr/0019-bounded-simulation-contribution-pressure.md) | Bound simulation contribution requests without credential-derived partitions | Accepted for local simulation | 2026-10-17 |
+| [0020](architecture/adr/0020-controlled-update-admission.md) | Require dual manifest/package trust before inert update staging | Accepted for pre-install admission only | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
