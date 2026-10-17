@@ -82,7 +82,7 @@ public sealed class PayPalSandboxHttpAdapterTests
     }
 
     [Fact]
-    public async Task DurableOperationsSource_RequiresApprovalAndExactReviewThenReplaysLocallyOnce()
+    public async Task DurableOperationsSource_RequiresApprovalAndExactReviewAcrossRepositories()
     {
         var root = Path.Combine(Path.GetTempPath(), $"dcx-care-operations-reviewed-{Guid.NewGuid():N}");
         try
@@ -148,10 +148,16 @@ public sealed class PayPalSandboxHttpAdapterTests
                 received));
             Assert.Equal(6, handler.Calls);
             var exactReview = await source.RefreshAsync();
+            var competingRepository = await DurableCareRepository.OpenAsync(root);
+            var competingSource = new DurableCareOperationsSource(
+                competingRepository,
+                processingCapabilityEnabled: true,
+                timeProvider: new FixedTimeProvider(received));
+            Assert.Equal(exactReview, await competingSource.RefreshAsync());
             var concurrentAttempts = new[]
             {
                 source.ProcessDueAsync(exactReview, explicitlyApproved: true),
-                source.ProcessDueAsync(exactReview, explicitlyApproved: true),
+                competingSource.ProcessDueAsync(exactReview, explicitlyApproved: true),
             };
             var successes = new List<CareOperationsProcessResult>();
             var failures = new List<InvalidOperationException>();
@@ -187,6 +193,91 @@ public sealed class PayPalSandboxHttpAdapterTests
                 source.ProcessDueAsync(exactReview, explicitlyApproved: true));
             Assert.Contains("state changed", replayError.Message, StringComparison.Ordinal);
             Assert.Equal(600, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.Equal(6, handler.Calls);
+        }
+        finally
+        {
+            TestDirectory.DeleteIfExists(root);
+        }
+    }
+
+    [Fact]
+    public async Task DurableOperationsSource_RollsBackWholeBatchWhenLaterRecordIsTampered()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"dcx-care-operations-rollback-{Guid.NewGuid():N}");
+        try
+        {
+            var handler = VerifiedWebhookHandler();
+            using var adapter = Adapter(handler);
+            var repository = await DurableCareRepository.OpenAsync(root);
+            const string planId = "P-DCX300";
+            var received = DateTimeOffset.Parse("2026-10-18T02:30:00Z");
+            var firstPayment = OfficialWebhook(
+                "WH-A-OPERATIONS-ROLLBACK",
+                "PAYMENT.SALE.COMPLETED",
+                "sale",
+                "{\"id\":\"SALE-A-OPERATIONS-ROLLBACK\",\"state\":\"completed\",\"billing_agreement_id\":\"I-OPERATIONS-ROLLBACK\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}");
+            var secondPayment = OfficialWebhook(
+                "WH-Z-OPERATIONS-ROLLBACK",
+                "PAYMENT.SALE.COMPLETED",
+                "sale",
+                "{\"id\":\"SALE-Z-OPERATIONS-ROLLBACK\",\"state\":\"completed\",\"billing_agreement_id\":\"I-OPERATIONS-ROLLBACK\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}");
+            var activation = OfficialWebhook(
+                "WH-OPERATIONS-ROLLBACK-ACTIVE",
+                "BILLING.SUBSCRIPTION.ACTIVATED",
+                "subscription",
+                "{\"id\":\"I-OPERATIONS-ROLLBACK\",\"plan_id\":\"P-DCX300\",\"status\":\"ACTIVE\"}");
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter,
+                Evidence("transmission:operations-rollback-first"),
+                firstPayment,
+                planId,
+                received));
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter,
+                Evidence("transmission:operations-rollback-second"),
+                secondPayment,
+                planId,
+                received));
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter,
+                Evidence("transmission:operations-rollback-active"),
+                activation,
+                planId,
+                received));
+            var source = new DurableCareOperationsSource(
+                repository,
+                processingCapabilityEnabled: true,
+                timeProvider: new FixedTimeProvider(received));
+            var exactReview = await source.RefreshAsync();
+
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = Path.Combine(root, "care-ledger.sqlite3"),
+                Pooling = false,
+            }.ToString()))
+            {
+                await connection.OpenAsync();
+                var command = connection.CreateCommand();
+                command.CommandText = """
+                    UPDATE webhook_event_quarantine
+                    SET verified_event_sha256 = $tampered
+                    WHERE event_id = 'WH-Z-OPERATIONS-ROLLBACK';
+                    """;
+                command.Parameters.AddWithValue("$tampered", new string('0', 64));
+                Assert.Equal(1, await command.ExecuteNonQueryAsync());
+            }
+
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                source.ProcessDueAsync(exactReview, explicitlyApproved: true));
+
+            Assert.Contains("failed its stored digest", error.Message, StringComparison.Ordinal);
+            var first = (await repository.GetOfficialWebhookQuarantineAsync(
+                "WH-A-OPERATIONS-ROLLBACK"))!;
+            Assert.Equal("pending", first.State);
+            Assert.Equal(0, first.AttemptCount);
+            Assert.Null(await repository.GetWebhookAuditAsync("WH-A-OPERATIONS-ROLLBACK"));
+            Assert.Equal(0, await repository.BalanceAsync(LedgerAccount.Cash));
             Assert.Equal(6, handler.Calls);
         }
         finally

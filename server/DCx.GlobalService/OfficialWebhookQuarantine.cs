@@ -52,7 +52,7 @@ public sealed partial class DurableCareRepository
     {
         await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         return await ReadWebhookQuarantineHealthAsync(
-                connection, now.ToUniversalTime(), cancellationToken)
+                connection, null, now.ToUniversalTime(), cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -88,8 +88,10 @@ public sealed partial class DurableCareRepository
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            await using var transaction = connection.BeginTransaction(deferred: false);
             var currentHealth = DurableCareOperationsSource.ToCareOperationsHealth(
-                await ReadWebhookQuarantineHealthAsync(connection, nowUtc, cancellationToken)
+                await ReadWebhookQuarantineHealthAsync(
+                        connection, transaction, nowUtc, cancellationToken)
                     .ConfigureAwait(false),
                 processingCapabilityEnabled);
             if (currentHealth != reviewedHealth)
@@ -105,10 +107,11 @@ public sealed partial class DurableCareRepository
             }
 
             var summary = await ReprocessQuarantinedOfficialWebhooksLockedAsync(
-                    connection, nowUtc, limit, cancellationToken)
+                    connection, transaction, nowUtc, limit, cancellationToken)
                 .ConfigureAwait(false);
             var resultingHealth = DurableCareOperationsSource.ToCareOperationsHealth(
-                await ReadWebhookQuarantineHealthAsync(connection, nowUtc, cancellationToken)
+                await ReadWebhookQuarantineHealthAsync(
+                        connection, transaction, nowUtc, cancellationToken)
                     .ConfigureAwait(false),
                 processingCapabilityEnabled);
             var result = new CareOperationsProcessResult(
@@ -119,6 +122,7 @@ public sealed partial class DurableCareRepository
                 ProviderCalls: 0,
                 resultingHealth);
             CareOperationsPolicy.RequireProcessResult(result);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return result;
         }
         finally
@@ -130,10 +134,12 @@ public sealed partial class DurableCareRepository
     private static async Task<WebhookQuarantineHealthSnapshot>
         ReadWebhookQuarantineHealthAsync(
             SqliteConnection connection,
+            SqliteTransaction? transaction,
             DateTimeOffset nowUtc,
             CancellationToken cancellationToken)
     {
         var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT
                 COALESCE(SUM(CASE WHEN state = 'pending' THEN 1 ELSE 0 END), 0),
@@ -212,9 +218,12 @@ public sealed partial class DurableCareRepository
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-            return await ReprocessQuarantinedOfficialWebhooksLockedAsync(
-                    connection, nowUtc, limit, cancellationToken)
+            await using var transaction = connection.BeginTransaction(deferred: false);
+            var summary = await ReprocessQuarantinedOfficialWebhooksLockedAsync(
+                    connection, transaction, nowUtc, limit, cancellationToken)
                 .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return summary;
         }
         finally
         {
@@ -225,11 +234,13 @@ public sealed partial class DurableCareRepository
     private static async Task<WebhookQuarantineReprocessSummary>
         ReprocessQuarantinedOfficialWebhooksLockedAsync(
             SqliteConnection connection,
+            SqliteTransaction transaction,
             DateTimeOffset nowUtc,
             int limit,
             CancellationToken cancellationToken)
     {
         var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
                 SELECT event_id
                 FROM webhook_event_quarantine
@@ -256,23 +267,19 @@ public sealed partial class DurableCareRepository
         var blocked = 0;
         foreach (var eventId in eventIds)
         {
-            await using var transaction = await connection.BeginTransactionAsync(cancellationToken)
-                .ConfigureAwait(false);
-            var sqliteTransaction = (SqliteTransaction)transaction;
             var record = await ReadWebhookQuarantineAsync(
-                    connection, sqliteTransaction, eventId, cancellationToken)
+                    connection, transaction, eventId, cancellationToken)
                 .ConfigureAwait(false);
             if (record is null || record.State != "pending" ||
                 record.NextAttemptUtc is null || record.NextAttemptUtc > nowUtc)
             {
-                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
                 continue;
             }
 
             ValidateWebhookQuarantineRecord(record);
             var existing = await ReadWebhookAsync(
                     connection,
-                    sqliteTransaction,
+                    transaction,
                     record.EventId,
                     record.TransmissionId,
                     cancellationToken)
@@ -284,16 +291,15 @@ public sealed partial class DurableCareRepository
                     string.Equals(existing.PayloadSha256, record.PayloadSha256, StringComparison.Ordinal))
                 {
                     await MarkWebhookQuarantineCompletedAsync(
-                            connection, sqliteTransaction, record, nowUtc, cancellationToken)
+                            connection, transaction, record, nowUtc, cancellationToken)
                         .ConfigureAwait(false);
-                    await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
                     completed++;
                     continue;
                 }
 
-                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
                 await MarkWebhookQuarantineFailureAsync(
                         connection,
+                        transaction,
                         record,
                         "paypal_sandbox_quarantine_identity_conflict",
                         keepPending: false,
@@ -311,7 +317,7 @@ public sealed partial class DurableCareRepository
             {
                 normalized = await NormalizeOfficialWebhookAsync(
                         connection,
-                        sqliteTransaction,
+                        transaction,
                         verified,
                         record.ExpectedPlanId,
                         cancellationToken)
@@ -324,10 +330,10 @@ public sealed partial class DurableCareRepository
 
             if (failureCode is not null)
             {
-                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
                 var keepPending = IsQuarantinableWebhookDependency(failureCode);
                 await MarkWebhookQuarantineFailureAsync(
                         connection,
+                        transaction,
                         record,
                         keepPending
                             ? failureCode
@@ -343,15 +349,14 @@ public sealed partial class DurableCareRepository
 
             await ApplyNormalizedWebhookAsync(
                     connection,
-                    sqliteTransaction,
+                    transaction,
                     normalized!,
                     record.PayloadSha256,
                     cancellationToken)
                 .ConfigureAwait(false);
             await MarkWebhookQuarantineCompletedAsync(
-                    connection, sqliteTransaction, record, nowUtc, cancellationToken)
+                    connection, transaction, record, nowUtc, cancellationToken)
                 .ConfigureAwait(false);
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             completed++;
         }
 
@@ -583,6 +588,7 @@ public sealed partial class DurableCareRepository
 
     private static async Task MarkWebhookQuarantineFailureAsync(
         SqliteConnection connection,
+        SqliteTransaction transaction,
         DurableWebhookQuarantineRecord record,
         string reasonCode,
         bool keepPending,
@@ -593,10 +599,8 @@ public sealed partial class DurableCareRepository
         var nextAttemptUtc = keepPending
             ? attemptedUtc.AddSeconds(Math.Min(3600, 1 << Math.Min(attemptCount, 10)))
             : (DateTimeOffset?)null;
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken)
-            .ConfigureAwait(false);
         var command = connection.CreateCommand();
-        command.Transaction = (SqliteTransaction)transaction;
+        command.Transaction = transaction;
         command.CommandText = """
             UPDATE webhook_event_quarantine
             SET state = $state, reason_code = $reason,
@@ -619,8 +623,6 @@ public sealed partial class DurableCareRepository
             throw new InvalidOperationException(
                 "The quarantined webhook retry state conflicted with durable state.");
         }
-
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static PayPalSandboxVerifiedWebhook ToVerifiedWebhook(
