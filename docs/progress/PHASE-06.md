@@ -1,7 +1,7 @@
 # P06 — Local models and resource inventory
 
 - Status: BLOCKED (real vision passes; bounded transcription/retrieval quality and adapter contracts pass fixtures; real Whisper/embedding backends remain absent)
-- Implementation commits: `463bfb6`, `b4aa4c9`, `a160435`, `21001d2`, `a41702b`, `5cdf5ec`, `ed6f001`, `2f71398`, `acc8e62`, `bcfe167`, `70f8dd7`
+- Implementation commits: `463bfb6`, `b4aa4c9`, `a160435`, `21001d2`, `a41702b`, `5cdf5ec`, `ed6f001`, `2f71398`, `acc8e62`, `bcfe167`, `70f8dd7`, `abd91c0`
 - Documentation commit: recorded by the commit containing this file
 
 No model or runtime was downloaded or installed. The real benchmark uses only software and models already present on this Windows machine.
@@ -42,6 +42,8 @@ No model or runtime was downloaded or installed. The real benchmark uses only so
 - Local MP4 frame description now requires and consumes this exact approved FFmpeg binding. The legacy `PATH` search and independent process implementation were removed.
 - A native fake Whisper CLI validates process/argument/output/cancellation behavior. It does not count as speech-recognition accuracy evidence.
 - A bounded evaluator now converts future real benchmark observations into deterministic aggregate evidence. Transcription scoring reports WER/CER plus aggregate edit counts; embedding scoring reports cosine-ranked Recall@K/MRR. Required elapsed/working-set measurements, optionally required GPU measurements, and default-required unload confirmation fail closed on missing or exceeded values. Results omit fixture identifiers, transcript text and vectors. Counts/dimensions/text and edit-distance work are bounded.
+- The execution runner requires a separately explicit, at-most-30-minute approval over exact domain-separated backend-binding, fixture-suite and policy digests. It uses DCx's UTC clock, recomputes every digest, checks backend identity around every call, requires unload in policy, runs sequentially and emits only schema-v1 aggregate evidence. Transcription suite digests bind expected text plus exact WAV length/bytes while absolute local WAVs remain under no-write/no-delete leases. Embedding suites bind exact text/relevance and execute in batches of at most 32.
+- A concrete Whisper benchmark adapter composes the existing exact-approved four-file binding. It revalidates both licenses and executable/model bytes through the production transcriber for each fixture; successful child exit supplies unload confirmation. The embedding runner remains adapter-neutral pending a real approved Ollama model and resource probe.
 
 ## Reproduction
 
@@ -53,12 +55,12 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 ## Measured result
 
-- Locked Release build: 0 warnings, 0 errors; 4.32 seconds in the current recorded P06 run.
-- P06 exact-namespace local-model tests: passed 68, failed 0, skipped 0; about 1 second, with counters parsed from retained TRX.
-- Current full suite: passed 370, failed 0, skipped 0; about 10 seconds under the repository-mandated native Windows PowerShell wrapper.
+- Locked Release build: 0 warnings, 0 errors; 4.69 seconds in the current recorded P06 run.
+- P06 exact-namespace local-model tests: passed 76, failed 0, skipped 0; about 1 second, with counters parsed from retained TRX.
+- Current full suite: passed 378, failed 0, skipped 0; about 11 seconds under the repository-mandated native Windows PowerShell wrapper.
 - Vision response: `A blue square and a red circle are displayed above the text "DCX 42".`
-- Production-adapter prompt tokens: 1,100; output tokens: 20; total duration: 21,227,615,700 ns.
-- Separately measured Ollama duration: 14,629,346,700 ns; wall duration: 16,653 ms.
+- Production-adapter prompt tokens: 1,100; output tokens: 20; total duration: 20,571,466,000 ns.
+- Separately measured Ollama duration: 15,165,049,100 ns; wall duration: 17,198 ms.
 - Ollama-reported loaded model and VRAM allocation: 3,527,545,978 bytes each.
 - Exact digest and license binding before/after inference, malformed inventory/digest rejection, duplicate/mutable selection denial, changed-binding denial and changed-license denial passed.
 - Explicit model unload verification by loaded-process digest: passed.
@@ -67,13 +69,14 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - Native UIA proved the Whisper approval begins unchecked, saving without approval is denied, both complete licenses and all four digests are exposed, action access keys are unique, and no download/install action exists. The UI-persisted binding produced `DCx transcription fixture 42.` through both the production adapter and accessible media viewer. User cancellation killed the fixture and retained no partial text; completion focused the transcript; clearing denied the consumer and removed stale text while retaining all four source files.
 - FFmpeg native UIA proved exact executable/license digest and full-license review, real `NotSigned` status, default-off/save-before-approval denial, unique keyboard access keys, persisted identity, approval reset and clear-without-delete. The real installed candidate measured 148,583,424 bytes, executable SHA-256 `943c5c0623ded76eb02e4b593a7ac1bac043fbbcf6d1d34d673fb8c0369fab52`, GPLv3 license SHA-256 `8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903`, Windows `NotSigned`, and `approved=false`.
 - Seven processor tests passed leased WAV/PNG success and cleanup, input/output signature denial, executable and license tamper denial, cancellation/timeout tree kill, lease release and active input write denial. Native UIA composed the approved fixture FFmpeg and Whisper bindings for MP3 transcription, focused the expected transcript, then proved immediate denial after clearing FFmpeg.
-- A disposable exact-file approval of the real installed FFmpeg candidate processed a generated 440 Hz MP3 through the production processor in 316 ms. The independently parsed output was 32,078 bytes of mono PCM16 at 16 kHz, measured 439.5 Hz with RMS 2,751.15, and its private leased WAV was absent after disposal. The persisted disposable binding was cleared and the inventory still records the host candidate as unapproved.
+- A disposable exact-file approval of the real installed FFmpeg candidate processed a generated 440 Hz MP3 through the production processor in 310 ms. The independently parsed output was 32,078 bytes of mono PCM16 at 16 kHz, measured 439.5 Hz with RMS 2,751.15, and its private leased WAV was absent after disposal. The persisted disposable binding was cleared and the inventory still records the host candidate as unapproved.
 - Bounded read-only discovery found no runnable Whisper CLI or Python Whisper package and no Ollama embedding model. Two pre-existing ADFi PyTorch `.pt` model files were inventoried only by base name/size and explicitly rejected as incompatible with the approved `.bin`/`.gguf` CLI contract; they were neither copied nor executed.
 - Ollama inspection/embed request shape, capability/license parsing, two-vector response and inconsistent-dimension denial passed.
 - Ollama redirect/cookie/proxy denial, exact response-origin enforcement, image-signature admission and mismatched/incomplete response denial passed.
 - The P07 native WebView2/UIA media test selected the installed model through the accessible manager, read the complete license through `ValuePattern`, proved approval initially and subsequently unchecked, persisted the binding, found no download action, and passed local MP4 pause/describe/resume with the real loopback VLM.
 - Eight quality-gate tests prove exact normalization, WER/CER edits, empty-output deletion scoring, deterministic tie ranking, Recall@K/MRR, missing/exceeded resource and unload denial, malformed/nonfinite/zero-vector/relevance denial, aggregate-only serialized results and pre-computation edit-work rejection.
-- Hardware/TRX/native-registration evidence: `artifacts/test-results/p06-f500c9fc4bc64336a00e0dda8cba3973/` (generated from source committed as `70f8dd7` and intentionally not committed); P07 UIA fixtures: `artifacts/test-results/p07-0a3c791833884f67bfa554162c81538a/`.
+- Eight runner tests prove exact approval/suite/policy/backend binding, input-order-stable digests, file write denial under lease, cancellation cleanup, policy/content substitution denial before inference, post-call binding-change denial, 32-input sequential embedding batches, aggregate resource composition, wrong-vector-count denial, result privacy shape and production composition through the pinned fake Whisper process.
+- Hardware/TRX/native-registration evidence: `artifacts/test-results/p06-1ddd133dd9e0475e9ab5c9fdf31fbacf/` (generated from source committed as `abd91c0` and intentionally not committed); P07 UIA fixtures: `artifacts/test-results/p07-0a3c791833884f67bfa554162c81538a/`.
 
 ## Changed files in the latest milestone
 
@@ -88,6 +91,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - Exact FFmpeg executable/license/signature review and state: `src/DCx.Core/LocalModels/FfmpegBackendRegistration.cs`, `src/DCx.Desktop/LocalModelsWindow.xaml`, `src/DCx.Desktop/LocalModelsWindow.xaml.cs`, `tests/DCx.Core.Tests/LocalModels/FfmpegBackendRegistrationTests.cs`, `docs/architecture/adr/0034-explicit-ffmpeg-file-registration.md`.
 - Approved FFmpeg execution, composed MP3/MP4 transcription, migrated frame capture and denial coverage: `src/DCx.Core/LocalModels/FfmpegMediaProcessor.cs`, `src/DCx.Desktop/Media/MediaFrameDescriptionService.cs`, `src/DCx.Desktop/ContentViewerWindow.xaml`, `src/DCx.Desktop/ContentViewerWindow.xaml.cs`, `tests/DCx.Core.Tests/LocalModels/FfmpegMediaProcessorTests.cs`, `tests/DCx.FakeWhisperCli/Program.cs`, `scripts/validate-p06-whisper-registration.ps1`, `scripts/validate-p07.ps1`.
 - Aggregate-only transcription/retrieval/resource evaluation and denial coverage: `src/DCx.Core/LocalModels/LocalModelBenchmarkEvaluation.cs`, `tests/DCx.Core.Tests/LocalModels/LocalModelBenchmarkEvaluationTests.cs`, `docs/architecture/adr/0049-bounded-local-model-quality-evaluation.md`.
+- Approval-bound leased execution, exact digest preparation, concrete Whisper composition and denial coverage: `src/DCx.Core/LocalModels/LocalModelBenchmarkRunner.cs`, `tests/DCx.Core.Tests/LocalModels/LocalModelBenchmarkRunnerTests.cs`, `docs/architecture/adr/0050-approval-bound-local-model-benchmark-runs.md`.
 - Decision, development and human-AT records: `docs/architecture/adr/0023-explicit-persisted-local-model-approval.md`, `docs/deployment/DEVELOPMENT.md`, `docs/accessibility/P06_LOCAL_MODELS_CHECKLIST.md`.
 
 ## Blockers and unblock condition
@@ -98,6 +102,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - The digest-qualified alias and before/after runtime checks bind the runtime-reported bytes and reviewed license text used for the measured call; they do not establish publisher authenticity, signed provenance, legal license approval or a production model install/update/revocation policy. The accessible manager selects only already-installed local models and deliberately performs no installation.
 - Automated UIA passed, but the dedicated JAWS/NVDA/Narrator checklist has not been run and cannot be inferred from automation.
 - The registration path proves safe consent and execution for already-installed files, but this host has no approved real Whisper executable/model to select. Install/download of whisper.cpp and a suitable embedding model, with source, version, license and SHA-256 recorded, requires owner approval.
+- The benchmark runner's explicit-approval boundary is tested at core level but is not yet exposed through a keyboard/UIA review surface. A real run must display the exact backend/suite/policy digests and thresholds, begin approval unchecked and retain only aggregate evidence. No real embedding adapter can pass resource gates until a model-specific working-set/GPU/unload probe is implemented against an approved installed model.
 - A 2026-10-18 read-only follow-up found an LM Studio CUDA ASR engine DLL without a runnable approved CLI/PTE model/license set, plus an 84,106,624-byte bundled Nomic GGUF embedding asset outside Ollama's managed inventory and without co-located approval evidence. Neither was imported, registered, executed or counted as an available DCx backend; one probe-only `lms.exe` helper was terminated after it waited for the desktop service. This does not change either blocker.
 - After approval, run fixed speech accuracy/word-error fixtures and retrieval recall/ranking fixtures, measure CPU/GPU/RAM/VRAM, latency, cancellation and unload under normal and low-resource emulation. P06 remains BLOCKED until those real gates pass.
 - No cloud Ollama endpoint, API key or network model call was used.
