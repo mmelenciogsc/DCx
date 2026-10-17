@@ -30,5 +30,6 @@
 | [0026](architecture/adr/0026-minimized-owner-contribution-lifecycle.md) | Reconcile and withdraw exact owner contributions through minimized, separately approved loopback operations | Accepted for local simulation | 2026-10-17 |
 | [0027](architecture/adr/0027-path-private-ccb-artifact-review.md) | Review and submit exact CCB artifacts without retaining their local path | Accepted for local simulation | 2026-10-17 |
 | [0028](architecture/adr/0028-local-only-visible-web-video-frame-qa.md) | Pause and question only the visible web-video rectangle through an approved local vision model | Accepted for deterministic fixtures; live provider blocked | 2026-10-17 |
+| [0029](architecture/adr/0029-inert-exact-package-install-review.md) | Review an exact digest-bound package request without creating installation authority | Accepted for local validation; real install blocked | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

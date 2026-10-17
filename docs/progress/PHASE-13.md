@@ -38,17 +38,17 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 ## Measured result
 
-Recorded evidence directory: `artifacts/test-results/p13-5f3586cd7aef40a7a3e2983d309d51c9/` (generated and intentionally not committed).
+Recorded evidence directory: `artifacts/test-results/p13-af55654b93db4550ac1411bbc889e4a0/` (generated and intentionally not committed).
 
 - Locked Release build: 0 warnings, 0 errors.
 - Reliability tests: passed 23, failed 0, skipped 0; exact counters parsed from the retained TRX.
-- Current full suite: passed 228, failed 0, skipped 0; about 9 seconds.
-- Publish trees: 42 files, 63,119,779 bytes each; no path/length/SHA-256 differences.
-- Reproducible staging ZIP SHA-256: `fb4f2bccb134073a0f2140ccf61e90d22398100fdf83ff6fbf99b8bbfe2730f2` (25,247,628 bytes).
+- Current full suite: passed 240, failed 0, skipped 0; about 8 seconds.
+- Publish trees: 42 files, 63,157,667 bytes each; no path/length/SHA-256 differences.
+- Reproducible staging ZIP SHA-256: `d645fce197650c876400b763da6578b0a2057f47c48ed7eed4ffd4330db81e24` (25,263,605 bytes).
 - CycloneDX components: 7; third-party license records: 7.
 - Unexpected secret matches: 0; exact synthetic scanner-fixture matches: 2.
 - Authenticode: `NotSigned`.
-- Offline UIA heading: `DCx is ready offline`; startup 4,180 ms; working set 466.2 MiB under the provisional 1 GiB ceiling.
+- Offline UIA heading: `DCx is ready offline`; startup 2,082 ms; working set 463.1 MiB under the provisional 1 GiB ceiling.
 - Crash-diagnostics UIA heading: `Privacy and crash diagnostics`; consent defaulted unchecked, explicit opt-in persisted notice version 1, purge preserved enabled consent, opt-out disabled and purged, and network transfers remained zero.
 - Recovery UIA heading: `DCx backup and recovery`; main-app launcher, path input, create, default-unchecked approval, restore and assertive status are exposed.
 - Backup while main DCx held the lease was denied and wrote no archive. After main exit, backup and approved restore passed; restore without approval was denied; excluded synthetic WebView2 cookie data remained unchanged.
@@ -68,6 +68,7 @@ Recorded evidence directory: `artifacts/test-results/p13-5f3586cd7aef40a7a3e2983
 - `makeappx.exe`, `signtool.exe`, MSIXMgr and WiX are absent. No code-signing identity is available. Installing tooling or acquiring a certificate requires approval.
 - The staging ZIP requires the pinned .NET desktop runtime and WebView2 runtime and provides no install, update activation, uninstall or runtime bootstrap behavior.
 - Controlled-update admission is an unwired core boundary. No production update origin/signing-root custody or rotation, real Windows MSIX/Authenticode package verifier, accessible update UI, scheduler, activation, restart coordination, installer integration or rollback exists. The package must be signature/digest/identity reverified again immediately before a future install; admission is not installation authority.
+- P12's accessible package-review window is likewise inert. Its synthetic trust adapter and non-executable approval receipt do not close any installer, signing, activation or clean-VM requirement.
 - No supported vulnerability scanner is installed; SBOM/license generation is not a vulnerability result.
 - No clean Windows 11 VM installation/uninstallation/upgrade/rollback run occurred.
 - Live SQLite/WAL snapshotting is not claimed; the exclusive lease deliberately requires main DCx to be closed during backup and restore.

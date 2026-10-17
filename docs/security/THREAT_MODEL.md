@@ -128,6 +128,14 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - Reserved payout batches retain canonical previews and SHA-256 digests. Restart reconciliation first looks up the stable batch ID: accepted/failed batches become terminal without resend, provider-pending batches remain reserved, and provider-not-found batches are resent idempotently with the same ID.
 - These controls remain local mocks. Official PayPal webhook authenticity, provider lookup/status semantics and idempotency still require sandbox acceptance; account/recipient eligibility, key custody and legal/accounting policy remain blockers.
 
+## Implemented package-install review controls through partial P12
+
+- Package review accepts only a local regular `.msix`; the native validation route additionally confines it beneath a configured non-root fixture directory. Unsupported kinds, UNC/alternate-data-stream paths, missing/empty/oversized files and reparse files or ancestors fail closed.
+- The exact package remains under a read-only/no-write/no-delete lease. Length, SHA-256, signature-valid flag, identity, publisher and exact four-part version are checked when review begins and again immediately before recording approval. A canonical proposal digest binds those fields plus path/URI, typed operation, scope, no-elevation flag and ten-minute lifetime.
+- The UI previews `PackageManager.AddPackageByUriAsync` and separate typed values rather than a caller-controlled shell command. Approval is initially unchecked, single-use and cancellable; stable errors exclude verifier exception text.
+- This implementation deliberately has no executor. The receipt always says execution is not permitted and zero installer processes started. The process broker has no install operation, and automated UIA verifies that DCx starts no child process during denial, approval or cancellation.
+- The native validation entry point is explicitly environment/root-gated and uses synthetic trust evidence. It cannot install anything and is not production signature validation. Real MSIX trust, one-time execution authority, final-file revalidation, activation, rollback, clean-VM and human assistive-technology gates remain absent.
+
 ## Implemented release/recovery controls through partial P13
 
 - Offline startup uses an embedded semantic document, permits its data navigation only as the first app-controlled navigation, and performs no website request.

@@ -1,17 +1,18 @@
 # P12 — Full vertical end-to-end flows
 
-- Status: BLOCKED (eight cross-phase local fixtures pass; required live/provider/installer acceptance remains absent)
-- Implementation commits: `1c51f9d`, `10ac274`, `10e07d5`; P07 export-race fix `0ccf5e8`
+- Status: BLOCKED (nine cross-phase local fixtures pass; required live/provider/installer acceptance remains absent)
+- Implementation commits: `1c51f9d`, `10ac274`, `10e07d5`, `84e7f23`, `ee7d8bf`; P07 export-race fix `0ccf5e8`
 - Documentation commit: recorded by the commit containing this file
 
 ## Reproduction and evidence
 
 ```bash
 cd /mnt/d/DCx
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p12-package-approval.ps1
 pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p12-fixtures.ps1
 ```
 
-The recorded run passed eight composed validators with zero production actions:
+The recorded run passed nine composed validators with zero production actions:
 
 1. Shared user-agent browser approval/takeover/handback fixture.
 2. External Windows application/UIA handoff fixture.
@@ -21,16 +22,25 @@ The recorded run passed eight composed validators with zero production actions:
 6. Consent/quarantine/contribution/qualified-receipt fixture.
 7. Durable CARE ledger and sandbox-only payout-safety mock.
 8. Local, explicitly non-Facebook manual-login/old-post search through the live WebView2 UIA tree plus sandbox-shaped report to genuine OOXML XLSX.
+9. Exact digest-bound `.msix` request review with typed Windows deployment API preview, initially unchecked approval, denial, revalidation, cancellation and zero installer child processes.
 
-Measured composed result: `P12 fixture scenarios passed=8`. Evidence manifest: `artifacts/test-results/p12-36617c643d804b7eb9c973e40803e63a/fixture-scenarios.json` (generated and intentionally not committed). All eight validators exited 0; production actions remained 0.
+Measured composed result: `P12 fixture scenarios passed=9`. Evidence manifest: `artifacts/test-results/p12-93a2bc740b394c5da03ea060b991d57c/fixture-scenarios.json` (generated and intentionally not committed). All nine validators exited 0; production actions remained 0. Focused package-review evidence: `artifacts/test-results/p12-package-approval-3126b6b1b4f046b2a037b278b8ce8901/`, with 12/12 exact policy tests and native UIA (generated and intentionally not committed).
 
 The XLSX fixture has a frozen header, filter, numeric currency cells, semantic text round-trip and formula-injection denial through inline strings. It makes zero QuickBooks network calls. The social fixture exposes a dated post, meaningful image alternative text and labeled video, but is deliberately not described as Facebook compatibility.
+
+The package-review fixture uses an injected synthetic trust adapter and a noninstallable file. The product boundary holds and rehashes the exact package under a read lease, displays all meaningful bindings, and can return only an in-memory receipt with `ExecutionPermitted=false` and `InstallerProcessesStarted=0`. It has no executor, shell, process-broker install operation or deployment API call. See `docs/accessibility/P12_PACKAGE_INSTALL_CHECKLIST.md` and ADR 0029.
+
+## Changed files in the latest milestone
+
+- Exact package review and inert receipt policy: `src/DCx.Core/Deployment/PackageInstallReview.cs`.
+- Accessible review window and validation-only startup route: `src/DCx.Desktop/PackageInstallReviewWindow.xaml`, `src/DCx.Desktop/PackageInstallReviewWindow.xaml.cs`, `src/DCx.Desktop/App.xaml.cs`.
+- Policy/denial and native UIA gates: `tests/DCx.Core.Tests/Deployment/PackageInstallReviewTests.cs`, `scripts/validate-p12-package-approval.ps1`, `scripts/validate-p12-fixtures.ps1`.
 
 ## Blockers
 
 - No live Facebook authenticated search or human login/MFA acceptance record. Site automation stability and policy remain unverified.
 - No QuickBooks sandbox OAuth or API retrieval. Only a sandbox-shaped client contract and export are validated.
 - Deterministic top-document HTML5 web-video pause, visible-rectangle Q&A, continued pause and explicit resume pass. Live/authenticated/embedded/protected YouTube acceptance remains absent.
-- No approved package installer execution/sandbox scenario.
+- Exact package/install approval behavior passes only as an inert local fixture. No real signed-package verifier, executor, elevation, install/update/uninstall/rollback or clean-VM acceptance exists.
 - P09 Compose, P10 production CCB deployment/isolation and P11 real PayPal sandbox remain blocked.
 - Live services require supported contracts, user authorization and separate human acceptance. Local fixture success is not counted as live acceptance.
