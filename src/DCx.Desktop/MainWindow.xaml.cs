@@ -56,6 +56,7 @@ public partial class MainWindow : Window
     private ContentViewerWindow? _contentViewerWindow;
     private ContributionsWindow? _contributionsWindow;
     private CareRecipientsWindow? _careRecipientsWindow;
+    private CareOperationsWindow? _careOperationsWindow;
     private CrashDiagnosticsWindow? _crashDiagnosticsWindow;
     private Task<LocalModelSelectionStore>? _localModelSelectionStore;
     private Task<WhisperBackendSelectionStore>? _whisperBackendSelectionStore;
@@ -1181,6 +1182,33 @@ public partial class MainWindow : Window
         catch
         {
             SetStatus("CARE payout recipient snapshots could not open safely. No recipient changed and no PayPal request occurred.");
+        }
+    }
+
+    private void OnCareOperationsClick(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Opening privacy-minimized CARE verified-event operations. No provider request will occur.");
+        if (_careOperationsWindow is { IsVisible: true })
+        {
+            _careOperationsWindow.Activate();
+            return;
+        }
+
+        try
+        {
+            var operations = CareOperationsSourceFactory.Create();
+            _careOperationsWindow = new CareOperationsWindow(
+                operations.Source,
+                operations.IsFixture)
+            {
+                Owner = this,
+            };
+            _careOperationsWindow.Closed += (_, _) => _careOperationsWindow = null;
+            _careOperationsWindow.Show();
+        }
+        catch
+        {
+            SetStatus("CARE verified-event operations could not open safely. No state changed and no provider request occurred.");
         }
     }
 

@@ -1,0 +1,101 @@
+<Window x:Class="DCx.Desktop.CareOperationsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CARE verified-event operations — DCx"
+        Width="760"
+        Height="650"
+        MinWidth="620"
+        MinHeight="500"
+        AutomationProperties.AutomationId="CareOperationsWindow"
+        AutomationProperties.Name="CARE verified-event operations">
+    <DockPanel Margin="20">
+        <TextBlock x:Name="StatusText"
+                   DockPanel.Dock="Bottom"
+                   Margin="0,16,0,0"
+                   Padding="10"
+                   Text="Loading CARE operations status."
+                   TextWrapping="Wrap"
+                   Background="#F3F3F3"
+                   AutomationProperties.AutomationId="CareOperationsStatus"
+                   AutomationProperties.Name="Loading CARE operations status."
+                   AutomationProperties.LiveSetting="Assertive" />
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Focusable="False">
+            <StackPanel>
+                <TextBlock x:Name="Heading"
+                           FontSize="26"
+                           FontWeight="SemiBold"
+                           Text="CARE verified-event operations"
+                           Focusable="True"
+                           AutomationProperties.AutomationId="CareOperationsHeading"
+                           AutomationProperties.Name="CARE verified-event operations" />
+                <TextBlock Margin="0,10,0,0"
+                           TextWrapping="Wrap"
+                           Text="Review privacy-minimized aggregate health for verified events waiting on subscription or sale bindings. This surface never displays event, provider, plan, subscription, sale, account, recipient, or contributor identifiers." />
+                <Border Margin="0,14,0,0"
+                        Padding="10"
+                        Background="#FFF4CE"
+                        BorderBrush="#8A6D00"
+                        BorderThickness="1">
+                    <TextBlock x:Name="BoundaryText"
+                               TextWrapping="Wrap"
+                               Text="The CARE operator connection is not configured. No queue state or provider availability is inferred."
+                               AutomationProperties.AutomationId="CareOperationsBoundary"
+                               AutomationProperties.Name="The CARE operator connection is not configured. No queue state or provider availability is inferred." />
+                </Border>
+
+                <GroupBox Margin="0,18,0,0" Header="Aggregate verified-event health">
+                    <StackPanel Margin="12,8">
+                        <TextBox x:Name="SummaryText"
+                                 MinHeight="180"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="CARE operations health has not been loaded."
+                                 AutomationProperties.AutomationId="CareOperationsSummary"
+                                 AutomationProperties.Name="CARE operations health has not been loaded." />
+                        <Button x:Name="RefreshButton"
+                                Width="180"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="_Refresh health"
+                                AutomationProperties.AutomationId="RefreshCareOperationsButton"
+                                AutomationProperties.Name="Refresh CARE verified-event health"
+                                AutomationProperties.HelpText="Reads aggregate queue state only. No provider request occurs."
+                                Click="OnRefreshClick" />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Margin="0,18,0,0" Header="Process due records locally">
+                    <StackPanel Margin="12,8">
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="Processing is available only from an explicitly authorized source. It re-evaluates already verified stored records and must make zero provider calls. Blocked records are never changed automatically." />
+                        <CheckBox x:Name="ProcessApprovalBox"
+                                  Margin="0,14,0,0"
+                                  FontWeight="SemiBold"
+                                  IsChecked="False"
+                                  Content="I reviewed the aggregate state and _approve one bounded local processing cycle"
+                                  AutomationProperties.AutomationId="ApproveCareOperationsProcessBox"
+                                  AutomationProperties.Name="I reviewed the aggregate state and approve one bounded local processing cycle"
+                                  AutomationProperties.HelpText="Initially unchecked and reset after every refresh or attempt." />
+                        <Button x:Name="ProcessButton"
+                                Width="210"
+                                MinHeight="36"
+                                Margin="0,14,0,0"
+                                HorizontalAlignment="Left"
+                                Content="_Process due records"
+                                AutomationProperties.AutomationId="ProcessDueCareOperationsButton"
+                                AutomationProperties.Name="Process due verified CARE events locally"
+                                AutomationProperties.HelpText="Requires explicit approval. No provider request is permitted."
+                                Click="OnProcessClick" />
+                    </StackPanel>
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

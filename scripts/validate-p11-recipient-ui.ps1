@@ -30,6 +30,7 @@ finally {
 
 $previousDataRoot = $env:DCX_DATA_ROOT
 $previousOfflineStartup = $env:DCX_OFFLINE_STARTUP
+$previousCareOperationsFixture = $env:DCX_CARE_OPERATIONS_FIXTURE
 $process = $null
 $store = $null
 
@@ -84,6 +85,7 @@ if (-not (Test-Path -LiteralPath $desktop -PathType Leaf)) {
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 $env:DCX_DATA_ROOT = $dataRoot
 $env:DCX_OFFLINE_STARTUP = "1"
+$env:DCX_CARE_OPERATIONS_FIXTURE = "1"
 
 try {
     $process = Start-Process $desktop -PassThru
@@ -242,8 +244,103 @@ try {
         throw "The revoked recipient snapshot still resolved its protected email."
     }
 
+    Invoke-ById $mainWindow "CareOperationsButton" | Out-Null
+    $operationsWindow = Wait-For {
+        Find-WindowByProcessAndId $process.Id "CareOperationsWindow"
+    } "The accessible CARE verified-event operations window did not open."
+    $operationsHeading = Wait-For {
+        Find-ById $operationsWindow "CareOperationsHeading"
+    } "The CARE operations heading was not exposed."
+    $null = Wait-For {
+        if ($operationsHeading.Current.HasKeyboardFocus) { $true }
+    } "Keyboard focus did not enter the CARE operations heading."
+    $operationsBoundary = Wait-For {
+        $element = Find-ById $operationsWindow "CareOperationsBoundary"
+        if ($null -ne $element -and $element.Current.Name -like
+            "Deterministic local validation fixture*Provider credentials*production actions are unavailable.*") { $element }
+    } "The inert fixture boundary was not exposed."
+    $operationsSummaryBefore = Wait-For {
+        $value = Get-Value $operationsWindow "CareOperationsSummary"
+        if ($value -like "*Status: retry_due.*" -and
+            $value -like "*Pending: 2.*" -and
+            $value -like "*Due now: 2.*" -and
+            $value -like "*Blocked: 0.*" -and
+            $value -like "*Local processing available: yes.*" -and
+            $value -like "*Data source: deterministic local fixture.*") { $value }
+    } "The generated aggregate CARE operations state was not exposed."
+    $operationsApproval = Wait-For {
+        Find-ById $operationsWindow "ApproveCareOperationsProcessBox"
+    } "The CARE operations approval checkbox was not exposed."
+    $operationsApprovalToggle = $operationsApproval.GetCurrentPattern(
+        [System.Windows.Automation.TogglePattern]::Pattern)
+    if ($operationsApprovalToggle.Current.ToggleState -ne
+        [System.Windows.Automation.ToggleState]::Off) {
+        throw "CARE operations approval did not default to unchecked."
+    }
+
+    $operationsActionIds = @(
+        "RefreshCareOperationsButton",
+        "ApproveCareOperationsProcessBox",
+        "ProcessDueCareOperationsButton")
+    $operationsAccessKeys = @()
+    foreach ($automationId in $operationsActionIds) {
+        $action = Find-ById $operationsWindow $automationId
+        if ($null -eq $action -or -not $action.Current.IsKeyboardFocusable -or
+            [string]::IsNullOrWhiteSpace($action.Current.AccessKey)) {
+            throw "The $automationId action lacks a keyboard-focusable access key."
+        }
+        $operationsAccessKeys += $action.Current.AccessKey
+    }
+    if (@($operationsAccessKeys | Sort-Object -Unique).Count -ne
+        $operationsAccessKeys.Count) {
+        throw "CARE operations actions expose duplicate access keys."
+    }
+
+    Invoke-ById $operationsWindow "ProcessDueCareOperationsButton" | Out-Null
+    $null = Wait-For {
+        $status = Find-ById $operationsWindow "CareOperationsStatus"
+        if ($null -ne $status -and $status.Current.Name -like
+            "No records were processed.*explicitly approve one local cycle first.*") { $status }
+    } "CARE operations processing without approval did not fail closed."
+    if ($operationsApprovalToggle.Current.ToggleState -ne
+        [System.Windows.Automation.ToggleState]::Off -or
+        -not $operationsApproval.Current.HasKeyboardFocus) {
+        throw "Denied CARE processing did not reset and focus explicit approval."
+    }
+
+    $operationsApprovalToggle.Toggle()
+    $null = Wait-For {
+        if ($operationsApprovalToggle.Current.ToggleState -eq
+            [System.Windows.Automation.ToggleState]::On) { $true }
+    } "CARE operations approval did not enter the checked state."
+    Invoke-ById $operationsWindow "ProcessDueCareOperationsButton" | Out-Null
+    $operationsCompletedStatus = Wait-For {
+        $status = Find-ById $operationsWindow "CareOperationsStatus"
+        if ($null -ne $status -and $status.Current.Name -eq
+            "Bounded local cycle completed. Scanned 2. Completed 2. Still pending 0. Blocked 0. Provider calls 0.") { $status }
+    } "The approved bounded CARE operations fixture did not complete accessibly."
+    $operationsCompletedStatusName = [string]$operationsCompletedStatus.Current.Name
+    $operationsSummaryAfter = Wait-For {
+        $element = Find-ById $operationsWindow "CareOperationsSummary"
+        $value = $element.GetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+        if ($value -like "*Status: clear.*" -and
+            $value -like "*Pending: 0.*" -and
+            $value -like "*Completed audit records: 2.*" -and
+            $value -like "*Local processing available: no.*" -and
+            $element.Current.HasKeyboardFocus) { $value }
+    } "Completed CARE operations state or focus was not exposed."
+    if ($operationsApprovalToggle.Current.ToggleState -ne
+        [System.Windows.Automation.ToggleState]::Off) {
+        throw "CARE operations approval was not reset after processing."
+    }
+    $processDueButton = Find-ById $operationsWindow "ProcessDueCareOperationsButton"
+    if ($null -eq $processDueButton -or $processDueButton.Current.IsEnabled) {
+        throw "CARE operations replay remained enabled without due records."
+    }
+
     [ordered]@{
-        schema_version = 1
+        schema_version = 2
         heading = $heading.Current.Name
         owner_approval_default_unchecked = $true
         revocation_approval_default_unchecked = $true
@@ -257,12 +354,24 @@ try {
         keyboard_focusable_distinct_access_keys = $accessKeys.Count
         status_after_save = $savedStatusName
         status_after_revocation = $revokedStatusName
+        operations_heading = $operationsHeading.Current.Name
+        operations_fixture_boundary = $operationsBoundary.Current.Name
+        operations_approval_default_unchecked = $true
+        operations_processing_without_approval_denied = $true
+        operations_keyboard_focusable_distinct_access_keys = $operationsAccessKeys.Count
+        operations_summary_before = $operationsSummaryBefore
+        operations_summary_after = $operationsSummaryAfter
+        operations_status_after_process = $operationsCompletedStatusName
+        operations_provider_calls = 0
+        operations_production_actions = 0
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $evidencePath -Encoding utf8NoBOM
 
     "P11 recipient snapshot native UIA=$($heading.Current.Name)"
     "P11 recipient approval and revocation default-off=PASS"
     "P11 exact destination protected and metadata minimized=PASS"
     "P11 provider eligibility remains false=PASS"
+    "P11 CARE operations default-off local cycle and focus=PASS"
+    "P11 CARE operations aggregate-only provider calls=0 production actions=0"
     "P11 recipient UI network requests=0 payout attempts=0"
     "P11 recipient UI evidence=$evidencePath"
 }
@@ -289,5 +398,6 @@ finally {
     finally {
         $env:DCX_DATA_ROOT = $previousDataRoot
         $env:DCX_OFFLINE_STARTUP = $previousOfflineStartup
+        $env:DCX_CARE_OPERATIONS_FIXTURE = $previousCareOperationsFixture
     }
 }

@@ -172,6 +172,14 @@
                             AutomationProperties.Name="Open CARE payout recipient snapshot approval"
                             AutomationProperties.HelpText="Prepare or revoke protected owner-approved recipient snapshots. This does not contact PayPal or authorize a payout."
                             Click="OnCareRecipientsClick" />
+                    <Button x:Name="CareOperationsButton"
+                            MinWidth="120"
+                            Margin="0,0,6,0"
+                            Content="CARE operations"
+                            AutomationProperties.AutomationId="CareOperationsButton"
+                            AutomationProperties.Name="Open CARE verified-event operations"
+                            AutomationProperties.HelpText="Review aggregate verified-event queue health. Processing is unavailable unless an explicitly authorized source provides it."
+                            Click="OnCareOperationsClick" />
                     <Button MinWidth="100"
                             Margin="0,0,6,0"
                             Content="Recovery"
