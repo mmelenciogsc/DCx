@@ -233,7 +233,7 @@ public sealed class ContributionApiE2eTests : IDisposable
 
             var transport = new HttpGlobalRegistryTransport(client, endpoint);
             var replica = await GlobalReplicaClient.OpenAsync(
-                Path.Combine(root, "client"), key.ExportSubjectPublicKeyInfo());
+                Path.Combine(root, "client"), key.ExportSubjectPublicKeyInfo(), TestGlobalTrustPolicyAnchorStore.Shared);
             await replica.SynchronizeAsync(transport);
             Assert.Equal(approvedRelease.Sequence, (await replica.GetStatusAsync()).Sequence);
             Assert.Equal(

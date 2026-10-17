@@ -38,7 +38,8 @@ public sealed class ContributionGovernanceTests : IDisposable
         Assert.Equal("reviewer:fixture", approved.ReviewerId);
         Assert.Equal(release.Sequence, approved.ReleaseSequence);
 
-        var client = await GlobalReplicaClient.OpenAsync(Path.Combine(root, "client"), registry.TrustRootSubjectPublicKeyInfo);
+        var client = await GlobalReplicaClient.OpenAsync(
+            Path.Combine(root, "client"), registry.TrustRootSubjectPublicKeyInfo, TestGlobalTrustPolicyAnchorStore.Shared);
         await client.SynchronizeAsync(new RepositoryRegistryTransport(registry));
         Assert.Equal(release.Sha256, (await client.GetStatusAsync()).ReleaseSha256);
         Assert.Equal("resource:approved", Assert.Single(await client.SearchAsync("keyboard accessibility", null)).ResourceId);
@@ -158,7 +159,8 @@ public sealed class ContributionGovernanceTests : IDisposable
         Assert.Equal(committedWithdrawal, recoveredWithdrawal);
         Assert.Equal(2, (await registry.GetLatestAsync())!.Sequence);
         var client = await GlobalReplicaClient.OpenAsync(
-            Path.Combine(root, "reconciliation-client"), registry.TrustRootSubjectPublicKeyInfo);
+            Path.Combine(root, "reconciliation-client"), registry.TrustRootSubjectPublicKeyInfo,
+            TestGlobalTrustPolicyAnchorStore.Shared);
         await client.SynchronizeAsync(new RepositoryRegistryTransport(registry));
         Assert.True(Assert.Single(await client.SearchAsync("cross database recovery", null)).Deprecated);
     }
@@ -730,7 +732,8 @@ public sealed class ContributionGovernanceTests : IDisposable
         Assert.Equal(2, executor.ExecutionCount);
         var transport = new RepositoryRegistryTransport(registry);
         var client = await GlobalReplicaClient.OpenAsync(
-            Path.Combine(root, "ccb-recovery-client"), registry.TrustRootSubjectPublicKeyInfo);
+            Path.Combine(root, "ccb-recovery-client"), registry.TrustRootSubjectPublicKeyInfo,
+            TestGlobalTrustPolicyAnchorStore.Shared);
         await client.SynchronizeAsync(transport);
         var resource = Assert.Single(await client.SearchAsync("community upper", null));
         var reference = Assert.IsType<GlobalArtifactReference>(resource.Artifact);
@@ -872,7 +875,8 @@ public sealed class ContributionGovernanceTests : IDisposable
         var release = await governance.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now);
 
         var client = await GlobalReplicaClient.OpenAsync(
-            Path.Combine(root, "ccb-client"), registry.TrustRootSubjectPublicKeyInfo);
+            Path.Combine(root, "ccb-client"), registry.TrustRootSubjectPublicKeyInfo,
+            TestGlobalTrustPolicyAnchorStore.Shared);
         var transport = new RepositoryRegistryTransport(registry);
         await client.SynchronizeAsync(transport);
         var resource = Assert.Single(await client.SearchAsync("community upper", null));

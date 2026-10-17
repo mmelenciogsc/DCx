@@ -35,8 +35,11 @@ public sealed class GlobalReplicaTests : IDisposable
         await privateStore.PutAsync(new KnowledgeResourceDraft(
             "private:sentinel", "1", KnowledgeResourceKind.Ckb, "Private sentinel", "Never enters global sync.",
             "urn:dcx:private", "Private", [], []), null);
-        var clientA = await GlobalReplicaClient.OpenAsync(clientARoot, repository.TrustRootSubjectPublicKeyInfo);
-        var clientB = await GlobalReplicaClient.OpenAsync(Path.Combine(root, "client-b"), repository.TrustRootSubjectPublicKeyInfo);
+        var clientA = await GlobalReplicaClient.OpenAsync(
+            clientARoot, repository.TrustRootSubjectPublicKeyInfo, TestGlobalTrustPolicyAnchorStore.Shared);
+        var clientB = await GlobalReplicaClient.OpenAsync(
+            Path.Combine(root, "client-b"), repository.TrustRootSubjectPublicKeyInfo,
+            TestGlobalTrustPolicyAnchorStore.Shared);
 
         var syncA = await clientA.SynchronizeAsync(transport);
         var syncB = await clientB.SynchronizeAsync(transport);
@@ -82,7 +85,8 @@ public sealed class GlobalReplicaTests : IDisposable
         var transport = new MemoryTransport(envelope);
         var client = await GlobalReplicaClient.OpenAsync(
             Path.Combine(root, "client"),
-            trusted.ExportSubjectPublicKeyInfo());
+            trusted.ExportSubjectPublicKeyInfo(),
+            TestGlobalTrustPolicyAnchorStore.Shared);
 
         await Assert.ThrowsAsync<GlobalReplicaException>(() => client.SynchronizeAsync(transport));
 
@@ -109,7 +113,8 @@ public sealed class GlobalReplicaTests : IDisposable
             trustRoot));
         var client = await GlobalReplicaClient.OpenAsync(
             Path.Combine(root, "rotating-client"),
-            trustRoot.ExportSubjectPublicKeyInfo());
+            trustRoot.ExportSubjectPublicKeyInfo(),
+            TestGlobalTrustPolicyAnchorStore.Shared);
 
         var firstStatus = await client.ApplyTrustPolicyAsync(policyOne);
         Assert.Equal(firstStatus, await client.ApplyTrustPolicyAsync(policyOne));
@@ -185,9 +190,67 @@ public sealed class GlobalReplicaTests : IDisposable
         Assert.Equal(2, (await client.GetStatusAsync()).Sequence);
         var reopened = await GlobalReplicaClient.OpenAsync(
             Path.Combine(root, "rotating-client"),
-            trustRoot.ExportSubjectPublicKeyInfo());
+            trustRoot.ExportSubjectPublicKeyInfo(),
+            TestGlobalTrustPolicyAnchorStore.Shared);
         Assert.Equal(3, (await reopened.GetTrustPolicyStatusAsync())!.Revision);
         Assert.Equal(2, (await reopened.GetStatusAsync()).Sequence);
+    }
+
+    [Fact]
+    public async Task ProtectedTrustAnchor_RejectsFilesystemRollbackAndRecoversInterruptedAdvance()
+    {
+        using var trustRoot = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var releaseKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var trustBytes = trustRoot.ExportSubjectPublicKeyInfo();
+        var trustId = GlobalReleaseCodec.Sha256(trustBytes);
+        var authorization = Authorization(releaseKey, 1);
+        var policyOne = GlobalTrustPolicyCodec.Encode(GlobalTrustPolicyCodec.Sign(
+            new GlobalTrustPolicy(
+                1, 1, null, DateTimeOffset.Parse("2026-10-17T00:00:00Z"), [authorization]),
+            trustRoot));
+        var policyTwo = GlobalTrustPolicyCodec.Encode(GlobalTrustPolicyCodec.Sign(
+            new GlobalTrustPolicy(
+                1,
+                2,
+                GlobalReleaseCodec.Sha256(policyOne),
+                DateTimeOffset.Parse("2026-10-18T00:00:00Z"),
+                [authorization]),
+            trustRoot));
+        var policyThree = GlobalTrustPolicyCodec.Encode(GlobalTrustPolicyCodec.Sign(
+            new GlobalTrustPolicy(
+                1,
+                3,
+                GlobalReleaseCodec.Sha256(policyTwo),
+                DateTimeOffset.Parse("2026-10-19T00:00:00Z"),
+                [authorization]),
+            trustRoot));
+        var anchors = new TestGlobalTrustPolicyAnchorStore();
+        var clientRoot = Path.Combine(root, "protected-anchor-client");
+        var client = await GlobalReplicaClient.OpenAsync(clientRoot, trustBytes, anchors);
+
+        await client.ApplyTrustPolicyAsync(policyOne);
+        await client.ApplyTrustPolicyAsync(policyTwo);
+        Assert.Equal(2, anchors.Get(trustId)!.Revision);
+        var policyPath = Path.Combine(client.ReplicaRoot, "trust-policy.json");
+
+        await File.WriteAllBytesAsync(policyPath, policyOne);
+        await Assert.ThrowsAsync<GlobalReplicaException>(() =>
+            GlobalReplicaClient.OpenAsync(clientRoot, trustBytes, anchors));
+        Assert.Equal(2, anchors.Get(trustId)!.Revision);
+
+        await File.WriteAllBytesAsync(policyPath, policyTwo);
+        var restored = await GlobalReplicaClient.OpenAsync(clientRoot, trustBytes, anchors);
+        anchors.FailNextAdvance = true;
+        await Assert.ThrowsAsync<GlobalReplicaException>(() => restored.ApplyTrustPolicyAsync(policyThree));
+        Assert.Equal(2, anchors.Get(trustId)!.Revision);
+
+        var recovered = await GlobalReplicaClient.OpenAsync(clientRoot, trustBytes, anchors);
+        Assert.Equal(3, (await recovered.GetTrustPolicyStatusAsync())!.Revision);
+        Assert.Equal(3, anchors.Get(trustId)!.Revision);
+
+        File.Delete(policyPath);
+        await Assert.ThrowsAsync<GlobalReplicaException>(() =>
+            GlobalReplicaClient.OpenAsync(clientRoot, trustBytes, anchors));
     }
 
     [Fact]
@@ -213,7 +276,8 @@ public sealed class GlobalReplicaTests : IDisposable
         var transport = new InterruptOnceTransport(new RepositoryRegistryTransport(repository));
         var client = await GlobalReplicaClient.OpenAsync(
             Path.Combine(root, "client"),
-            repository.TrustRootSubjectPublicKeyInfo);
+            repository.TrustRootSubjectPublicKeyInfo,
+            TestGlobalTrustPolicyAnchorStore.Shared);
 
         await Assert.ThrowsAsync<IOException>(() => client.SynchronizeAsync(transport));
         var result = await client.SynchronizeAsync(transport);

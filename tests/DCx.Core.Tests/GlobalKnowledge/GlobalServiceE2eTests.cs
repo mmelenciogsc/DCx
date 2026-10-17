@@ -107,7 +107,8 @@ public sealed class GlobalServiceE2eTests : IDisposable
                 Assert.Equal(HttpStatusCode.NotFound, disabledContributionApi.StatusCode);
             }
             var transport = new HttpGlobalRegistryTransport(httpClient, endpoint);
-            var client = await GlobalReplicaClient.OpenAsync(Path.Combine(root, "client"), trustRoot);
+            var client = await GlobalReplicaClient.OpenAsync(
+                Path.Combine(root, "client"), trustRoot, TestGlobalTrustPolicyAnchorStore.Shared);
 
             var result = await client.SynchronizeAsync(transport);
 

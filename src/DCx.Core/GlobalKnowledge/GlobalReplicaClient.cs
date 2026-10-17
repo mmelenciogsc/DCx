@@ -22,12 +22,20 @@ public sealed partial class GlobalReplicaClient
     private readonly string artifactsRoot;
     private readonly string activePath;
     private readonly string trustPolicyPath;
+    private readonly string trustRootSha256;
+    private readonly IGlobalTrustPolicyAnchorStore trustPolicyAnchorStore;
     private readonly SemaphoreSlim syncLock = new(1, 1);
 
-    private GlobalReplicaClient(string replicaRoot, byte[] trustRoot)
+    private GlobalReplicaClient(
+        string replicaRoot,
+        byte[] trustRoot,
+        string trustRootSha256,
+        IGlobalTrustPolicyAnchorStore trustPolicyAnchorStore)
     {
         ReplicaRoot = replicaRoot;
         this.trustRoot = trustRoot;
+        this.trustRootSha256 = trustRootSha256;
+        this.trustPolicyAnchorStore = trustPolicyAnchorStore;
         releasesRoot = Path.Combine(replicaRoot, "releases");
         catalogsRoot = Path.Combine(replicaRoot, "catalogs");
         stagingRoot = Path.Combine(replicaRoot, "staging");
@@ -41,10 +49,23 @@ public sealed partial class GlobalReplicaClient
     public static async Task<GlobalReplicaClient> OpenAsync(
         string applicationDataRoot,
         byte[] trustRootSubjectPublicKeyInfo,
+        CancellationToken cancellationToken = default) =>
+        await OpenAsync(
+                applicationDataRoot,
+                trustRootSubjectPublicKeyInfo,
+                new WindowsGlobalTrustPolicyAnchorStore(),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+    public static async Task<GlobalReplicaClient> OpenAsync(
+        string applicationDataRoot,
+        byte[] trustRootSubjectPublicKeyInfo,
+        IGlobalTrustPolicyAnchorStore trustPolicyAnchorStore,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(applicationDataRoot);
         ArgumentNullException.ThrowIfNull(trustRootSubjectPublicKeyInfo);
+        ArgumentNullException.ThrowIfNull(trustPolicyAnchorStore);
         if (trustRootSubjectPublicKeyInfo.Length is < 64 or > 1024)
         {
             throw new GlobalReplicaException("The global trust root has an invalid size.");
@@ -76,7 +97,11 @@ public sealed partial class GlobalReplicaClient
             throw new GlobalReplicaException("The global replica root cannot be a reparse point.");
         }
 
-        var client = new GlobalReplicaClient(root, trustRootSubjectPublicKeyInfo.ToArray());
+        var client = new GlobalReplicaClient(
+            root,
+            trustRootSubjectPublicKeyInfo.ToArray(),
+            trustId,
+            trustPolicyAnchorStore);
         Directory.CreateDirectory(client.releasesRoot);
         Directory.CreateDirectory(client.catalogsRoot);
         Directory.CreateDirectory(client.stagingRoot);
@@ -385,23 +410,22 @@ public sealed partial class GlobalReplicaClient
 
     private async Task<TrustPolicyState?> LoadTrustPolicyAsync(CancellationToken cancellationToken)
     {
-        if (!File.Exists(trustPolicyPath))
-        {
-            return null;
-        }
-
+        TrustPolicyState? state = null;
         try
         {
-            var information = new FileInfo(trustPolicyPath);
-            if (information.Length is <= 0 or > GlobalTrustPolicyCodec.MaximumPolicyBytes)
+            if (File.Exists(trustPolicyPath))
             {
-                throw new GlobalReplicaException("The persisted trust-policy envelope has an invalid size.");
-            }
+                var information = new FileInfo(trustPolicyPath);
+                if (information.Length is <= 0 or > GlobalTrustPolicyCodec.MaximumPolicyBytes)
+                {
+                    throw new GlobalReplicaException("The persisted trust-policy envelope has an invalid size.");
+                }
 
-            var envelope = await File.ReadAllBytesAsync(trustPolicyPath, cancellationToken).ConfigureAwait(false);
-            var signedPolicy = GlobalTrustPolicyCodec.Decode(envelope);
-            GlobalTrustPolicyCodec.Verify(signedPolicy, trustRoot);
-            return new TrustPolicyState(signedPolicy, GlobalReleaseCodec.Sha256(envelope));
+                var envelope = await File.ReadAllBytesAsync(trustPolicyPath, cancellationToken).ConfigureAwait(false);
+                var signedPolicy = GlobalTrustPolicyCodec.Decode(envelope);
+                GlobalTrustPolicyCodec.Verify(signedPolicy, trustRoot);
+                state = new TrustPolicyState(signedPolicy, GlobalReleaseCodec.Sha256(envelope));
+            }
         }
         catch (GlobalReplicaException)
         {
@@ -411,6 +435,9 @@ public sealed partial class GlobalReplicaClient
         {
             throw new GlobalReplicaException($"The persisted trust policy is unreadable: {exception.GetType().Name}.");
         }
+
+        await ReconcileTrustPolicyAnchorAsync(state, cancellationToken).ConfigureAwait(false);
+        return state;
     }
 
     private async Task<GlobalTrustPolicyStatus> ApplyTrustPolicyUnderLockAsync(
@@ -442,6 +469,10 @@ public sealed partial class GlobalReplicaClient
         }
 
         await WriteAtomicAsync(trustPolicyPath, policyEnvelope, cancellationToken).ConfigureAwait(false);
+        await trustPolicyAnchorStore.AdvanceAsync(
+                CreateTrustPolicyAnchor(proposed.Policy.Revision, proposedSha256),
+                cancellationToken)
+            .ConfigureAwait(false);
         return new GlobalTrustPolicyStatus(
             proposed.Policy.Revision,
             proposedSha256,
@@ -545,6 +576,69 @@ public sealed partial class GlobalReplicaClient
 
         throw new GlobalReplicaException("The global release was not signed by a key authorized for its sequence.");
     }
+
+    private async Task ReconcileTrustPolicyAnchorAsync(
+        TrustPolicyState? state,
+        CancellationToken cancellationToken)
+    {
+        var anchor = await trustPolicyAnchorStore.ReadAsync(trustRootSha256, cancellationToken).ConfigureAwait(false);
+        if (anchor is not null &&
+            (anchor.SchemaVersion != WindowsGlobalTrustPolicyAnchorStore.CurrentSchemaVersion ||
+             anchor.Revision < 1 || !IsSha256(anchor.TrustRootSha256) || !IsSha256(anchor.PolicySha256) ||
+             !string.Equals(anchor.TrustRootSha256, trustRootSha256, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new GlobalReplicaException("The protected global trust-policy anchor is invalid.");
+        }
+
+        if (state is null)
+        {
+            if (anchor is not null)
+            {
+                throw new GlobalReplicaException("The local trust policy is missing behind its protected revision anchor.");
+            }
+
+            return;
+        }
+
+        var revision = state.SignedPolicy.Policy.Revision;
+        if (anchor is null)
+        {
+            await trustPolicyAnchorStore.AdvanceAsync(
+                    CreateTrustPolicyAnchor(revision, state.Sha256),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        if (revision < anchor.Revision ||
+            revision == anchor.Revision &&
+            !string.Equals(state.Sha256, anchor.PolicySha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new GlobalReplicaException("The local trust policy is behind or conflicts with its protected revision anchor.");
+        }
+
+        if (revision == anchor.Revision) return;
+        if (revision != anchor.Revision + 1 ||
+            !string.Equals(
+                state.SignedPolicy.Policy.PreviousPolicySha256,
+                anchor.PolicySha256,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new GlobalReplicaException("The local trust policy advanced without the protected predecessor anchor.");
+        }
+
+        await trustPolicyAnchorStore.AdvanceAsync(
+                CreateTrustPolicyAnchor(revision, state.Sha256),
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private GlobalTrustPolicyAnchor CreateTrustPolicyAnchor(long revision, string policySha256) =>
+        new(
+            WindowsGlobalTrustPolicyAnchorStore.CurrentSchemaVersion,
+            trustRootSha256,
+            revision,
+            policySha256.ToLowerInvariant());
 
     private async Task<(string Path, long BytesDownloaded)> DownloadReleaseAsync(
         IGlobalRegistryTransport transport,
