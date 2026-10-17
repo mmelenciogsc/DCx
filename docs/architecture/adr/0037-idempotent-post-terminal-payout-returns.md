@@ -9,7 +9,7 @@ A PayPal payout item reported as successful can later be returned, refunded or r
 
 ## Decision
 
-Introduced in schema v6 and retained in schema v7, an immutable adjustment row records each corrected item. A digest-verified `succeeded` or `partially_succeeded` batch may be looked up again through its existing provider reference, but this path never submits or resubmits a payout. Provider `NotFound` fails closed. Provider-pending results make no mutation.
+Introduced in schema v6 and retained in schema v8, an immutable adjustment row records each corrected item. A digest-verified `succeeded` or `partially_succeeded` batch may be looked up again through its existing provider reference, but this path never submits or resubmits a payout. Provider `NotFound` fails closed. Provider-pending results make no mutation.
 
 A previously successful item may transition exactly once to the exact provider status `RETURNED`, `REFUNDED` or `REVERSED`. Unsuccessful items cannot become successful or change status, and still-successful items cannot be rewritten. The approved preview, stored terminal-result digest, recipient snapshot, destination digest, amounts, item ordering, provider batch status and paid total must all reconcile before mutation.
 

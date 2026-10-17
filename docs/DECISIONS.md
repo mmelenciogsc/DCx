@@ -41,5 +41,6 @@
 | [0037](architecture/adr/0037-idempotent-post-terminal-payout-returns.md) | Reconcile later payout returns through one-way item corrections and compensating journals | Accepted for uncredentialed sandbox reconciliation; provider acceptance blocked | 2026-10-17 |
 | [0038](architecture/adr/0038-protected-owner-approved-recipient-snapshots.md) | Protect exact payout destinations behind immutable, default-off owner-approved snapshots | Accepted for local owner approval; provider verification and payout use blocked | 2026-10-17 |
 | [0039](architecture/adr/0039-explicit-failed-payout-item-remediation.md) | Remediate only exact failed payout items through an expiring separately approved lineage | Accepted for durable uncredentialed sandbox validation; operator/provider acceptance blocked | 2026-10-17 |
+| [0040](architecture/adr/0040-durable-verified-webhook-dependency-quarantine.md) | Quarantine only officially verified events whose durable subscription or sale dependency has not arrived | Accepted for uncredentialed handler-backed validation; production operations/provider acceptance blocked | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
