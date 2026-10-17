@@ -1,7 +1,7 @@
 # P14 — Pilot and release readiness
 
 - Status: BLOCKED / NO_GO (local readiness controls pass; pilot and production activation are off)
-- Implementation commits: `01539fd`, `66715b0`, `edd516a`, `26da605`, `993149e`, `54f66bc`, `9877a60`, `faf6b71`, `1631ebb`, `599cee9`, `ec37d1f`, `a662abb`, `8583b29`
+- Implementation commits: `01539fd`, `66715b0`, `edd516a`, `26da605`, `993149e`, `54f66bc`, `9877a60`, `faf6b71`, `1631ebb`, `599cee9`, `ec37d1f`, `a662abb`, `8583b29`, `d5624a6`
 - Documentation commit: recorded by the commit containing this file
 
 No pilot was started, no telemetry was collected, no user was enrolled, and no production service or payment was activated.
@@ -32,7 +32,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 exact-namespace release/readiness tests: passed 10, failed 0, skipped 0; about 1 second. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
-- Current committed-source expanded full suite: passed 323, failed 0, skipped 0; about 10 seconds.
+- Current committed-source expanded full suite: passed 328, failed 0, skipped 0; about 9 seconds.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -40,8 +40,8 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 - Decision: `NO_GO`.
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled consent state, blocker list, metric-definition list and refresh action. The validator confirmed that no control named `Activate production` exists.
-- The P11 blocker recognizes the local protected owner-approved recipient snapshot workflow, verified event mapping and post-terminal return/reversal reconciliation as implemented, while requiring the still-missing exact US$3 plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider verification/retention policy, failed-item remediation and authorized provider acceptance.
-- Evidence: `artifacts/test-results/p14-1fabd22ef1294bc396942a6235217194/go-no-go.json` with `p14-readiness.trx` beside it, generated from the exact source committed as `8583b29` and intentionally not committed.
+- The P11 blocker recognizes the local protected recipient workflow, schema-v7 failed-item remediation lineage, verified event mapping and post-terminal return/reversal reconciliation as implemented, while requiring exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider verification/retention policy, an accessible hold/remediation and contributor-notification operator workflow, out-of-order event remediation and authorized provider acceptance.
+- Evidence: `artifacts/test-results/p14-cbf069a700344a159a7b18fdf3f9b421/go-no-go.json` with `p14-readiness.trx` beside it, generated from the exact source committed as `d5624a6` and intentionally not committed.
 
 ## Changed files in the latest milestone
 
@@ -52,7 +52,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 
 ## Blockers
 
-- P06 transcription/embedding backend gate, P09 Compose gate, P10 production CCB isolation/deployment gate, P11 exact-plan provisioning/credentialed PayPal acceptance/provider eligibility and verification-policy/failed-item-remediation gates, P12 live/human acceptance and P13 signed installer/security/human-AT gates are unresolved.
+- P06 transcription/embedding backend gate, P09 Compose gate, P10 production CCB isolation/deployment gate, P11 exact-plan provisioning/credentialed PayPal acceptance/provider eligibility and verification-policy/accessible-remediation/event-remediation gates, P12 live/human acceptance and P13 signed installer/security/human-AT gates are unresolved.
 - Privacy notice, terms, CARE/commission policy, provider distribution approvals and legal/compliance review are not approved.
 - The readiness dashboard is local and read-only; it is not a pilot admin console. No enrollment system, approved accessible consent/withdrawal UI, network metric transport, support staffing or incident exercise exists. The local versioned consent record and aggregate store are not wired to product event collection.
 - A staged pilot requires explicit owner approval after blocker closure. Production activation remains off by construction in this report.
