@@ -23,3 +23,6 @@
 
 Retention periods, export/deletion behavior, telemetry consent, regional requirements, and a production privacy notice remain P10/P14 legal-review gates.
 
+## Current private-store realization
+
+P08 stores each local profile in a different hashed directory beneath the current Windows user's application-data root. Queries open only the selected profile database; no sync or upload code is present. Content-addressed artifacts remain inside that same namespace. Current confidentiality relies on inherited Windows per-user ACLs; the SQLite database is not represented as encrypted at rest.

@@ -54,6 +54,16 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - Media does not autoplay. FFmpeg receives typed arguments and a bounded timeout; temporary frames are removed. Frame descriptions use only loopback Ollama and leave playback paused for user-controlled resume.
 - HTML/DOCX exports are newly generated semantic artifacts rather than modified untrusted source packages. Human review remains necessary before relying on OCR or model descriptions.
 
+## Implemented private-knowledge controls through P08
+
+- Private profile identifiers map to distinct hashed directories; databases, vectors and artifacts are never queried across those roots.
+- Optimistic version checks and SQLite transactions prevent silent lost updates. Resource bodies and vectors are bounded and validated before insertion.
+- Content-addressed writes verify declared SHA-256 and use same-directory atomic moves. CCB reads repeat artifact integrity, package identity and provenance checks.
+- CCB ZIPs reject traversal, absolute/backslash paths, duplicates, symbolic links, excessive entry/expanded size, malformed manifests and missing entrypoints.
+- CCB publisher trust is pinned by subject-public-key info. Canonical ECDSA signatures bind code digest and meaningful metadata; an untrusted publisher, changed body or changed package fails closed.
+- Artifact packages are data, not executable authority. Only a host-registered adapter with matching identity/digest and passing bounded fixtures becomes a BOSS capability; package code is not dynamically loaded.
+- FTS input is tokenized into a bounded parameterized expression. All relational writes and queries use parameters rather than concatenated user content.
+
 ## Security gate policy
 
 Security tests must cover denial paths as well as successful paths. A mock or sandbox pass proves only that path. Production OpenAI/PayPal eligibility, code signing, legal review, external penetration testing, and the Ubuntu production deployment remain explicit blockers until separately evidenced.

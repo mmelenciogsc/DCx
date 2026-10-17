@@ -16,8 +16,9 @@
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p05.ps1
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p06.ps1
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p07.ps1
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p08.ps1
    ```
 
 5. Continue only the earliest uncompleted phase. Record commands, results, changed files, blockers, and the milestone commit in its phase document. Never infer manual screen-reader or external-service success from automated tests.
 
-Current implementation includes the native browser, shared-control and Windows brokers, isolated Codex provider boundary, BOSS orchestration, a loopback-only Ollama vision adapter, and the validated P07 local content/document/media surface. P00–P05 and P07 pass their stated automated gates; P06 is blocked only on the absent, unapproved Whisper backend. P07's structured HTML/DOCX exports, OCR/geometry, local frame description and hostile-input tests are at `c618254`; human assistive-technology testing, universal YouTube playback/frame capture and transcription are not claimed. P08 private local CKB/CCB storage is active. Consult the status and P08 phase document before continuing.
+Current implementation includes the native browser, shared-control and Windows brokers, isolated Codex provider boundary, BOSS orchestration, a loopback-only Ollama vision adapter, the validated P07 content/document/media surface, and P08's isolated private CKB/CCB store at `685ca5a`. P00–P05, P07 and P08 pass their stated automated gates. P06 remains blocked on absent, unapproved Whisper and embedding backends. Human assistive-technology testing, universal YouTube playback/frame capture, transcription and local embedding generation are not claimed. P09's local global-registry/signed-sync simulation is active; do not access or deploy to the owner's Ubuntu server. Consult the status and P09 phase document before continuing.

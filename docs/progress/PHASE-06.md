@@ -1,6 +1,6 @@
 # P06 — Local models and resource inventory
 
-- Status: BLOCKED (vision and fallback policy pass; transcription backend absent)
+- Status: BLOCKED (vision and fallback policy pass; transcription and embedding backends absent)
 - Implementation commit: `463bfb6`
 
 No model or runtime was downloaded or installed. The benchmark uses software and models already present on this Windows machine.
@@ -13,6 +13,7 @@ No model or runtime was downloaded or installed. The benchmark uses software and
 - Selected candidate: `qwen3-vl:4b-instruct`, model ID beginning `6bf7b924e48a`, 4.4B parameters, Q4_K_M, vision capability, 262,144 reported context. Ollama's installed model metadata begins with Apache License.
 - FFmpeg: Windows-native 2025-03-24 git build with CUDA/NVDEC/NVENC support.
 - Whisper: no `whisper-cli` and no FFmpeg Whisper filter found.
+- Embeddings: no installed Ollama model advertises an embedding capability; P08 validates storage/search with deterministic vector fixtures but does not claim local embedding generation.
 
 ## Implemented
 
@@ -40,10 +41,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\valida
 - Ollama-reported loaded model and VRAM allocation: 3,527,545,978 bytes each.
 - Explicit model unload request: passed.
 - Transcription gate: BLOCKED because no approved local Whisper backend is installed.
+- Embedding gate: BLOCKED because no approved local embedding model is installed or benchmarked.
 
 ## Known limitations and unblock condition
 
 - This single synthetic image proves the adapter and current machine path, not production VLM accuracy. P07 adds media fixtures; broader evals remain necessary.
 - The 70% selector uses stored model size as a conservative first filter; real peak memory, context and concurrency benchmarks must remain authoritative.
-- Install/download of whisper.cpp (including a model with recorded hash/license) requires owner approval. After approval, run a fixed audio transcription fixture, record word error evidence, CPU/GPU memory and latency, then update this phase from BLOCKED only if it passes.
+- Install/download of whisper.cpp and a suitable embedding model (each with recorded hash/license) requires owner approval. After approval, run fixed transcription and retrieval fixtures, record accuracy, memory and latency, then update this phase from BLOCKED only if both pass.
 - No cloud Ollama endpoint, API key or network model call was used.

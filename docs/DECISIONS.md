@@ -6,5 +6,6 @@
 | [0002](architecture/adr/0002-local-first-trust-boundaries.md) | Enforce local-first execution and explicit broker boundaries | Accepted | 2026-10-17 |
 | [0003](architecture/adr/0003-separate-private-and-global-knowledge.md) | Keep private and global CKB/CCB stores physically and logically separate | Accepted | 2026-10-17 |
 | [0004](architecture/adr/0004-openai-auth-and-codex-boundary.md) | Isolate Codex runtime and keep API-key mode independent from gated ChatGPT-plan sign-in | Accepted | 2026-10-17 |
+| [0005](architecture/adr/0005-embedded-sqlite-private-store.md) | Use embedded SQLite FTS5 plus bounded managed vectors for private CKB/CCB | Accepted | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

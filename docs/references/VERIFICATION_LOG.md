@@ -23,5 +23,8 @@ Checked 2026-10-17 from the development host.
 | Ollama chat schema | https://docs.ollama.com/api/chat | HTTP 200; request/response fields, deterministic options, token/duration metrics and `keep_alive` verified. |
 | whisper.cpp | https://github.com/ggml-org/whisper.cpp | HTTP 200; upstream project exists, but no local Windows backend is installed and no binary/model license/hash has been approved. |
 | FFmpeg documentation | https://ffmpeg.org/documentation.html | Timed out from this environment on the verification attempt; the installed binary/version and enabled backends were inspected locally instead. |
+| SQLite documentation | https://www.sqlite.org/docs.html | HTTP 200; selected as the embedded transactional metadata/FTS5 engine for the per-profile private store. |
+| Microsoft.Data.Sqlite package | https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlite/index.json | Latest stable observed for the .NET 10 line: 10.0.13; pinned with NuGet content hash. Package metadata identifies Microsoft, the dotnet repository commit `4099f83977f4d29604a9aeb971fb0a7bc1d5f699`, and MIT. |
+| SQLitePCLRaw transitive packages | https://api.nuget.org/v3-flatcontainer/sqlitepclraw.bundle_e_sqlite3/2.1.13/sqlitepclraw.bundle_e_sqlite3.nuspec | Bundled engine/core/provider packages resolve to 2.1.13; official NuGet metadata reports Apache-2.0. Exact package hashes are locked per project. |
 
 The remaining supplied official references are verified immediately before their associated integration phase. An HTTP success alone never proves account entitlement, commercial authorization, licensing suitability, or API availability.
