@@ -1,10 +1,10 @@
 # P09 — Global registry and synchronization
 
 - Status: BLOCKED (native process/HTTP simulation passes; required Docker Compose execution unavailable)
-- Partial implementation commits: `1be3f9e`, `b1608cd`, `9123a81`, `4278601`
+- Partial implementation commits: `1be3f9e`, `b1608cd`, `9123a81`, `4278601`; read-only environment audit `8b94159`
 - Documentation commit: recorded by the commit containing this file
 
-No connection or deployment to the owner's Ubuntu server was attempted.
+A bounded read-only SSH capability audit was added later; no deployment, remote write, container start, service change or privileged action was attempted.
 
 ## Implemented
 
@@ -37,7 +37,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 - Locked restore and native Release build passed with 0 warnings/errors.
 - P09 exact filtered tests: passed 12, failed 0, skipped 0; about 1 second, with exact counters parsed from retained TRX.
-- Current full suite: passed 261, failed 0, skipped 0; about 8 seconds.
+- Current full suite: passed 289, failed 0, skipped 0; about 9 seconds.
 - A real child Kestrel process served three chained trust-policy revisions and a signed SQLite-backed release over loopback HTTP; a fresh production client transport caught up all revisions, synchronized and searched it.
 - Two distinct client roots synchronized the same chain; the P08 private sentinel remained present and absent from global results.
 - Wrong-key release activation was rejected with no active pointer.
@@ -48,7 +48,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - A transfer interrupted after its first 64 KiB chunk resumed at a nonzero offset and downloaded fewer bytes on retry than the full release.
 - Lazy 150,000-byte artifact retrieval, deprecation, offline search and explicit rollback passed.
 - Publication retry used reordered equivalent changes and a later timestamp after repository reopen, returned the byte-identical original descriptor and kept the chain at sequence 1; a changed request under the same operation ID was rejected.
-- Latest evidence: `artifacts/test-results/p09-4b467a1bff46420c969bceacaf33b2c1/` containing `p09-global-knowledge.trx` and `storage-forecast.json` (generated and intentionally not committed).
+- Latest local evidence: `artifacts/test-results/p09-6bbf54ee910741009db23bf984dbd203/` containing `p09-global-knowledge.trx` and `storage-forecast.json`; server capability evidence: `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` (generated and intentionally not committed).
 
 ## Measured storage/bandwidth fixture
 
@@ -72,8 +72,8 @@ Artifact storage and transfer must add exact signed artifact sizes. Artifacts ar
 
 ## Blocker and limits
 
-- Native Windows validation has no Docker CLI. WSL reports Docker 29.1.3, but daemon access is permission-denied and no Compose plugin or `docker-compose` command exists. Installing/enabling these is privileged and requires owner approval.
-- Consequently, `server/docker-compose.simulation.yml` is unexecuted and P09 is not complete. After approval/access, validate Compose configuration, build with recorded image digests, run the same two-client gate against the container, then update this phase.
+- Read-only evidence from `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` confirms the owner's server is Ubuntu 24.04 x64 with Docker 29.5.2, Compose 5.1.4 and an active daemon. The authenticated UID 1000 is not in the `docker` group, so daemon access is denied. No remote DCx deployment exists.
+- Consequently, `server/docker-compose.simulation.yml` remains unexecuted and P09 is not complete. Granting Docker/sudo access or deploying/building on the real server is privileged/external mutation and requires explicit owner approval. After approval, validate Compose configuration, record image digests, run the same two-client gate against the container, and update this phase.
 - Simulation signing keys and the offline root are ephemeral fixture material. The per-user Windows anchor mitigates replica-file rollback but is deletable by same-user code and is not TPM/hardware monotonic storage. Production offline-root custody/ceremony, anchor loss/recovery, TLS identity, backup/restore, monitoring and external security review are not implemented.
 - The service exposes read-only catalog endpoints by default. P10 adds a separate default-off, loopback/container simulation contribution API; this is not authorization or infrastructure for production exposure.
 - Real Ubuntu deployment remains forbidden without explicit owner approval.

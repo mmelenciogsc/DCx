@@ -29,7 +29,7 @@ Intake stores the exact SHA-256-addressed ZIP in quarantine. Approval rechecks t
 
 Signed publication and its digest-bound operation record commit atomically in the registry. Reviewer-authorized intent is durable first; startup validates and processes at most 100 pending intents, and the local state transition plus intent completion commit together. Recovery rehashes quarantine and authoritative artifacts, reuses the original operation/timestamp/reviewer and does not rerun CCB code. Changed request, candidate or artifact bytes fail closed.
 
-The default simulation service remains read-only for contributions. When the API, worker and complete hash-pinned Linux executor configuration are all enabled, CCB approval first persists and claims a digest-bound review job before calling this executor. That combined HTTP-to-real-Bubblewrap path remains unrun without a Linux .NET service runtime or approved Compose environment; it is not production exposure.
+The default simulation service remains read-only for contributions. When the API, worker and complete hash-pinned Linux executor configuration are all enabled, CCB approval first persists and claims a digest-bound review job before calling this executor. The real Ubuntu 24.04 server has .NET/ASP.NET 10, Docker/Compose and Bubblewrap, but the authenticated user cannot access the Docker daemon, has no delegated writable cgroup, and the exact nonprivileged `--unshare-all` network-isolation smoke fails. The combined HTTP-to-real-Bubblewrap path remains unrun and no deployment was attempted; this is not production exposure.
 
 ## Remaining production work
 

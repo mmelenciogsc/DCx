@@ -47,4 +47,10 @@ pwsh.exe -NoProfile -File .\scripts\validate-p06.ps1
 
 ## Ubuntu service
 
-No real-server deployment is authorized. P09 must first provide a local Compose simulation and a reviewed deployment manifest. Connecting to, installing on, or changing the owner's Ubuntu server requires explicit approval.
+No real-server deployment is authorized. The bounded command below uses the preconfigured `ubuntu-server` SSH alias only for fixed read-only, nonprivileged capability checks; it must not be expanded into file transfer, build, container or service actions without approval.
+
+```powershell
+pwsh.exe -NoProfile -File .\scripts\audit-ubuntu-server.ps1
+```
+
+The recorded audit found Ubuntu 24.04, .NET/ASP.NET 10, Docker/Compose and Bubblewrap, but denied Docker daemon access, found no writable cgroup delegation and failed the exact Bubblewrap network-isolation smoke. P09 still needs explicit authority for any access change or Compose deployment. P10 still needs an approved remediation that preserves network denial and measured resource isolation.

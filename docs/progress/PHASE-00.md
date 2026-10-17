@@ -3,11 +3,11 @@
 - Status: Complete (local native-Windows gate)
 - Started: 2026-10-17
 - Gate owner: implementation agent; manual/external claims excluded
-- Milestone commit: `a98195a`
+- Milestone commits: `a98195a`, read-only server audit `8b94159`
 
 ## Requirements and assumptions
 
-The four handoff files were read in full before implementation. The pre-existing `DCx` directory contained only the handoff kit and one prompt file; it was not a Git repository and contained no application implementation to preserve. WSL is a development surface only. No Ubuntu-server connection/deployment, privileged installation, paid provider call, publication, or financial transaction was performed.
+The four handoff files were read in full before implementation. The pre-existing `DCx` directory contained only the handoff kit and one prompt file; it was not a Git repository and contained no application implementation to preserve. WSL is a development surface only. The original P00 milestone made no Ubuntu-server connection. A later bounded audit used the preconfigured Windows SSH host alias in batch/key-only, strict-host-key mode and executed only fixed read-only capability checks; it wrote no remote file, installed nothing, changed no service, started no container and attempted no deployment. No paid provider call, publication, or financial transaction was performed.
 
 ## Measured audit
 
@@ -27,7 +27,21 @@ The four handoff files were read in full before implementation. The pre-existing
 | WSL tooling | Git 2.34.1, Node 22.23.2, npm 10.9.8, Codex CLI 0.146.0, Docker CLI 29.1.3, CMake 3.22.1 |
 | Windows tooling | Git 2.47.1, Node 22.18.0; Windows Codex executable not found |
 | Containers | Docker daemon access denied for current WSL user; deferred to P09 and not worked around with elevation |
-| SSH | Windows OpenSSH present and one host entry configured; no connection attempted and no host details or keys logged |
+| SSH | Original audit: Windows OpenSSH present and one host entry configured; connection deferred. See the later read-only refresh below. |
+
+## Read-only Ubuntu server audit refresh
+
+Commit `8b94159` adds `scripts/audit-ubuntu-server.ps1`. Its fixed remote command emits a bounded allowlisted capability record and retains only the configured host alias—not an address, credential, SSH configuration or remote path. Evidence: `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/ubuntu-server-audit.json` (generated and intentionally not committed).
+
+| Item | Result |
+|---|---|
+| SSH boundary | Existing host key accepted with `StrictHostKeyChecking=yes`; `BatchMode=yes`; non-root UID 1000 |
+| Server | Ubuntu 24.04 x64; kernel 7.0.0-29; 128,704 MiB RAM; about 43 GiB root free |
+| Runtime | .NET SDK 8.0.131; .NET/ASP.NET 10.0.12 runtimes present |
+| Container tooling | Docker 29.5.2 and Compose 5.1.4 installed; service active; current user is not in `docker`; daemon access denied |
+| Sandbox tooling | Bubblewrap 0.9.0 installed; unprivileged `--unshare-all` network-isolation smoke failed |
+| Resource controls | cgroup v2 with CPU, IO, memory and PIDs controllers; current user has no delegated writable cgroup |
+| DCx deployment | No DCx directory found within the bounded home scan; remote writes, installs, service changes, containers and deployments: 0 |
 
 ## Framework decision
 
@@ -59,6 +73,7 @@ Reproducible locked gate:
 ```bash
 ./scripts/verify-p00.sh
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\smoke-desktop.ps1
+pwsh.exe -NoProfile -File D:\DCx\scripts\audit-ubuntu-server.ps1
 ```
 
 Equivalent Windows steps are in `scripts/ci.ps1`.
@@ -89,7 +104,7 @@ The GitHub Actions workflow was not remotely executed because no remote reposito
 
 - Repository controls: `.editorconfig`, `.gitattributes`, `.gitignore`, `global.json`, `NuGet.Config`, central build/package files, solution, CI workflow.
 - Native code: `src/DCx.Core`, `src/DCx.Desktop`.
-- Tests and scripts: `tests/DCx.Core.Tests`, `scripts/ci.ps1`, `scripts/verify-p00.sh`, `scripts/smoke-desktop.ps1`.
+- Tests and scripts: `tests/DCx.Core.Tests`, `scripts/ci.ps1`, `scripts/verify-p00.sh`, `scripts/smoke-desktop.ps1`, bounded `scripts/audit-ubuntu-server.ps1`.
 - Governance/docs: `AGENTS.md`, root README/license/notice, architecture ADRs, security/privacy/accessibility/deployment/reference/progress docs, `RESUME.md`.
 - Authoritative handoff files were retained unchanged.
 
@@ -105,5 +120,7 @@ The GitHub Actions workflow was not remotely executed because no remote reposito
 
 - No hosted Git remote exists, so the checked-in GitHub workflow cannot be claimed as remotely executed. The same commands are executed locally on native Windows.
 - Docker daemon permission is unavailable to this WSL user; relevant only from P09.
+- The real Ubuntu server has current Docker/Compose and an active daemon, but the authenticated non-root user lacks daemon access. Granting group/sudo authority is privileged and was not attempted.
+- The server's Bubblewrap network namespace smoke fails and its current cgroup is not delegated writable; P10 must not claim deployable hostile-code isolation until an approved remediation preserves network denial and measured resource enforcement.
 - WinUI 3 was not built because its template/workload is absent; installing it would be unnecessary privileged setup for the selected WPF path.
 - Disk is already 88% used; P06 model selection must budget space before any download.
