@@ -64,6 +64,8 @@ public sealed class CareOperationsApiE2eTests : IDisposable
         startInfo.Environment["DCX_GLOBAL_CARE_OPERATOR_TOKEN_SHA256"] = Digest(operatorToken);
         startInfo.Environment["DCX_GLOBAL_CARE_OPERATOR_PSEUDONYM_SHA256"] =
             operatorPseudonymSha256;
+        startInfo.Environment["DCX_GLOBAL_CARE_MONITOR"] = "1";
+        startInfo.Environment["DCX_GLOBAL_CARE_MONITOR_INTERVAL_MS"] = "100";
         startInfo.Environment["Logging__LogLevel__Default"] = "Warning";
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start the CARE operations fixture.");
@@ -79,7 +81,9 @@ public sealed class CareOperationsApiE2eTests : IDisposable
                 Assert.True(healthDocument.RootElement.GetProperty("careOperationsApi").GetBoolean());
                 Assert.True(healthDocument.RootElement.GetProperty("careOperationsProcessing").GetBoolean());
                 Assert.True(healthDocument.RootElement.GetProperty("careOperationsRateLimit").GetBoolean());
+                Assert.True(healthDocument.RootElement.GetProperty("careOperationsMonitor").GetBoolean());
             }
+            await Task.Delay(250);
 
             var healthUri = new Uri(endpoint, "api/care/operations/health");
             using (var missingAuth = await client.GetAsync(healthUri))
@@ -188,6 +192,7 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             }
 
             var diagnostics = await outputTask + await errorTask;
+            Assert.Contains(CareOperationsMonitor.RetryDueCode, diagnostics, StringComparison.Ordinal);
             Assert.DoesNotContain(operatorToken, diagnostics, StringComparison.Ordinal);
             Assert.DoesNotContain(wrongToken, diagnostics, StringComparison.Ordinal);
             Assert.DoesNotContain("WH-CARE-API", diagnostics, StringComparison.Ordinal);

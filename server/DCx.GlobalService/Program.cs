@@ -1,3 +1,4 @@
+using DCx.Core.Finance;
 using DCx.GlobalService;
 
 if (!string.Equals(Environment.GetEnvironmentVariable("DCX_GLOBAL_SIMULATION"), "1", StringComparison.Ordinal))
@@ -20,6 +21,8 @@ var contributionRateLimiter = contributionApiOptions is null
 var contributionWorkerOptions = SimulationContributionWorkerOptions.Load(
     contributionApiOptions is not null);
 var careOperationsApiOptions = SimulationCareOperationsApiOptions.Load();
+var careOperationsMonitorOptions = SimulationCareOperationsMonitorOptions.Load(
+    careOperationsApiOptions is not null);
 var careOperationsRateLimiter = careOperationsApiOptions is null
     ? null
     : new SimulationContributionRequestLimiter(
@@ -106,6 +109,14 @@ if (careOperationsApiOptions is not null)
         operatorPseudonymSha256: careOperationsApiOptions.OperatorPseudonymSha256);
     builder.Services.AddSingleton(careRepository);
     builder.Services.AddSingleton(careOperationsSource);
+    if (careOperationsMonitorOptions is not null)
+    {
+        builder.Services.AddSingleton<ICareOperationsSource>(careOperationsSource);
+        builder.Services.AddSingleton(careOperationsMonitorOptions);
+        builder.Services.AddSingleton<ICareOperationsAlertSink, LoggingCareOperationsAlertSink>();
+        builder.Services.AddSingleton<CareOperationsMonitor>();
+        builder.Services.AddHostedService<CareOperationsMonitoringWorker>();
+    }
 }
 
 var app = builder.Build();
@@ -119,6 +130,7 @@ app.MapGet("/health", () => Results.Ok(new
     careOperationsApi = careOperationsApiOptions is not null,
     careOperationsProcessing = careOperationsApiOptions?.ProcessingEnabled ?? false,
     careOperationsRateLimit = careOperationsRateLimiter is not null,
+    careOperationsMonitor = careOperationsMonitorOptions is not null,
 }));
 app.MapGet("/api/trust-policy/latest", async (GlobalRegistryRepository registry, CancellationToken cancellationToken) =>
 {
