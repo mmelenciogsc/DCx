@@ -180,9 +180,10 @@ public partial class ContentViewerWindow : Window
     {
         if (MediaViewer.Source is null) return;
         var model = Environment.GetEnvironmentVariable("DCX_VISION_MODEL");
-        if (string.IsNullOrWhiteSpace(model))
+        var modelDigest = Environment.GetEnvironmentVariable("DCX_VISION_MODEL_SHA256");
+        if (string.IsNullOrWhiteSpace(model) || string.IsNullOrWhiteSpace(modelDigest))
         {
-            SetStatus("No validated local vision model is configured. Complete P06 model selection first.");
+            SetStatus("No digest-pinned local vision model is configured. Complete P06 model selection first.");
             return;
         }
 
@@ -198,6 +199,7 @@ public partial class ContentViewerWindow : Window
                 MediaViewer.Source.LocalPath,
                 MediaViewer.Position,
                 model,
+                modelDigest,
                 _frameDescriptionCancellation.Token);
             FrameDescriptionText.Text = result.Text;
             SetStatus($"Frame description complete. {result.PromptTokens} prompt tokens and {result.OutputTokens} output tokens; video remains paused.");

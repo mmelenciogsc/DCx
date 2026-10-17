@@ -6,6 +6,12 @@ namespace DCx.Core.Tests.LocalModels;
 
 public sealed class OllamaLocalClientTests
 {
+    private const string VisionDigest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    private const string EmbeddingDigest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    private const string OtherDigest = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    private const string VisionModel = "fixture-vlm:" + VisionDigest;
+    private const string EmbeddingModel = "fixture-embed:" + EmbeddingDigest;
+
     [Fact]
     public void Constructor_RejectsNonLoopbackEndpoint()
     {
@@ -34,6 +40,21 @@ public sealed class OllamaLocalClientTests
     }
 
     [Fact]
+    public async Task InventoryAndExpectedDigest_RejectMalformedIdentityData()
+    {
+        using var malformed = new OllamaLocalClient(
+            new FixtureHandler { ReturnMalformedInventory = true },
+            new Uri("http://localhost:11434/"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => malformed.ListModelsAsync());
+
+        using var client = new OllamaLocalClient(
+            new FixtureHandler(),
+            new Uri("http://localhost:11434/"));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            client.DescribeImagePinnedAsync(VisionModel, "not-a-digest", "missing.png", "Describe."));
+    }
+
+    [Fact]
     public async Task ListAndVision_UseExpectedLocalContracts()
     {
         var handler = new FixtureHandler();
@@ -43,10 +64,13 @@ public sealed class OllamaLocalClientTests
         try
         {
             var models = await client.ListModelsAsync();
-            var result = await client.DescribeImageAsync("fixture-vlm", image, "Describe shapes.");
+            var result = await client.DescribeImagePinnedAsync(
+                VisionModel, VisionDigest, image, "Describe shapes.");
 
-            Assert.Equal("fixture-vlm", Assert.Single(models).Name);
-            Assert.True(models.Single().SupportsVision);
+            var vision = Assert.Single(models, candidate => candidate.Name == VisionModel);
+            Assert.True(vision.SupportsVision);
+            Assert.Equal(VisionDigest, vision.Digest);
+            Assert.True(vision.HasDigestBoundName);
             Assert.Equal("A blue square. A red circle.", result.Text);
             Assert.Equal(12, result.PromptTokens);
             Assert.Equal(8, result.OutputTokens);
@@ -65,8 +89,9 @@ public sealed class OllamaLocalClientTests
         var handler = new FixtureHandler();
         using var client = new OllamaLocalClient(handler, new Uri("http://127.0.0.1:11434/"));
 
-        var inspection = await client.InspectModelAsync("fixture-embed");
-        var result = await client.EmbedAsync("fixture-embed", ["first", "second"]);
+        var inspection = await client.InspectModelAsync(EmbeddingModel);
+        var result = await client.EmbedPinnedAsync(
+            EmbeddingModel, EmbeddingDigest, ["first", "second"]);
 
         Assert.Contains("embedding", inspection.Capabilities);
         Assert.Equal("Apache-2.0", inspection.License);
@@ -83,9 +108,12 @@ public sealed class OllamaLocalClientTests
         var handler = new FixtureHandler { ReturnInconsistentEmbeddings = true };
         using var client = new OllamaLocalClient(handler, new Uri("http://localhost:11434/"));
 
-        await Assert.ThrowsAsync<ArgumentException>(() => client.EmbedAsync("fixture", []));
-        await Assert.ThrowsAsync<ArgumentException>(() => client.EmbedAsync("fixture", [new string('x', 8193)]));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => client.EmbedAsync("fixture", ["one", "two"]));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            client.EmbedPinnedAsync(EmbeddingModel, EmbeddingDigest, []));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            client.EmbedPinnedAsync(EmbeddingModel, EmbeddingDigest, [new string('x', 8193)]));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.EmbedPinnedAsync(EmbeddingModel, EmbeddingDigest, ["one", "two"]));
     }
 
     [Fact]
@@ -98,7 +126,8 @@ public sealed class OllamaLocalClientTests
         try
         {
             await Assert.ThrowsAsync<ArgumentException>(() =>
-                client.DescribeImageAsync("fixture-vlm", image, "Describe shapes."));
+                client.DescribeImagePinnedAsync(
+                    VisionModel, VisionDigest, image, "Describe shapes."));
             Assert.Empty(handler.ChatRequest);
         }
         finally
@@ -117,7 +146,36 @@ public sealed class OllamaLocalClientTests
         try
         {
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                client.DescribeImageAsync("fixture-vlm", image, "Describe shapes."));
+                client.DescribeImagePinnedAsync(
+                    VisionModel, VisionDigest, image, "Describe shapes."));
+        }
+        finally
+        {
+            File.Delete(image);
+        }
+    }
+
+    [Fact]
+    public async Task PinnedInference_RejectsDuplicateOrChangedRuntimeBinding()
+    {
+        var image = Path.GetTempFileName();
+        await File.WriteAllBytesAsync(
+            image, [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+        try
+        {
+            using var duplicate = new OllamaLocalClient(
+                new FixtureHandler { DuplicateVisionBinding = true },
+                new Uri("http://localhost:11434/"));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                duplicate.DescribeImagePinnedAsync(
+                    VisionModel, VisionDigest, image, "Describe shapes."));
+
+            using var changed = new OllamaLocalClient(
+                new FixtureHandler { ChangeVisionBindingAfterInference = true },
+                new Uri("http://localhost:11434/"));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                changed.DescribeImagePinnedAsync(
+                    VisionModel, VisionDigest, image, "Describe shapes."));
         }
         finally
         {
@@ -131,13 +189,33 @@ public sealed class OllamaLocalClientTests
         public string EmbeddingRequest { get; private set; } = string.Empty;
         public bool ReturnInconsistentEmbeddings { get; init; }
         public bool ReturnIncompleteVision { get; init; }
+        public bool DuplicateVisionBinding { get; init; }
+        public bool ChangeVisionBindingAfterInference { get; init; }
+        public bool ReturnMalformedInventory { get; init; }
         public Uri? ResponseUri { get; init; }
+        private int inventoryCalls;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             if (request.RequestUri?.AbsolutePath == "/api/tags")
             {
-                return Json("{\"models\":[{\"name\":\"fixture-vlm\",\"size\":1000,\"capabilities\":[\"completion\",\"vision\"],\"details\":{\"parameter_size\":\"1B\",\"quantization_level\":\"Q4\"}}]}", request);
+                if (ReturnMalformedInventory)
+                {
+                    return Json(
+                        "{\"models\":[{\"name\":\"mutable-tag\",\"size\":1000,\"details\":{}}]}",
+                        request);
+                }
+
+                inventoryCalls++;
+                var visionDigest = ChangeVisionBindingAfterInference && inventoryCalls > 1
+                    ? OtherDigest
+                    : VisionDigest;
+                var duplicate = DuplicateVisionBinding
+                    ? $",{{\"name\":\"{VisionModel}\",\"digest\":\"{OtherDigest}\",\"size\":1001,\"capabilities\":[\"completion\",\"vision\"],\"details\":{{\"parameter_size\":\"1B\",\"quantization_level\":\"Q4\"}}}}"
+                    : string.Empty;
+                return Json(
+                    $"{{\"models\":[{{\"name\":\"{VisionModel}\",\"digest\":\"{visionDigest}\",\"size\":1000,\"capabilities\":[\"completion\",\"vision\"],\"details\":{{\"parameter_size\":\"1B\",\"quantization_level\":\"Q4\"}}}}{duplicate},{{\"name\":\"{EmbeddingModel}\",\"digest\":\"{EmbeddingDigest}\",\"size\":500,\"capabilities\":[\"embedding\"],\"details\":{{\"parameter_size\":\"300M\",\"quantization_level\":\"F16\"}}}}]}}",
+                    request);
             }
 
             if (request.RequestUri?.AbsolutePath == "/api/show")
@@ -149,14 +227,14 @@ public sealed class OllamaLocalClientTests
             {
                 EmbeddingRequest = await request.Content!.ReadAsStringAsync(cancellationToken);
                 return Json(ReturnInconsistentEmbeddings
-                    ? "{\"model\":\"fixture\",\"embeddings\":[[0.1,0.2],[0.3]],\"prompt_eval_count\":7,\"total_duration\":100}"
-                    : "{\"model\":\"fixture-embed\",\"embeddings\":[[0.1,0.2,0.3],[0.4,0.5,0.6]],\"prompt_eval_count\":7,\"total_duration\":100,\"load_duration\":20}", request);
+                    ? $"{{\"model\":\"{EmbeddingModel}\",\"embeddings\":[[0.1,0.2],[0.3]],\"prompt_eval_count\":7,\"total_duration\":100}}"
+                    : $"{{\"model\":\"{EmbeddingModel}\",\"embeddings\":[[0.1,0.2,0.3],[0.4,0.5,0.6]],\"prompt_eval_count\":7,\"total_duration\":100,\"load_duration\":20}}", request);
             }
 
             ChatRequest = await request.Content!.ReadAsStringAsync(cancellationToken);
             return Json(ReturnIncompleteVision
                 ? "{\"model\":\"wrong-model\",\"done\":false,\"message\":{\"content\":\"Partial\"}}"
-                : "{\"model\":\"fixture-vlm\",\"done\":true,\"message\":{\"content\":\"A blue square. A red circle.\"},\"prompt_eval_count\":12,\"eval_count\":8,\"total_duration\":1000}", request);
+                : $"{{\"model\":\"{VisionModel}\",\"done\":true,\"message\":{{\"content\":\"A blue square. A red circle.\"}},\"prompt_eval_count\":12,\"eval_count\":8,\"total_duration\":1000}}", request);
         }
 
         private HttpResponseMessage Json(string value, HttpRequestMessage request) => new(HttpStatusCode.OK)

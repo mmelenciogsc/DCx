@@ -7,7 +7,16 @@ public sealed record LocalModelDescriptor(
     bool SupportsEmbeddings,
     string? ParameterSize = null,
     string? Quantization = null,
-    string? License = null);
+    string? License = null,
+    string? Digest = null)
+{
+    public bool HasDigestBoundName =>
+        Digest is { Length: 64 } &&
+        Digest.All(character => char.IsAsciiHexDigit(character)) &&
+        Name.Length > Digest.Length &&
+        Name[Name.Length - Digest.Length - 1] is ':' or '-' &&
+        Name.EndsWith(Digest, StringComparison.OrdinalIgnoreCase);
+}
 
 public sealed record LocalModelSelection(LocalModelDescriptor? Model, string Reason)
 {

@@ -72,7 +72,8 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path $pdfFixture)) { throw "ImageMagick c
 $env:DCX_REPO_ROOT = $repoRoot
 $env:DCX_DATA_ROOT = Join-Path $runRoot "data"
 $env:DCX_EXPORT_ROOT = $exportRoot
-$env:DCX_VISION_MODEL = "qwen3-vl:4b-instruct"
+$env:DCX_VISION_MODEL_SHA256 = "ef33995bb2ac37689e49c1a15cd627354d05a3c21d1f4bdcd6a5c83825349c1f"
+$env:DCX_VISION_MODEL = "llamacpp:$($env:DCX_VISION_MODEL_SHA256)"
 $process = Start-Process $exe -PassThru
 try {
     $mainWindow = Wait-For {

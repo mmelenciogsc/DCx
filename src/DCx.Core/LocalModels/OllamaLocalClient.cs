@@ -72,17 +72,54 @@ public sealed class OllamaLocalClient : IDisposable
         foreach (var item in document.RootElement.GetProperty("models").EnumerateArray())
         {
             if (models.Count >= 1000) throw new InvalidOperationException("The Ollama model inventory exceeds its limit.");
-            var details = item.GetProperty("details");
-            var capabilities = item.TryGetProperty("capabilities", out var capabilityElement)
-                ? capabilityElement.EnumerateArray().Select(value => value.GetString()).ToHashSet(StringComparer.Ordinal)
-                : [];
+            if (item.ValueKind != JsonValueKind.Object ||
+                !item.TryGetProperty("name", out var nameElement) ||
+                nameElement.ValueKind != JsonValueKind.String ||
+                !item.TryGetProperty("size", out var sizeElement) ||
+                !sizeElement.TryGetInt64(out var size) || size <= 0 ||
+                !item.TryGetProperty("digest", out var digestElement) ||
+                digestElement.ValueKind != JsonValueKind.String)
+            {
+                throw new InvalidOperationException("The Ollama model inventory contains an invalid entry.");
+            }
+
+            var name = nameElement.GetString()!;
+            var digest = digestElement.GetString()!;
+            ValidateModelName(name);
+            ValidateDigest(digest, nameof(digest));
+            if (!item.TryGetProperty("details", out var details) || details.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException("The Ollama model inventory entry has no valid details object.");
+            }
+
+            var capabilities = new HashSet<string>(StringComparer.Ordinal);
+            if (item.TryGetProperty("capabilities", out var capabilityElement))
+            {
+                if (capabilityElement.ValueKind != JsonValueKind.Array || capabilityElement.GetArrayLength() > 32)
+                {
+                    throw new InvalidOperationException("The Ollama capability inventory exceeds its limit.");
+                }
+
+                foreach (var capability in capabilityElement.EnumerateArray())
+                {
+                    if (capability.ValueKind != JsonValueKind.String ||
+                        capability.GetString() is not { Length: > 0 and <= 64 } value ||
+                        value.Any(char.IsControl))
+                    {
+                        throw new InvalidOperationException("The Ollama capability inventory contains an invalid value.");
+                    }
+
+                    capabilities.Add(value);
+                }
+            }
             models.Add(new LocalModelDescriptor(
-                item.GetProperty("name").GetString()!,
-                item.GetProperty("size").GetInt64(),
+                name,
+                size,
                 SupportsVision: capabilities.Contains("vision"),
                 SupportsEmbeddings: capabilities.Contains("embedding"),
                 details.TryGetProperty("parameter_size", out var parameterSize) ? parameterSize.GetString() : null,
-                details.TryGetProperty("quantization_level", out var quantization) ? quantization.GetString() : null));
+                details.TryGetProperty("quantization_level", out var quantization) ? quantization.GetString() : null,
+                Digest: digest.ToLowerInvariant()));
         }
 
         return models;
@@ -119,18 +156,23 @@ public sealed class OllamaLocalClient : IDisposable
             details.ValueKind == JsonValueKind.Object && details.TryGetProperty("quantization_level", out var quantization) ? quantization.GetString() : null);
     }
 
-    public async Task<OllamaEmbeddingResult> EmbedAsync(
+    public async Task<OllamaEmbeddingResult> EmbedPinnedAsync(
         string model,
+        string expectedDigest,
         IReadOnlyList<string> inputs,
         CancellationToken cancellationToken = default)
     {
         ValidateModelName(model);
+        ValidateDigest(expectedDigest, nameof(expectedDigest));
         ArgumentNullException.ThrowIfNull(inputs);
         if (inputs.Count is 0 or > MaximumEmbeddingInputs || inputs.Any(input =>
                 string.IsNullOrWhiteSpace(input) || input.Length > MaximumEmbeddingInputCharacters || input.Contains('\0')))
         {
             throw new ArgumentException("Embedding input must contain 1 to 32 bounded nonempty strings.", nameof(inputs));
         }
+
+        await RequireBoundModelAsync(
+            model, expectedDigest, requireVision: false, requireEmbedding: true, cancellationToken).ConfigureAwait(false);
 
         using var response = await _httpClient.PostAsJsonAsync(
             "api/embed",
@@ -173,21 +215,26 @@ public sealed class OllamaLocalClient : IDisposable
             embeddings.Add(vector);
         }
 
-        return new OllamaEmbeddingResult(
+        var result = new OllamaEmbeddingResult(
             model,
             embeddings,
             root.TryGetProperty("prompt_eval_count", out var promptTokens) ? promptTokens.GetInt32() : 0,
             root.TryGetProperty("total_duration", out var duration) ? duration.GetInt64() : 0,
             root.TryGetProperty("load_duration", out var loadDuration) ? loadDuration.GetInt64() : 0);
+        await RequireBoundModelAsync(
+            model, expectedDigest, requireVision: false, requireEmbedding: true, cancellationToken).ConfigureAwait(false);
+        return result;
     }
 
-    public async Task<OllamaVisionResult> DescribeImageAsync(
+    public async Task<OllamaVisionResult> DescribeImagePinnedAsync(
         string model,
+        string expectedDigest,
         string imagePath,
         string prompt,
         CancellationToken cancellationToken = default)
     {
         ValidateModelName(model);
+        ValidateDigest(expectedDigest, nameof(expectedDigest));
         ArgumentException.ThrowIfNullOrWhiteSpace(imagePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         if (prompt.Length > MaximumPromptCharacters || prompt.Contains('\0'))
@@ -200,6 +247,9 @@ public sealed class OllamaLocalClient : IDisposable
         {
             throw new ArgumentException("The image must exist and be between 1 byte and 20 MiB.", nameof(imagePath));
         }
+
+        await RequireBoundModelAsync(
+            model, expectedDigest, requireVision: true, requireEmbedding: false, cancellationToken).ConfigureAwait(false);
 
         var imageBytes = new byte[checked((int)file.Length)];
         await using (var stream = new FileStream(
@@ -247,11 +297,14 @@ public sealed class OllamaLocalClient : IDisposable
             throw new InvalidOperationException("The Ollama vision response text is empty or outside its limit.");
         }
 
-        return new OllamaVisionResult(
+        var result = new OllamaVisionResult(
             text,
             root.TryGetProperty("prompt_eval_count", out var promptTokens) ? promptTokens.GetInt32() : 0,
             root.TryGetProperty("eval_count", out var outputTokens) ? outputTokens.GetInt32() : 0,
             root.TryGetProperty("total_duration", out var duration) ? duration.GetInt64() : 0);
+        await RequireBoundModelAsync(
+            model, expectedDigest, requireVision: true, requireEmbedding: false, cancellationToken).ConfigureAwait(false);
+        return result;
     }
 
     public void Dispose() => _httpClient.Dispose();
@@ -263,6 +316,39 @@ public sealed class OllamaLocalClient : IDisposable
         {
             throw new ArgumentException("The Ollama model name is invalid.", nameof(model));
         }
+    }
+
+    private static void ValidateDigest(string digest, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(digest) || digest.Length != 64 ||
+            !digest.All(character => char.IsAsciiHexDigit(character)))
+        {
+            throw new ArgumentException(
+                "An Ollama model binding requires a 64-character SHA-256 digest.", parameterName);
+        }
+    }
+
+    private async Task<LocalModelDescriptor> RequireBoundModelAsync(
+        string model,
+        string expectedDigest,
+        bool requireVision,
+        bool requireEmbedding,
+        CancellationToken cancellationToken)
+    {
+        var matches = (await ListModelsAsync(cancellationToken).ConfigureAwait(false))
+            .Where(candidate => string.Equals(candidate.Name, model, StringComparison.Ordinal))
+            .ToArray();
+        if (matches.Length != 1 ||
+            !string.Equals(matches[0].Digest, expectedDigest, StringComparison.OrdinalIgnoreCase) ||
+            !matches[0].HasDigestBoundName ||
+            requireVision && !matches[0].SupportsVision ||
+            requireEmbedding && !matches[0].SupportsEmbeddings)
+        {
+            throw new InvalidOperationException(
+                "The requested Ollama model is not uniquely bound to the expected digest and capability.");
+        }
+
+        return matches[0];
     }
 
     private void EnsureLoopbackResponse(HttpResponseMessage response)
