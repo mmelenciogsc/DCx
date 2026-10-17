@@ -2,6 +2,10 @@
 param()
 
 $ErrorActionPreference = "Stop"
+if ($PSVersionTable.PSEdition -ne "Core" -or $PSVersionTable.PSVersion -lt [Version]"7.4" -or
+    [Runtime.InteropServices.RuntimeInformation]::FrameworkDescription -notlike ".NET 10.*") {
+    throw "P13 requires supported Windows PowerShell 7.4 or newer running on .NET 10; use pwsh.exe."
+}
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $solution = Join-Path $repoRoot "DCx.slnx"
 $desktopProject = Join-Path $repoRoot "src\DCx.Desktop\DCx.Desktop.csproj"
@@ -505,18 +509,34 @@ try {
 
     $publishedExe = Join-Path $publishOne "DCx.exe"
     $signature = Get-AuthenticodeSignature -FilePath $publishedExe
-    [Reflection.Assembly]::LoadFrom((Join-Path $publishOne "DCx.Core.dll")) | Out-Null
-    $manifestInspector = [DCx.Core.Deployment.MsixManifestInspector]::new()
+    $coreAssembly = [Reflection.Assembly]::LoadFrom((Join-Path $publishOne "DCx.Core.dll"))
+    $manifestInspectorType = $coreAssembly.GetType(
+        "DCx.Core.Deployment.MsixManifestInspector", $true)
+    $authenticodeProbeType = $coreAssembly.GetType(
+        "DCx.Core.Deployment.WindowsPowerShellAuthenticodeProbe", $true)
+    $trustVerifierType = $coreAssembly.GetType(
+        "DCx.Core.Deployment.MsixPackageTrustVerifier", $true)
+    $manifestInspector = [Activator]::CreateInstance($manifestInspectorType)
     $actualMsixIdentity = $manifestInspector.InspectAsync(
         $msixOne,
         [Threading.CancellationToken]::None).GetAwaiter().GetResult()
-    $actualSignatureProbe = [DCx.Core.Deployment.WindowsPowerShellAuthenticodeProbe]::new()
+    $authenticodeConstructors = @($authenticodeProbeType.GetConstructors() | Where-Object {
+        $_.GetParameters().Count -eq 2
+    })
+    if ($authenticodeConstructors.Count -ne 1) {
+        throw "The Windows Authenticode probe constructor contract changed."
+    }
+    $actualSignatureProbe = $authenticodeConstructors[0].Invoke(
+        [object[]]@($null, $null))
     $actualMsixSignature = $actualSignatureProbe.InspectAsync(
         $msixOne,
         [Threading.CancellationToken]::None).GetAwaiter().GetResult()
-    $actualTrustVerifier = [DCx.Core.Deployment.MsixPackageTrustVerifier]::new(
-        $actualSignatureProbe,
-        $manifestInspector)
+    $trustConstructors = @($trustVerifierType.GetConstructors())
+    if ($trustConstructors.Count -ne 1) {
+        throw "The package trust verifier constructor contract changed."
+    }
+    $actualTrustVerifier = $trustConstructors[0].Invoke(
+        [object[]]@($actualSignatureProbe, $manifestInspector))
     $actualMsixTrust = $actualTrustVerifier.VerifyAsync(
         $msixOne,
         [Threading.CancellationToken]::None).GetAwaiter().GetResult()

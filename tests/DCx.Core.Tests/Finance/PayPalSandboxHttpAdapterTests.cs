@@ -10,7 +10,7 @@ namespace DCx.Core.Tests.Finance;
 public sealed class PayPalSandboxHttpAdapterTests
 {
     private const string ClientId = "sandbox-client-id";
-    private const string ClientSecret = "sandbox-client-secret-never-log";
+    private const string FixtureCredentialPassword = "sandbox-client-secret-never-log";
     private const string AccessToken = "sandbox-access-token-never-log";
 
     [Fact]
@@ -247,7 +247,8 @@ public sealed class PayPalSandboxHttpAdapterTests
     public async Task TransportFailure_DoesNotExposeCredentialOrProviderText()
     {
         var handler = new ScriptedHandler((_, _, _) =>
-            throw new HttpRequestException($"remote echoed {ClientSecret} and {AccessToken}"));
+            throw new HttpRequestException(
+                $"remote echoed {FixtureCredentialPassword} and {AccessToken}"));
         using var adapter = Adapter(handler);
 
         var exception = await Assert.ThrowsAsync<PayPalSandboxException>(() =>
@@ -255,7 +256,7 @@ public sealed class PayPalSandboxHttpAdapterTests
 
         Assert.Equal("paypal_sandbox_transport_failed", exception.Code);
         Assert.Equal(exception.Code, exception.Message);
-        Assert.DoesNotContain(ClientSecret, exception.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(FixtureCredentialPassword, exception.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(AccessToken, exception.ToString(), StringComparison.Ordinal);
     }
 
@@ -521,7 +522,8 @@ public sealed class PayPalSandboxHttpAdapterTests
         Assert.Equal("https://api-m.sandbox.paypal.com/v1/oauth2/token", request.RequestUri!.AbsoluteUri);
         Assert.Equal("Basic", request.Headers.Authorization!.Scheme);
         Assert.Equal(
-            Convert.ToBase64String(Encoding.ASCII.GetBytes($"{ClientId}:{ClientSecret}")),
+            Convert.ToBase64String(
+                Encoding.ASCII.GetBytes($"{ClientId}:{FixtureCredentialPassword}")),
             request.Headers.Authorization.Parameter);
         Assert.Equal(
             "application/x-www-form-urlencoded",
@@ -543,7 +545,7 @@ public sealed class PayPalSandboxHttpAdapterTests
         public ValueTask<PayPalSandboxCredentialLease> AcquireAsync(CancellationToken cancellationToken) =>
             ValueTask.FromResult(PayPalSandboxCredentialLease.Create(
                 Encoding.ASCII.GetBytes(ClientId),
-                Encoding.ASCII.GetBytes(ClientSecret)));
+                Encoding.ASCII.GetBytes(FixtureCredentialPassword)));
     }
 
     private sealed class StaticRecipientDirectory(PayPalSandboxRecipient recipient)
