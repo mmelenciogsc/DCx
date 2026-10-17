@@ -86,6 +86,7 @@ internal sealed class LoggingCareOperationsAlertSink(
 internal sealed class CareOperationsMonitor(
     ICareOperationsSource source,
     ICareOperationsAlertSink sink,
+    ICareOperationsAlertQueue queue,
     TimeProvider? timeProvider = null)
 {
     internal const string RetryScheduledCode = "care_retry_scheduled";
@@ -95,7 +96,6 @@ internal sealed class CareOperationsMonitor(
 
     private readonly SemaphoreSlim cycleLock = new(1, 1);
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
-    private CareOperationsAlertFingerprint? lastDeliveredState;
 
     internal async Task<CareOperationsAggregateAlert?> PollOnceAsync(
         CancellationToken cancellationToken = default)
@@ -105,41 +105,18 @@ internal sealed class CareOperationsMonitor(
         {
             var health = await source.RefreshAsync(cancellationToken).ConfigureAwait(false);
             CareOperationsPolicy.RequireHealth(health);
-            var current = CareOperationsAlertFingerprint.From(health);
-            var previous = lastDeliveredState;
-            if (previous == current)
-            {
-                return null;
-            }
-
-            if (health.StatusCode == "clear" &&
-                (previous is null || previous.StatusCode == "clear"))
-            {
-                lastDeliveredState = current;
-                return null;
-            }
-
-            var alert = new CareOperationsAggregateAlert(
-                health.StatusCode switch
-                {
-                    "retry_scheduled" => RetryScheduledCode,
-                    "retry_due" => RetryDueCode,
-                    "operator_action_required" => OperatorActionRequiredCode,
-                    "clear" => RecoveredCode,
-                    _ => throw new InvalidOperationException(
-                        "The CARE aggregate monitor status is invalid."),
-                },
-                health.StatusCode switch
-                {
-                    "operator_action_required" => "critical",
-                    "retry_due" => "warning",
-                    _ => "information",
-                },
-                health,
-                clock.GetUtcNow().ToUniversalTime());
-            await sink.PublishAsync(alert, cancellationToken).ConfigureAwait(false);
-            lastDeliveredState = current;
-            return alert;
+            var queued = await queue.ObserveAsync(
+                    health, clock.GetUtcNow(), cancellationToken)
+                .ConfigureAwait(false);
+            if (queued is null) return null;
+            await sink.PublishAsync(queued.Alert, cancellationToken).ConfigureAwait(false);
+            await queue.MarkDeliveredAsync(
+                    queued.Sequence,
+                    queued.RecordSha256,
+                    clock.GetUtcNow(),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return queued.Alert;
         }
         finally
         {
@@ -147,26 +124,6 @@ internal sealed class CareOperationsMonitor(
         }
     }
 
-    private sealed record CareOperationsAlertFingerprint(
-        string StatusCode,
-        int Pending,
-        int Due,
-        int Blocked,
-        int MaximumAttemptCount,
-        DateTimeOffset? OldestPendingUtc,
-        DateTimeOffset? NextAttemptUtc,
-        bool CanProcessDue)
-    {
-        internal static CareOperationsAlertFingerprint From(CareOperationsHealth health) => new(
-            health.StatusCode,
-            health.Pending,
-            health.Due,
-            health.Blocked,
-            health.MaximumAttemptCount,
-            health.OldestPendingUtc,
-            health.NextAttemptUtc,
-            health.CanProcessDue);
-    }
 }
 
 internal sealed class CareOperationsMonitoringWorker(

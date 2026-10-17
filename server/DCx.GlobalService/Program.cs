@@ -112,6 +112,7 @@ if (careOperationsApiOptions is not null)
     if (careOperationsMonitorOptions is not null)
     {
         builder.Services.AddSingleton<ICareOperationsSource>(careOperationsSource);
+        builder.Services.AddSingleton<ICareOperationsAlertQueue>(careRepository);
         builder.Services.AddSingleton(careOperationsMonitorOptions);
         builder.Services.AddSingleton<ICareOperationsAlertSink, LoggingCareOperationsAlertSink>();
         builder.Services.AddSingleton<CareOperationsMonitor>();

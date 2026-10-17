@@ -21,7 +21,8 @@ public sealed class CareOperationsMonitorTests
             Health("clear", completed: 3));
         var sink = new CapturingSink();
         var monitor = new CareOperationsMonitor(
-            source, sink, new FixedTimeProvider(Now));
+            source, sink, new InMemoryCareOperationsAlertQueue(),
+            new FixedTimeProvider(Now));
 
         for (var index = 0; index < 7; index++)
         {
@@ -52,7 +53,8 @@ public sealed class CareOperationsMonitorTests
         var due = Health("retry_due", pending: 1, due: 1, canProcess: true);
         var source = new SequenceSource(due, due, due);
         var sink = new CapturingSink(failFirst: true);
-        var monitor = new CareOperationsMonitor(source, sink);
+        var monitor = new CareOperationsMonitor(
+            source, sink, new InMemoryCareOperationsAlertQueue());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => monitor.PollOnceAsync());
         var attempts = await Task.WhenAll(

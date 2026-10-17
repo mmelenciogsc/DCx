@@ -1033,7 +1033,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         command.CommandText = "PRAGMA user_version;";
         var schemaVersion = Convert.ToInt32(
             await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
-        if (schemaVersion > 9)
+        if (schemaVersion > 10)
         {
             throw new InvalidOperationException("The CARE ledger schema is newer than this application.");
         }
@@ -1299,6 +1299,82 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             BEGIN
                 SELECT RAISE(ABORT, 'CARE operator audit is append-only');
             END;
+            CREATE TABLE IF NOT EXISTS care_operations_monitor_state(
+                singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+                status_code TEXT NOT NULL CHECK(status_code IN (
+                    'clear', 'retry_due', 'retry_scheduled',
+                    'operator_action_required')),
+                fingerprint_sha256 TEXT NOT NULL CHECK(
+                    length(fingerprint_sha256) = 64 AND
+                    fingerprint_sha256 = lower(fingerprint_sha256) AND
+                    fingerprint_sha256 NOT GLOB '*[^0-9a-f]*'),
+                observed_utc TEXT NOT NULL,
+                state_sha256 TEXT NOT NULL CHECK(
+                    length(state_sha256) = 64 AND
+                    state_sha256 = lower(state_sha256) AND
+                    state_sha256 NOT GLOB '*[^0-9a-f]*')
+            );
+            CREATE TABLE IF NOT EXISTS care_operations_alert_outbox(
+                sequence INTEGER PRIMARY KEY CHECK(sequence > 0),
+                code TEXT NOT NULL CHECK(code IN (
+                    'care_retry_scheduled', 'care_retry_due',
+                    'care_operator_action_required', 'care_recovered')),
+                severity TEXT NOT NULL CHECK(severity IN (
+                    'information', 'warning', 'critical')),
+                status_code TEXT NOT NULL CHECK(status_code IN (
+                    'clear', 'retry_due', 'retry_scheduled',
+                    'operator_action_required')),
+                pending INTEGER NOT NULL CHECK(pending BETWEEN 0 AND 1000000),
+                due INTEGER NOT NULL CHECK(due BETWEEN 0 AND pending),
+                blocked INTEGER NOT NULL CHECK(blocked BETWEEN 0 AND 1000000),
+                completed INTEGER NOT NULL CHECK(completed BETWEEN 0 AND 1000000),
+                maximum_attempt_count INTEGER NOT NULL CHECK(
+                    maximum_attempt_count BETWEEN 0 AND 1000000),
+                oldest_pending_utc TEXT,
+                next_attempt_utc TEXT,
+                can_process_due INTEGER NOT NULL CHECK(can_process_due IN (0, 1)),
+                observed_utc TEXT NOT NULL,
+                previous_record_sha256 TEXT NOT NULL CHECK(
+                    length(previous_record_sha256) = 64 AND
+                    previous_record_sha256 = lower(previous_record_sha256) AND
+                    previous_record_sha256 NOT GLOB '*[^0-9a-f]*'),
+                record_sha256 TEXT NOT NULL UNIQUE CHECK(
+                    length(record_sha256) = 64 AND
+                    record_sha256 = lower(record_sha256) AND
+                    record_sha256 NOT GLOB '*[^0-9a-f]*'),
+                UNIQUE(sequence, record_sha256)
+            );
+            CREATE TABLE IF NOT EXISTS care_operations_alert_deliveries(
+                sequence INTEGER PRIMARY KEY,
+                record_sha256 TEXT NOT NULL UNIQUE,
+                delivered_utc TEXT NOT NULL,
+                delivery_sha256 TEXT NOT NULL UNIQUE CHECK(
+                    length(delivery_sha256) = 64 AND
+                    delivery_sha256 = lower(delivery_sha256) AND
+                    delivery_sha256 NOT GLOB '*[^0-9a-f]*'),
+                FOREIGN KEY(sequence, record_sha256)
+                    REFERENCES care_operations_alert_outbox(sequence, record_sha256)
+            );
+            CREATE TRIGGER IF NOT EXISTS care_operations_alert_outbox_no_update
+            BEFORE UPDATE ON care_operations_alert_outbox
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE alert outbox is append-only');
+            END;
+            CREATE TRIGGER IF NOT EXISTS care_operations_alert_outbox_no_delete
+            BEFORE DELETE ON care_operations_alert_outbox
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE alert outbox is append-only');
+            END;
+            CREATE TRIGGER IF NOT EXISTS care_operations_alert_delivery_no_update
+            BEFORE UPDATE ON care_operations_alert_deliveries
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE alert delivery is append-only');
+            END;
+            CREATE TRIGGER IF NOT EXISTS care_operations_alert_delivery_no_delete
+            BEFORE DELETE ON care_operations_alert_deliveries
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE alert delivery is append-only');
+            END;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         command.CommandText = """
@@ -1309,7 +1385,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             ON webhook_event_quarantine(state, next_attempt_utc, occurred_utc, event_id);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        command.CommandText = "PRAGMA user_version = 9;";
+        command.CommandText = "PRAGMA user_version = 10;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
