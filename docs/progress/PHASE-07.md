@@ -1,7 +1,7 @@
 # P07 — Files, documents, accessibility and media
 
 - Status: Complete (automated native gate; human assistive-technology pass unverified)
-- Implementation commits: `e21c654`, `4e8ee1f`, `c47edf9`, `c618254`, `10e07d5`
+- Implementation commits: `e21c654`, `4e8ee1f`, `c47edf9`, `c618254`, `10e07d5`, `ed6f001`
 - Documentation commit: recorded by the commit containing this file
 
 ## Implemented
@@ -14,6 +14,7 @@
 - Validated semantic HTML and structured DOCX export. The output is not a tagged accessible PDF and is never presented as editable unless a reviewed block is explicitly marked as a labeled form field.
 - Local-video pause, FFmpeg frame extraction, bounded optional question, loopback-only Ollama description, continued pause after description and explicit user resume.
 - User-invoked shared-viewport web-video Q&A: the current tab's largest ready, visible top-document HTML5 video is paused, its viewport-clipped rectangle is captured, the bounded question and frame go only to the approved loopback vision model, playback remains paused for follow-up questions, and resume is a separate same-tab/page action.
+- Direct admitted-WAV transcription through the exact approved local Whisper binding, with pause, accessible cancel, bounded strict transcript text, completed transcript focus and cleared-binding denial. No MP3/MP4 extraction is claimed.
 - Denial tests for spoofed extensions, malformed containers, YouTube lookalikes, credentials and unsupported pages.
 
 ## Reproduction
@@ -29,7 +30,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 ## Measured result
 
 - Locked native Release build: 0 warnings, 0 errors.
-- Original P07 content tests: passed 74, failed 0, skipped 0. New bounded-question policy tests: passed 5, failed 0, skipped 0. Current full native suite: passed 273, failed 0, skipped 0.
+- Original P07 content tests: passed 74, failed 0, skipped 0. New bounded-question policy tests: passed 5, failed 0, skipped 0. Current full native suite: passed 275, failed 0, skipped 0.
 - Real generated H.264 MP4: initial pause and Play/Pause passed.
 - Local frame description identified the fixture's solid blue content; video remained paused; explicit user resume passed.
 - Shared-viewport generated HTML5 video Q&A answered `Blue`; the video remained paused after narration and explicit same-page resume passed.
@@ -38,7 +39,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 - Windows OCR recognized the golden `DCX`/`42` content and returned normalized geometry.
 - Semantic repair, HTML export, real OPC DOCX export and DOCX viewer round-trip passed.
 - Native UIA script result: `P07 content viewer UIA validation=PASS`.
-- Latest evidence directory: `artifacts/test-results/p07-2d99cd06835848e18b52d4804acf44f2/` (generated and intentionally not committed).
+- Latest evidence directory: `artifacts/test-results/p07-ee447f4bbdd84aed8fee91999ccc091b/` (generated and intentionally not committed). The composed P06 evidence at `artifacts/test-results/p06-fec5e76f92cb4c49be4cb75bee3aa5c9/` contains the native WAV transcription UIA fixture.
 
 ## Security, accessibility and limitations
 
@@ -47,4 +48,4 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 - Folder presentation is bounded and does not expose absolute paths in item labels.
 - Human JAWS, NVDA and Narrator results remain `UNVERIFIED`; see `docs/accessibility/P07_CONTENT_CHECKLIST.md`.
 - YouTube playback/provider limitations are reported in `docs/media/YOUTUBE_LIMITATIONS.md`. The gate proves safe URL admission/handoff and provider-neutral Q&A against a deterministic loopback HTML5 video. It does not prove live, authenticated, embedded, protected or universal YouTube frame Q&A.
-- Audio transcription remains blocked by P06's absent, unapproved Whisper backend.
+- The fake-CLI native WAV flow proves accessible broker integration, cancellation and text presentation, not speech accuracy. A real approved Whisper backend, accuracy/resource evidence and MP3/MP4 extraction remain blocked by P06.
