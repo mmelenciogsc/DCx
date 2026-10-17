@@ -98,6 +98,9 @@ public sealed class GlobalServiceE2eTests : IDisposable
             {
                 Assert.False(health.RootElement.GetProperty("contributionApi").GetBoolean());
                 Assert.False(health.RootElement.GetProperty("contributionRateLimit").GetBoolean());
+                Assert.False(health.RootElement.GetProperty("careOperationsApi").GetBoolean());
+                Assert.False(health.RootElement.GetProperty("careOperationsProcessing").GetBoolean());
+                Assert.False(health.RootElement.GetProperty("careOperationsRateLimit").GetBoolean());
                 Assert.False(health.RootElement.GetProperty("contributionWorker").GetBoolean());
                 Assert.False(health.RootElement.GetProperty("ccbSandbox").GetBoolean());
             }

@@ -1,0 +1,408 @@
+using System.Diagnostics;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using DCx.Core.Finance;
+using DCx.GlobalService;
+
+namespace DCx.Core.Tests.Finance;
+
+public sealed class CareOperationsApiE2eTests : IDisposable
+{
+    private const string PlanId = "P-DCX300";
+    private readonly string root = Path.Combine(
+        Path.GetTempPath(), $"dcx-care-api-{Guid.NewGuid():N}");
+
+    [Fact]
+    public async Task LoopbackApi_AuthenticatesBindsExactReviewAndNeverCallsProviderDuringReplay()
+    {
+        Directory.CreateDirectory(root);
+        using var signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var keyPath = Path.Combine(root, "simulation-key.pk8");
+        await File.WriteAllBytesAsync(keyPath, signingKey.ExportPkcs8PrivateKey());
+        var operatorToken = $"care-operator-{Guid.NewGuid():N}";
+        var wrongToken = $"wrong-operator-{Guid.NewGuid():N}";
+        var dataRoot = Path.Combine(root, "server");
+        var careRoot = Path.Combine(dataRoot, "care");
+        var repository = await DurableCareRepository.OpenAsync(careRoot);
+        var providerHandler = VerifiedWebhookHandler();
+        using var adapter = Adapter(providerHandler);
+        var received = DateTimeOffset.UtcNow.AddMinutes(-1).ToUniversalTime();
+        await QueuePaymentAsync(
+            repository,
+            adapter,
+            "FIRST",
+            "I-CARE-API-FIRST",
+            received);
+        await ActivateAsync(
+            repository,
+            adapter,
+            "FIRST",
+            "I-CARE-API-FIRST",
+            received);
+        Assert.Equal(4, providerHandler.Calls);
+
+        var endpoint = new Uri($"http://127.0.0.1:{ReserveEphemeralPort()}/");
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add(typeof(GlobalRegistryRepository).Assembly.Location);
+        startInfo.Environment["DCX_GLOBAL_SIMULATION"] = "1";
+        startInfo.Environment["DCX_GLOBAL_DATA_ROOT"] = dataRoot;
+        startInfo.Environment["DCX_GLOBAL_SIGNING_KEY"] = keyPath;
+        startInfo.Environment["DCX_GLOBAL_SIMULATION_URL"] = endpoint.AbsoluteUri;
+        startInfo.Environment["DCX_GLOBAL_CARE_OPERATIONS_API"] = "1";
+        startInfo.Environment["DCX_GLOBAL_CARE_PROCESSING"] = "1";
+        startInfo.Environment["DCX_GLOBAL_CARE_OPERATOR_TOKEN_SHA256"] = Digest(operatorToken);
+        startInfo.Environment["Logging__LogLevel__Default"] = "Warning";
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start the CARE operations fixture.");
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            await WaitForHealthAsync(client, endpoint, process, errorTask);
+            using (var healthDocument = JsonDocument.Parse(
+                       await client.GetStringAsync(new Uri(endpoint, "health"))))
+            {
+                Assert.True(healthDocument.RootElement.GetProperty("careOperationsApi").GetBoolean());
+                Assert.True(healthDocument.RootElement.GetProperty("careOperationsProcessing").GetBoolean());
+                Assert.True(healthDocument.RootElement.GetProperty("careOperationsRateLimit").GetBoolean());
+            }
+
+            var healthUri = new Uri(endpoint, "api/care/operations/health");
+            using (var missingAuth = await client.GetAsync(healthUri))
+            {
+                await AssertErrorAsync(
+                    missingAuth, HttpStatusCode.Unauthorized, "authentication_required");
+            }
+            using (var invalidAuth = await SendAuthorizedAsync(
+                       client, HttpMethod.Get, healthUri, wrongToken))
+            {
+                await AssertErrorAsync(
+                    invalidAuth, HttpStatusCode.Unauthorized, "authentication_invalid");
+            }
+            using (var malformed = await SendRawProcessAsync(
+                       client,
+                       new Uri(endpoint, "api/care/operations/process"),
+                       operatorToken,
+                       "{}"u8.ToArray()))
+            {
+                await AssertErrorAsync(
+                    malformed, HttpStatusCode.BadRequest, "care_operations_request_invalid");
+            }
+
+            using var source = new LoopbackCareOperationsSource(
+                endpoint, operatorToken, TimeSpan.FromSeconds(5));
+            var firstReview = await source.RefreshAsync();
+            Assert.Equal(1, firstReview.Due);
+            Assert.True(firstReview.CanProcessDue);
+            var serializedHealth = JsonSerializer.Serialize(firstReview);
+            Assert.DoesNotContain("FIRST", serializedHealth, StringComparison.Ordinal);
+            Assert.DoesNotContain("subscription", serializedHealth, StringComparison.OrdinalIgnoreCase);
+
+            var processUri = new Uri(endpoint, "api/care/operations/process");
+            using (var unapproved = await SendProcessAsync(
+                       client, processUri, operatorToken, firstReview, explicitlyApproved: false))
+            {
+                await AssertErrorAsync(
+                    unapproved, HttpStatusCode.Forbidden, "care_operations_approval_required");
+            }
+            Assert.Equal(0, (await repository.GetOfficialWebhookQuarantineAsync(
+                "WH-CARE-API-FIRST"))!.AttemptCount);
+
+            await QueuePaymentAsync(
+                repository,
+                adapter,
+                "SECOND",
+                "I-CARE-API-SECOND",
+                received);
+            var stale = await Assert.ThrowsAsync<CareOperationsTransportException>(() =>
+                source.ProcessDueAsync(firstReview, explicitlyApproved: true));
+            Assert.Equal("care_operations_review_stale", stale.Code);
+            await ActivateAsync(
+                repository,
+                adapter,
+                "SECOND",
+                "I-CARE-API-SECOND",
+                received);
+            Assert.Equal(8, providerHandler.Calls);
+
+            var exactReview = await source.RefreshAsync();
+            Assert.Equal(2, exactReview.Due);
+            var result = await source.ProcessDueAsync(exactReview, explicitlyApproved: true);
+
+            Assert.Equal(2, result.Scanned);
+            Assert.Equal(2, result.Completed);
+            Assert.Equal(0, result.ProviderCalls);
+            Assert.Equal("clear", result.Health.StatusCode);
+            Assert.Equal(600, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.Equal(8, providerHandler.Calls);
+            var replay = await Assert.ThrowsAsync<CareOperationsTransportException>(() =>
+                source.ProcessDueAsync(exactReview, explicitlyApproved: true));
+            Assert.Equal("care_operations_review_stale", replay.Code);
+            Assert.Equal(600, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.Equal(8, providerHandler.Calls);
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
+            }
+
+            var diagnostics = await outputTask + await errorTask;
+            Assert.DoesNotContain(operatorToken, diagnostics, StringComparison.Ordinal);
+            Assert.DoesNotContain(wrongToken, diagnostics, StringComparison.Ordinal);
+            Assert.DoesNotContain("WH-CARE-API", diagnostics, StringComparison.Ordinal);
+        }
+    }
+
+    public void Dispose() => TestDirectory.DeleteIfExists(root);
+
+    private static async Task QueuePaymentAsync(
+        DurableCareRepository repository,
+        PayPalSandboxHttpAdapter adapter,
+        string suffix,
+        string subscriptionId,
+        DateTimeOffset received)
+    {
+        var webhook = OfficialWebhook(
+            $"WH-CARE-API-{suffix}",
+            "PAYMENT.SALE.COMPLETED",
+            "sale",
+            $"{{\"id\":\"SALE-CARE-API-{suffix}\",\"state\":\"completed\",\"billing_agreement_id\":\"{subscriptionId}\",\"amount\":{{\"total\":\"3.00\",\"currency\":\"USD\"}}}}");
+        Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+            adapter,
+            Evidence($"transmission:care-api-payment-{suffix.ToLowerInvariant()}"),
+            webhook,
+            PlanId,
+            received));
+    }
+
+    private static async Task ActivateAsync(
+        DurableCareRepository repository,
+        PayPalSandboxHttpAdapter adapter,
+        string suffix,
+        string subscriptionId,
+        DateTimeOffset received)
+    {
+        var webhook = OfficialWebhook(
+            $"WH-CARE-API-{suffix}-ACTIVE",
+            "BILLING.SUBSCRIPTION.ACTIVATED",
+            "subscription",
+            $"{{\"id\":\"{subscriptionId}\",\"plan_id\":\"{PlanId}\",\"status\":\"ACTIVE\"}}");
+        Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+            adapter,
+            Evidence($"transmission:care-api-active-{suffix.ToLowerInvariant()}"),
+            webhook,
+            PlanId,
+            received));
+    }
+
+    private static PayPalSandboxHttpAdapter Adapter(HttpMessageHandler handler) => new(
+        handler,
+        new StaticCredentialSource(),
+        "WHDCXSANDBOX",
+        new EmptyRecipientDirectory(),
+        new MemoryReferenceStore());
+
+    private static ScriptedHandler VerifiedWebhookHandler() => new(
+        (index, request, _) => Task.FromResult(index % 2 == 0
+            ? Json(request, HttpStatusCode.OK,
+                "{\"access_token\":\"sandbox-token\",\"token_type\":\"Bearer\",\"expires_in\":3600}")
+            : Json(request, HttpStatusCode.OK, "{\"verification_status\":\"SUCCESS\"}")));
+
+    private static PayPalSandboxWebhookVerificationEvidence Evidence(string transmissionId) => new(
+        "SHA256withRSA",
+        new Uri("https://api.sandbox.paypal.com/v1/notifications/certs/CERT-DCX123"),
+        transmissionId,
+        Convert.ToBase64String(Enumerable.Repeat((byte)7, 64).ToArray()),
+        DateTimeOffset.UtcNow.ToString("O"));
+
+    private static byte[] OfficialWebhook(
+        string eventId,
+        string eventType,
+        string resourceType,
+        string resourceJson) => Encoding.UTF8.GetBytes(
+            $"{{\"id\":\"{eventId}\",\"create_time\":\"{DateTimeOffset.UtcNow:O}\",\"resource_type\":\"{resourceType}\",\"event_type\":\"{eventType}\",\"resource\":{resourceJson}}}");
+
+    private static async Task<HttpResponseMessage> SendAuthorizedAsync(
+        HttpClient client,
+        HttpMethod method,
+        Uri uri,
+        string token)
+    {
+        using var request = new HttpRequestMessage(method, uri);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> SendProcessAsync(
+        HttpClient client,
+        Uri uri,
+        string token,
+        CareOperationsHealth health,
+        bool explicitlyApproved)
+    {
+        var body = JsonSerializer.SerializeToUtf8Bytes(
+            new CareOperationsProcessRequest(health, explicitlyApproved),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using var request = new HttpRequestMessage(HttpMethod.Post, uri)
+        {
+            Content = new ByteArrayContent(body),
+        };
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        try
+        {
+            return await client.SendAsync(request);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(body);
+        }
+    }
+
+    private static async Task<HttpResponseMessage> SendRawProcessAsync(
+        HttpClient client,
+        Uri uri,
+        string token,
+        byte[] body)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, uri)
+        {
+            Content = new ByteArrayContent(body),
+        };
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        try
+        {
+            return await client.SendAsync(request);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(body);
+        }
+    }
+
+    private static async Task AssertErrorAsync(
+        HttpResponseMessage response,
+        HttpStatusCode status,
+        string code)
+    {
+        Assert.Equal(status, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(code, document.RootElement.GetProperty("code").GetString());
+    }
+
+    private static string Digest(string value) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static int ReserveEphemeralPort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+
+    private static async Task WaitForHealthAsync(
+        HttpClient client,
+        Uri endpoint,
+        Process process,
+        Task<string> errorTask)
+    {
+        var health = new Uri(endpoint, "health");
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            if (process.HasExited)
+            {
+                throw new InvalidOperationException(
+                    $"The CARE operations API fixture exited early: {await errorTask}");
+            }
+
+            try
+            {
+                using var response = await client.GetAsync(health);
+                if (response.IsSuccessStatusCode) return;
+            }
+            catch (HttpRequestException)
+            {
+            }
+            catch (TaskCanceledException)
+            {
+            }
+
+            await Task.Delay(100);
+        }
+
+        throw new TimeoutException("The CARE operations API fixture did not become healthy.");
+    }
+
+    private static HttpResponseMessage Json(
+        HttpRequestMessage request,
+        HttpStatusCode status,
+        string body) => new(status)
+        {
+            RequestMessage = request,
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        };
+
+    private sealed class StaticCredentialSource : IPayPalSandboxCredentialSource
+    {
+        public ValueTask<PayPalSandboxCredentialLease> AcquireAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult(PayPalSandboxCredentialLease.Create(
+                "client-id"u8, "client-secret"u8));
+    }
+
+    private sealed class EmptyRecipientDirectory : IPayPalSandboxRecipientDirectory
+    {
+        public ValueTask<PayPalSandboxRecipient?> ResolveAsync(
+            string snapshotId,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromResult<PayPalSandboxRecipient?>(null);
+    }
+
+    private sealed class MemoryReferenceStore : IPayPalSandboxPayoutReferenceStore
+    {
+        private readonly Dictionary<string, string> values = new(StringComparer.Ordinal);
+
+        public Task<string?> GetProviderBatchIdAsync(
+            string localBatchId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(values.GetValueOrDefault(localBatchId));
+
+        public Task StoreProviderBatchIdAsync(
+            string localBatchId,
+            string providerBatchId,
+            CancellationToken cancellationToken = default)
+        {
+            values[localBatchId] = providerBatchId;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ScriptedHandler(
+        Func<int, HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send)
+        : HttpMessageHandler
+    {
+        private int calls;
+        public int Calls => calls;
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            send(Interlocked.Increment(ref calls) - 1, request, cancellationToken);
+    }
+}

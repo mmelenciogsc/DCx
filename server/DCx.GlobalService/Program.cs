@@ -19,6 +19,11 @@ var contributionRateLimiter = contributionApiOptions is null
     : new SimulationContributionRequestLimiter(SimulationContributionRateLimitOptions.Load());
 var contributionWorkerOptions = SimulationContributionWorkerOptions.Load(
     contributionApiOptions is not null);
+var careOperationsApiOptions = SimulationCareOperationsApiOptions.Load();
+var careOperationsRateLimiter = careOperationsApiOptions is null
+    ? null
+    : new SimulationContributionRequestLimiter(
+        new SimulationContributionRateLimitOptions(120, 4));
 var inContainer = string.Equals(Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"), "true", StringComparison.OrdinalIgnoreCase);
 var simulationUrl = Environment.GetEnvironmentVariable("DCX_GLOBAL_SIMULATION_URL") ?? "http://127.0.0.1:5087";
 if (!inContainer &&
@@ -91,6 +96,17 @@ if (contributionApiOptions is not null)
     }
 }
 
+DurableCareOperationsSource? careOperationsSource = null;
+if (careOperationsApiOptions is not null)
+{
+    var careRepository = await DurableCareRepository.OpenAsync(Path.Combine(dataRoot, "care"));
+    careOperationsSource = new DurableCareOperationsSource(
+        careRepository,
+        careOperationsApiOptions.ProcessingEnabled);
+    builder.Services.AddSingleton(careRepository);
+    builder.Services.AddSingleton(careOperationsSource);
+}
+
 var app = builder.Build();
 app.MapGet("/health", () => Results.Ok(new
 {
@@ -99,6 +115,9 @@ app.MapGet("/health", () => Results.Ok(new
     contributionRateLimit = contributionRateLimiter is not null,
     contributionWorker = contributionWorkerOptions is not null,
     ccbSandbox = ccbSandbox is not null,
+    careOperationsApi = careOperationsApiOptions is not null,
+    careOperationsProcessing = careOperationsApiOptions?.ProcessingEnabled ?? false,
+    careOperationsRateLimit = careOperationsRateLimiter is not null,
 }));
 app.MapGet("/api/trust-policy/latest", async (GlobalRegistryRepository registry, CancellationToken cancellationToken) =>
 {
@@ -149,6 +168,16 @@ if (contributionApiOptions is not null && contributionRateLimiter is not null &&
         contributionApiOptions,
         contributionRateLimiter,
         contributionWorkerOptions is not null);
+}
+
+if (careOperationsApiOptions is not null && careOperationsRateLimiter is not null &&
+    careOperationsSource is not null)
+{
+    SimulationCareOperationsApi.Map(
+        app,
+        careOperationsSource,
+        careOperationsApiOptions,
+        careOperationsRateLimiter);
 }
 
 await app.RunAsync();
