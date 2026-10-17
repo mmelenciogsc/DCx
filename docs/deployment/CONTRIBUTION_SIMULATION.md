@@ -26,6 +26,19 @@ With the API enabled, `/health` reports `contributionRateLimit: true`. Every con
 
 This is process-local simulation protection. State resets on restart, is not synchronized across instances, and deliberately ignores forwarded-address headers. Do not treat it as production reverse-proxy trust, distributed rate limiting or abuse prevention.
 
+## Windows simulation client
+
+The native **Contributions** window can connect only to a root `http` origin on a literal loopback IP, such as `http://127.0.0.1:5087/`. Host names such as `localhost`, paths, HTTPS, remote addresses, user information, query strings and fragments are rejected. The client uses only `POST /api/contributions/intake`; redirects, cookies, proxies and decompression are disabled.
+
+1. Keep **Prepare contributions for review** unchecked unless preparing a deliberate fixture.
+2. Enter and review one CKB candidate, complete all three attestations, approve the exact item and prepare it locally.
+3. Confirm **Approve sending this exact prepared contribution to the loopback simulation now** is still unchecked.
+4. Enter the simulation's matching contributor pseudonym, literal-loopback origin and one-attempt contributor token.
+5. Check the separate send approval and invoke **Send to local simulation**.
+6. Treat `Quarantined` only as intake confirmation. It is not reviewer approval or publication. The password control and send approval clear after the attempt.
+
+The UI currently sends metadata/body only and has no artifact picker, status/withdrawal/reviewer action or remote/global endpoint mode. Use only generated fixture credentials. Cancellation may occur after the server accepted the request; reconcile server state before retrying.
+
 ## Optional publication worker
 
 The worker is independently default-off. It cannot start unless the contribution API is enabled.
