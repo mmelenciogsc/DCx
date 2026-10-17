@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Text.Json;
 using DCx.Core.GlobalKnowledge;
 using DCx.Core.Knowledge;
 using DCx.GlobalService;
@@ -92,6 +93,17 @@ public sealed class GlobalServiceE2eTests : IDisposable
         {
             using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
             await WaitForHealthAsync(httpClient, endpoint, process);
+            using (var health = JsonDocument.Parse(
+                       await httpClient.GetStringAsync(new Uri(endpoint, "health"))))
+            {
+                Assert.False(health.RootElement.GetProperty("contributionApi").GetBoolean());
+                Assert.False(health.RootElement.GetProperty("ccbSandbox").GetBoolean());
+            }
+            using (var disabledContributionApi = await httpClient.GetAsync(
+                       new Uri(endpoint, "api/contributions/pending")))
+            {
+                Assert.Equal(HttpStatusCode.NotFound, disabledContributionApi.StatusCode);
+            }
             var transport = new HttpGlobalRegistryTransport(httpClient, endpoint);
             var client = await GlobalReplicaClient.OpenAsync(Path.Combine(root, "client"), trustRoot);
 

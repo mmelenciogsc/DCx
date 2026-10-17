@@ -108,6 +108,65 @@ public sealed class ContributionPolicyTests
         Assert.DoesNotContain("body", json, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void TransportEnvelope_RoundTripsStrictApprovedMetadataAndArtifactBytes()
+    {
+        var candidate = Candidate(
+            "candidate:transport",
+            "A bounded contribution transport fixture with exact reviewed metadata.");
+        var prepared = service.Prepare(
+            new ContributionPreferences(true),
+            candidate,
+            new ContributionAttestation(true, true, true),
+            Approval(candidate),
+            now);
+        byte[] artifact = [0x50, 0x4b, 0x03, 0x04, 0x2a];
+
+        var encoded = ContributionTransportCodec.Encode(prepared, artifact);
+        var decoded = ContributionTransportCodec.Decode(encoded);
+
+        Assert.Equal(ContributionTransportCodec.MediaType, "application/vnd.dcx.contribution.v1+binary");
+        Assert.Equal(prepared.SubmissionId, decoded.Submission.SubmissionId);
+        Assert.Equal(
+            ContributionCodec.CandidateSha256(prepared.Candidate),
+            ContributionCodec.CandidateSha256(decoded.Submission.Candidate));
+        Assert.Equal(prepared.Attestation, decoded.Submission.Attestation);
+        Assert.Equal(prepared.Approval, decoded.Submission.Approval);
+        Assert.Equal(prepared.State, decoded.Submission.State);
+        Assert.Equal(prepared.PreparedUtc, decoded.Submission.PreparedUtc);
+        Assert.Equal(
+            prepared.Scan.Findings.Select(finding => finding.Code),
+            decoded.Submission.Scan.Findings.Select(finding => finding.Code));
+        Assert.Equal(artifact, decoded.Artifact);
+    }
+
+    [Fact]
+    public void TransportEnvelope_RejectsVersionTruncationAndOversizedMetadata()
+    {
+        var candidate = Candidate(
+            "candidate:transport-denial",
+            "A bounded contribution transport denial fixture.");
+        var prepared = service.Prepare(
+            new ContributionPreferences(true),
+            candidate,
+            new ContributionAttestation(true, true, true),
+            Approval(candidate),
+            now);
+        var encoded = ContributionTransportCodec.Encode(prepared);
+        var changedVersion = encoded.ToArray();
+        changedVersion[4] = 2;
+
+        Assert.Equal("contribution_envelope_invalid", Assert.Throws<ContributionPolicyException>(() =>
+            ContributionTransportCodec.Decode(changedVersion)).Code);
+        Assert.Equal("contribution_envelope_invalid", Assert.Throws<ContributionPolicyException>(() =>
+            ContributionTransportCodec.Decode(encoded.AsSpan(0, ContributionTransportCodec.HeaderBytes))).Code);
+        Assert.Equal("contribution_envelope_size_invalid", Assert.Throws<ContributionPolicyException>(() =>
+            ContributionTransportCodec.Encode(prepared with
+            {
+                Candidate = candidate with { Body = new string('x', ContributionTransportCodec.MaximumMetadataBytes) },
+            })).Code);
+    }
+
     private ContributionCandidate Candidate(string id, string body) => new(
         id,
         $"resource:{id.Split(':')[1]}",

@@ -25,16 +25,32 @@ public sealed class ContributionGovernanceTests : IDisposable
 
         Assert.Equal(ContributionState.Quarantined, await governance.IntakeAsync(prepared, now));
         Assert.Null(await registry.GetLatestAsync());
+        var pending = Assert.Single(await governance.GetPendingReviewItemsAsync());
+        Assert.Equal(prepared.SubmissionId, pending.SubmissionId);
+        Assert.Equal(
+            ContributionCodec.CandidateSha256(candidate),
+            ContributionCodec.CandidateSha256(pending.Candidate));
+        Assert.Empty(pending.FindingCodes);
         var release = await governance.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now);
+        var approved = await governance.GetReviewItemAsync(prepared.SubmissionId);
+        Assert.Equal(ContributionState.Approved, approved.State);
+        Assert.Equal("reviewer:fixture", approved.ReviewerId);
+        Assert.Equal(release.Sequence, approved.ReleaseSequence);
 
         var client = await GlobalReplicaClient.OpenAsync(Path.Combine(root, "client"), registry.TrustRootSubjectPublicKeyInfo);
         await client.SynchronizeAsync(new RepositoryRegistryTransport(registry));
         Assert.Equal(release.Sha256, (await client.GetStatusAsync()).ReleaseSha256);
         Assert.Equal("resource:approved", Assert.Single(await client.SearchAsync("keyboard accessibility", null)).ResourceId);
 
-        await governance.WithdrawAsync(prepared.SubmissionId, now.AddDays(1));
+        var wrongOwner = await Assert.ThrowsAsync<ContributionPolicyException>(() =>
+            governance.WithdrawOwnedAsync(prepared.SubmissionId, "contributor:other", now.AddDays(1)));
+        Assert.Equal("submission_owner_mismatch", wrongOwner.Code);
+        await governance.WithdrawOwnedAsync(
+            prepared.SubmissionId, candidate.ContributorPseudonym, now.AddDays(1));
         await client.SynchronizeAsync(new RepositoryRegistryTransport(registry));
         Assert.True(Assert.Single(await client.SearchAsync("keyboard accessibility", null)).Deprecated);
+        Assert.Equal(ContributionState.Withdrawn,
+            (await governance.GetReviewItemAsync(prepared.SubmissionId)).State);
     }
 
     [Fact]

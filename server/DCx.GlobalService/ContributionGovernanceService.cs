@@ -16,6 +16,18 @@ public sealed record AuthoritativeUsageContext(
     byte[] InstallationIntegrityKey,
     DateTimeOffset NowUtc);
 
+public sealed record ContributionReviewItem(
+    string SubmissionId,
+    string CandidateSha256,
+    ContributionCandidate Candidate,
+    IReadOnlyList<string> FindingCodes,
+    ContributionState State,
+    string ContributorPseudonym,
+    string? ReviewerId,
+    DateTimeOffset CreatedUtc,
+    DateTimeOffset? ReviewedUtc,
+    long? ReleaseSequence);
+
 public sealed class ContributionGovernanceService
 {
     private const int MaximumRecoveryBatch = 100;
@@ -121,8 +133,8 @@ public sealed class ContributionGovernanceService
             submission.Attestation,
             submission.Approval,
             now);
-        if (submission.State != ContributionState.Quarantined ||
-            string.IsNullOrWhiteSpace(submission.SubmissionId) || submission.SubmissionId.Length > 128)
+        ValidateSubmissionId(submission.SubmissionId);
+        if (submission.State != ContributionState.Quarantined)
         {
             throw new ContributionPolicyException("submission_schema_invalid");
         }
@@ -205,7 +217,8 @@ public sealed class ContributionGovernanceService
         DateTimeOffset issuedUtc,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(reviewerId) || reviewerId.Length > 128)
+        ValidateSubmissionId(submissionId);
+        if (!IsBoundedIdentity(reviewerId))
         {
             throw new ContributionPolicyException("reviewer_invalid");
         }
@@ -277,14 +290,47 @@ public sealed class ContributionGovernanceService
     public async Task<GlobalReleaseDescriptor> WithdrawAsync(
         string submissionId,
         DateTimeOffset issuedUtc,
+        CancellationToken cancellationToken = default) =>
+        await WithdrawCoreAsync(
+            submissionId, expectedContributorPseudonym: null, issuedUtc, cancellationToken).ConfigureAwait(false);
+
+    public async Task<GlobalReleaseDescriptor> WithdrawOwnedAsync(
+        string submissionId,
+        string contributorPseudonym,
+        DateTimeOffset issuedUtc,
         CancellationToken cancellationToken = default)
     {
+        if (!IsBoundedIdentity(contributorPseudonym))
+        {
+            throw new ContributionPolicyException("contributor_invalid");
+        }
+
+        return await WithdrawCoreAsync(
+            submissionId, contributorPseudonym, issuedUtc, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<GlobalReleaseDescriptor> WithdrawCoreAsync(
+        string submissionId,
+        string? expectedContributorPseudonym,
+        DateTimeOffset issuedUtc,
+        CancellationToken cancellationToken)
+    {
+        ValidateSubmissionId(submissionId);
         await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
             var row = await ReadSubmissionAsync(connection, submissionId, cancellationToken).ConfigureAwait(false)
                 ?? throw new ContributionPolicyException("submission_missing");
+            if (expectedContributorPseudonym is not null &&
+                !string.Equals(
+                    row.ContributorPseudonym,
+                    expectedContributorPseudonym,
+                    StringComparison.Ordinal))
+            {
+                throw new ContributionPolicyException("submission_owner_mismatch");
+            }
+
             if (row.State != ContributionState.Approved)
             {
                 throw new ContributionPolicyException("submission_not_approved");
@@ -304,6 +350,71 @@ public sealed class ContributionGovernanceService
             await NotifyCheckpointAsync(
                 ContributionPublicationCheckpoint.IntentStored, intent.OperationId, cancellationToken).ConfigureAwait(false);
             return await PublishClaimedIntentAsync(connection, intent, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            mutationLock.Release();
+        }
+    }
+
+    public async Task<ContributionReviewItem> GetReviewItemAsync(
+        string submissionId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateSubmissionId(submissionId);
+        await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            return await ReadReviewItemAsync(connection, submissionId, cancellationToken).ConfigureAwait(false)
+                ?? throw new ContributionPolicyException("submission_missing");
+        }
+        finally
+        {
+            mutationLock.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<ContributionReviewItem>> GetPendingReviewItemsAsync(
+        int limit = 50,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit is < 1 or > 100)
+        {
+            throw new ContributionPolicyException("review_limit_invalid");
+        }
+
+        await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT submission_id
+                FROM contributions
+                WHERE state = $state
+                ORDER BY created_utc, submission_id
+                LIMIT $limit;
+                """;
+            command.Parameters.AddWithValue("$state", (int)ContributionState.Quarantined);
+            command.Parameters.AddWithValue("$limit", limit);
+            var identifiers = new List<string>();
+            await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+            {
+                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    identifiers.Add(reader.GetString(0));
+                }
+            }
+
+            var items = new List<ContributionReviewItem>(identifiers.Count);
+            foreach (var identifier in identifiers)
+            {
+                items.Add(await ReadReviewItemAsync(connection, identifier, cancellationToken).ConfigureAwait(false)
+                    ?? throw new ContributionPolicyException("submission_missing"));
+            }
+
+            return items;
         }
         finally
         {
@@ -1272,6 +1383,115 @@ public sealed class ContributionGovernanceService
 
     private static string PublicationOperationId(string action, string submissionId) =>
         $"contribution-{action}:{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(submissionId)))}";
+
+    private static void ValidateSubmissionId(string submissionId)
+    {
+        if (string.IsNullOrWhiteSpace(submissionId) || submissionId.Length > 128 ||
+            submissionId.Any(character =>
+                !char.IsAsciiLetterOrDigit(character) && character is not ':' and not '.' and not '_' and not '-'))
+        {
+            throw new ContributionPolicyException("submission_id_invalid");
+        }
+    }
+
+    private static bool IsBoundedIdentity(string value) =>
+        !string.IsNullOrWhiteSpace(value) && value.Length <= 128 &&
+        value.All(character =>
+            char.IsAsciiLetterOrDigit(character) || character is ':' or '.' or '_' or '-');
+
+    private static async Task<ContributionReviewItem?> ReadReviewItemAsync(
+        SqliteConnection connection,
+        string submissionId,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT candidate_sha256, candidate_json, scan_codes, state, contributor_pseudonym,
+                   reviewer_id, created_utc, reviewed_utc, release_sequence
+            FROM contributions
+            WHERE submission_id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", submissionId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) return null;
+
+        var stateValue = reader.GetInt32(3);
+        var reviewerId = reader.IsDBNull(5) ? null : reader.GetString(5);
+        var createdText = reader.GetString(6);
+        var reviewedText = reader.IsDBNull(7) ? null : reader.GetString(7);
+        long? releaseSequence = reader.IsDBNull(8) ? null : reader.GetInt64(8);
+        DateTimeOffset reviewedValue = default;
+        if (!Enum.IsDefined((ContributionState)stateValue) ||
+            !TryParseUtc(createdText, out var createdUtc) ||
+            reviewedText is not null && !TryParseUtc(reviewedText, out reviewedValue))
+        {
+            throw new ContributionPolicyException("submission_corrupt");
+        }
+
+        DateTimeOffset? reviewedUtc = reviewedText is null
+            ? null
+            : reviewedValue.ToUniversalTime();
+        if (reviewedUtc < createdUtc)
+        {
+            throw new ContributionPolicyException("submission_corrupt");
+        }
+        var state = (ContributionState)stateValue;
+        var stateFieldsValid = state switch
+        {
+            ContributionState.Quarantined => reviewerId is null && reviewedUtc is null && releaseSequence is null,
+            ContributionState.Approved or ContributionState.Withdrawn =>
+                IsBoundedIdentity(reviewerId ?? string.Empty) && reviewedUtc is not null && releaseSequence is > 0,
+            ContributionState.Rejected =>
+                IsBoundedIdentity(reviewerId ?? string.Empty) && reviewedUtc is not null && releaseSequence is null,
+            _ => false,
+        };
+        if (!stateFieldsValid)
+        {
+            throw new ContributionPolicyException("submission_corrupt");
+        }
+
+        var candidateSha256 = reader.GetString(0);
+        var contributorPseudonym = reader.GetString(4);
+        var row = new SubmissionRow(candidateSha256, reader.GetString(1), state, contributorPseudonym);
+        var candidate = DecodeCandidate(row);
+        if (!IsBoundedIdentity(contributorPseudonym) ||
+            !string.Equals(candidate.ContributorPseudonym, contributorPseudonym, StringComparison.Ordinal))
+        {
+            throw new ContributionPolicyException("submission_corrupt");
+        }
+
+        var scanText = reader.GetString(2);
+        var findingCodes = string.IsNullOrEmpty(scanText)
+            ? []
+            : scanText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (findingCodes.Length > 100 || findingCodes.Any(code =>
+                code.Length is < 1 or > 64 ||
+                code.Any(character =>
+                    !char.IsAsciiLetterOrDigit(character) && character is not '_' and not '-')))
+        {
+            throw new ContributionPolicyException("submission_corrupt");
+        }
+
+        return new ContributionReviewItem(
+            submissionId,
+            candidateSha256,
+            candidate,
+            findingCodes,
+            state,
+            contributorPseudonym,
+            reviewerId,
+            createdUtc.ToUniversalTime(),
+            reviewedUtc,
+            releaseSequence);
+    }
+
+    private static bool TryParseUtc(string value, out DateTimeOffset parsed) =>
+        DateTimeOffset.TryParseExact(
+            value,
+            "O",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind,
+            out parsed) && parsed.Offset == TimeSpan.Zero;
 
     private static async Task<SubmissionRow?> ReadSubmissionAsync(
         SqliteConnection connection,
