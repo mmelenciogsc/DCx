@@ -11,6 +11,17 @@ public sealed record DurablePayoutState(
     string? ProviderStatus,
     DateTimeOffset UpdatedUtc);
 
+public sealed record DurablePendingPayout(
+    PayoutBatchPreview Preview,
+    DateTimeOffset CreatedUtc,
+    DateTimeOffset UpdatedUtc);
+
+public sealed record PayoutReconciliationSummary(
+    int Scanned,
+    int Completed,
+    int StillPending,
+    int Resubmitted);
+
 public sealed class DurableCareRepository
 {
     private readonly string connectionString;
@@ -200,7 +211,9 @@ public sealed class DurableCareRepository
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
-        if (preview.BatchId != result.BatchId || preview.Mode != PayoutExecutionMode.Sandbox)
+        if (preview.BatchId != result.BatchId || preview.Mode != PayoutExecutionMode.Sandbox ||
+            string.IsNullOrWhiteSpace(result.ProviderStatus) || result.ProviderStatus.Length > 128 ||
+            result.ProviderStatus.Any(char.IsControl))
         {
             throw new InvalidOperationException("The payout result does not match a sandbox preview.");
         }
@@ -272,6 +285,53 @@ public sealed class DurableCareRepository
         {
             mutationLock.Release();
         }
+    }
+
+    public async Task<IReadOnlyList<DurablePendingPayout>> GetPendingPayoutsAsync(
+        DateTimeOffset updatedBeforeOrAt,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit));
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT preview_sha256, preview_json, created_utc, updated_utc
+            FROM payout_batches
+            WHERE status = 'reserved' AND updated_utc <= $cutoff
+            ORDER BY updated_utc, batch_id
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$cutoff", updatedBeforeOrAt.ToUniversalTime().ToString("O"));
+        command.Parameters.AddWithValue("$limit", limit);
+        var pending = new List<DurablePendingPayout>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            PayoutBatchPreview preview;
+            try
+            {
+                preview = JsonSerializer.Deserialize<PayoutBatchPreview>(reader.GetString(1))
+                    ?? throw new InvalidOperationException("A durable payout preview is empty.");
+            }
+            catch (JsonException exception)
+            {
+                throw new InvalidOperationException(
+                    $"A durable payout preview is unreadable: {exception.GetType().Name}.");
+            }
+
+            if (!string.Equals(reader.GetString(0), PayoutPreviewSha(preview), StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("A durable payout preview failed its stored digest.");
+            }
+
+            pending.Add(new DurablePendingPayout(
+                preview,
+                DateTimeOffset.Parse(reader.GetString(2)),
+                DateTimeOffset.Parse(reader.GetString(3))));
+        }
+
+        return pending;
     }
 
     public async Task<long> BalanceAsync(
@@ -542,5 +602,77 @@ public sealed class DurablePayoutCoordinator(
         var result = await provider.SendSandboxAsync(preview, cancellationToken).ConfigureAwait(false);
         await repository.CompletePayoutAsync(preview, result, now, cancellationToken).ConfigureAwait(false);
         return result;
+    }
+
+    public async Task<PayoutReconciliationSummary> ReconcilePendingAsync(
+        DateTimeOffset updatedBeforeOrAt,
+        DateTimeOffset now,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        if (provider is not IReconcilablePayoutSandboxProvider reconcilable)
+        {
+            throw new InvalidOperationException("The sandbox payout provider does not support restart reconciliation.");
+        }
+
+        var pending = await repository.GetPendingPayoutsAsync(updatedBeforeOrAt, limit, cancellationToken)
+            .ConfigureAwait(false);
+        var completed = 0;
+        var stillPending = 0;
+        var resubmitted = 0;
+        foreach (var item in pending)
+        {
+            var lookup = await reconcilable.LookupSandboxAsync(item.Preview.BatchId, cancellationToken)
+                .ConfigureAwait(false);
+            if (!string.Equals(lookup.BatchId, item.Preview.BatchId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The sandbox payout lookup returned a conflicting batch identifier.");
+            }
+
+            PayoutBatchResult? result = null;
+            switch (lookup.State)
+            {
+                case SandboxPayoutLookupState.NotFound:
+                    result = await reconcilable.SendSandboxAsync(item.Preview, cancellationToken).ConfigureAwait(false);
+                    resubmitted++;
+                    break;
+                case SandboxPayoutLookupState.Pending:
+                    stillPending++;
+                    break;
+                case SandboxPayoutLookupState.Succeeded:
+                    result = new PayoutBatchResult(
+                        item.Preview.BatchId,
+                        true,
+                        ValidateLookupStatus(lookup.ProviderStatus));
+                    break;
+                case SandboxPayoutLookupState.Failed:
+                    result = new PayoutBatchResult(
+                        item.Preview.BatchId,
+                        false,
+                        ValidateLookupStatus(lookup.ProviderStatus));
+                    break;
+                default:
+                    throw new InvalidOperationException("The sandbox payout lookup state is invalid.");
+            }
+
+            if (result is not null)
+            {
+                await repository.CompletePayoutAsync(item.Preview, result, now, cancellationToken)
+                    .ConfigureAwait(false);
+                completed++;
+            }
+        }
+
+        return new PayoutReconciliationSummary(pending.Count, completed, stillPending, resubmitted);
+    }
+
+    private static string ValidateLookupStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status) || status.Length > 128 || status.Any(char.IsControl))
+        {
+            throw new InvalidOperationException("The sandbox payout lookup returned an invalid provider status.");
+        }
+
+        return status;
     }
 }

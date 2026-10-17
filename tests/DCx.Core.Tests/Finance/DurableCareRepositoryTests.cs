@@ -109,6 +109,67 @@ public sealed class DurableCareRepositoryTests : IDisposable
         Assert.Equal(0, await repository.BalanceAsync(LedgerAccount.Cash));
     }
 
+    [Fact]
+    public async Task RestartReconciliation_FinalizesProviderSuccessWithoutResending()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var preview = Preview("batch:accepted-before-crash");
+        await AccrueAsync(repository, preview);
+        Assert.True(await repository.ReservePayoutAsync(
+            preview, true, true, preview.EligibilityDate, now));
+        var provider = new ReconcilableFixtureProvider();
+        provider.SetLookup(preview.BatchId, SandboxPayoutLookupState.Succeeded, "SANDBOX_SUCCESS");
+
+        var reopened = await DurableCareRepository.OpenAsync(root);
+        var summary = await new DurablePayoutCoordinator(reopened, provider).ReconcilePendingAsync(
+            now.AddMinutes(1), now.AddMinutes(1));
+
+        Assert.Equal(new PayoutReconciliationSummary(1, 1, 0, 0), summary);
+        Assert.Equal(0, provider.SendCalls);
+        Assert.Equal("succeeded", (await reopened.GetPayoutStateAsync(preview.BatchId))!.Status);
+        Assert.Equal(0, await reopened.BalanceAsync(LedgerAccount.ContributorPayable));
+        Assert.True(await reopened.ReconcilesAsync());
+    }
+
+    [Fact]
+    public async Task RestartReconciliation_ResubmitsOnlyProviderNotFoundBatchIdempotently()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var preview = Preview("batch:not-sent-before-crash");
+        await AccrueAsync(repository, preview);
+        Assert.True(await repository.ReservePayoutAsync(
+            preview, true, true, preview.EligibilityDate, now));
+        var provider = new ReconcilableFixtureProvider();
+
+        var summary = await new DurablePayoutCoordinator(repository, provider).ReconcilePendingAsync(
+            now.AddMinutes(1), now.AddMinutes(1));
+        var second = await new DurablePayoutCoordinator(repository, provider).ReconcilePendingAsync(
+            now.AddMinutes(2), now.AddMinutes(2));
+
+        Assert.Equal(new PayoutReconciliationSummary(1, 1, 0, 1), summary);
+        Assert.Equal(new PayoutReconciliationSummary(0, 0, 0, 0), second);
+        Assert.Equal(1, provider.SendCalls);
+        Assert.Equal("succeeded", (await repository.GetPayoutStateAsync(preview.BatchId))!.Status);
+    }
+
+    [Fact]
+    public async Task RestartReconciliation_LeavesProviderPendingBatchReserved()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var preview = Preview("batch:provider-pending");
+        Assert.True(await repository.ReservePayoutAsync(
+            preview, true, true, preview.EligibilityDate, now));
+        var provider = new ReconcilableFixtureProvider();
+        provider.SetLookup(preview.BatchId, SandboxPayoutLookupState.Pending, "PENDING");
+
+        var summary = await new DurablePayoutCoordinator(repository, provider).ReconcilePendingAsync(
+            now.AddMinutes(1), now.AddMinutes(1));
+
+        Assert.Equal(new PayoutReconciliationSummary(1, 0, 1, 0), summary);
+        Assert.Equal("reserved", (await repository.GetPayoutStateAsync(preview.BatchId))!.Status);
+        Assert.Equal(0, provider.SendCalls);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root))
@@ -119,6 +180,22 @@ public sealed class DurableCareRepositoryTests : IDisposable
 
     private PayPalSandboxWebhookEvent Event(string eventId, string transmissionId, string eventType, long amount) =>
         new(eventId, transmissionId, eventType, "subscription:one", amount, "USD", now);
+
+    private static PayoutBatchPreview Preview(string batchId) => new(
+        batchId,
+        PayoutExecutionMode.Sandbox,
+        new DateOnly(2026, 1, 31),
+        [new PayoutItem("contributor:one", 500)]);
+
+    private async Task AccrueAsync(DurableCareRepository repository, PayoutBatchPreview preview) =>
+        await repository.PostAsync(new LedgerJournalEntry(
+            $"accrual:{preview.BatchId}",
+            now,
+            "fixture_contributor_accrual",
+            [
+                new LedgerPosting(LedgerAccount.ContributorExpense, preview.TotalCents, 0),
+                new LedgerPosting(LedgerAccount.ContributorPayable, 0, preview.TotalCents),
+            ]));
 
     private sealed class FixtureProvider(bool succeeds) : IPayoutSandboxProvider
     {
@@ -131,6 +208,31 @@ public sealed class DurableCareRepositoryTests : IDisposable
                 preview.BatchId,
                 succeeds,
                 succeeds ? "SANDBOX_SUCCESS" : "SANDBOX_FAILED"));
+        }
+    }
+
+    private sealed class ReconcilableFixtureProvider : IReconcilablePayoutSandboxProvider
+    {
+        private readonly Dictionary<string, SandboxPayoutLookupResult> lookups = new(StringComparer.Ordinal);
+
+        public int SendCalls { get; private set; }
+
+        public void SetLookup(string batchId, SandboxPayoutLookupState state, string? providerStatus) =>
+            lookups[batchId] = new SandboxPayoutLookupResult(batchId, state, providerStatus);
+
+        public Task<SandboxPayoutLookupResult> LookupSandboxAsync(
+            string batchId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(lookups.GetValueOrDefault(batchId) ??
+                            new SandboxPayoutLookupResult(batchId, SandboxPayoutLookupState.NotFound, null));
+
+        public Task<PayoutBatchResult> SendSandboxAsync(
+            PayoutBatchPreview preview,
+            CancellationToken cancellationToken)
+        {
+            SendCalls++;
+            SetLookup(preview.BatchId, SandboxPayoutLookupState.Succeeded, "SANDBOX_SUCCESS");
+            return Task.FromResult(new PayoutBatchResult(preview.BatchId, true, "SANDBOX_SUCCESS"));
         }
     }
 }

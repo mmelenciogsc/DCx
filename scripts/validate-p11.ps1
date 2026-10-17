@@ -26,6 +26,9 @@ try {
     "Qualified attribution split and Net 60=PASS"
     "Owner approval duplicate payout and live-disable gates=PASS"
     "Durable payout reservation terminal state and restart reconciliation=PASS"
+    "Crash-before-send not-found reconciliation and idempotent resubmission=PASS"
+    "Crash-after-provider-acceptance reconciliation without resubmission=PASS"
+    "Provider-pending batch remains reserved=PASS"
     "Real PayPal network calls=0"
     "P11 local CARE and PayPal mock validation=PASS"
 }

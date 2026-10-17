@@ -24,6 +24,24 @@ public interface IPayoutSandboxProvider
     Task<PayoutBatchResult> SendSandboxAsync(PayoutBatchPreview preview, CancellationToken cancellationToken);
 }
 
+public enum SandboxPayoutLookupState
+{
+    NotFound,
+    Pending,
+    Succeeded,
+    Failed,
+}
+
+public sealed record SandboxPayoutLookupResult(
+    string BatchId,
+    SandboxPayoutLookupState State,
+    string? ProviderStatus);
+
+public interface IReconcilablePayoutSandboxProvider : IPayoutSandboxProvider
+{
+    Task<SandboxPayoutLookupResult> LookupSandboxAsync(string batchId, CancellationToken cancellationToken);
+}
+
 public sealed class PayoutSafetyCoordinator(IPayoutSandboxProvider sandboxProvider)
 {
     private readonly HashSet<string> executedBatches = new(StringComparer.Ordinal);
