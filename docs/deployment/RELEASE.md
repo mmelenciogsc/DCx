@@ -4,7 +4,7 @@ DCx has no production release. The current validated outputs are an unsigned sel
 
 ## Reproduce local staging evidence
 
-From native PowerShell 7 on Windows:
+From native PowerShell 7.4 or newer running on .NET 10 on Windows (the gate rejects legacy Windows PowerShell before doing work):
 
 ```powershell
 Set-Location D:\DCx

@@ -1,7 +1,7 @@
 # P13 — Packaging, security and reliability
 
 - Status: BLOCKED (substantial local reliability, self-contained unsigned-MSIX staging, Defender and dependency-advisory checks pass; signed installer, clean-VM, independent security and human-AT gates remain absent)
-- Implementation commits: `82452fe`, `3e9b172`, `1b32cdf`, `26da605`, `7b0a03b`, `a69f5bf`, `e20a7d3`, `993149e`, `54f66bc`, `acc8e62`, `bcfe167`, `8b94159`
+- Implementation commits: `82452fe`, `3e9b172`, `1b32cdf`, `26da605`, `7b0a03b`, `a69f5bf`, `e20a7d3`, `993149e`, `54f66bc`, `acc8e62`, `bcfe167`, `8b94159`, `9877a60`
 - Documentation commit: recorded by the commit containing this file
 
 The generated ZIP and synthetic-identity MSIX are unsigned self-contained x64 local-validation artifacts. Neither is an installer or production release.
@@ -36,6 +36,7 @@ The generated ZIP and synthetic-identity MSIX are unsigned self-contained x64 lo
 - Trust requires Windows status `Valid`, exact signer-subject/manifest-publisher equality and a lowercase signer-certificate SHA-256 that is bound into the approval proposal. The current synthetic package receives a real nonvalid Windows status and is denied; no real signed-positive package is claimed.
 - Whisper process telemetry now samples current and peak working set before exit checks and represents an unobservable ultra-short-process sample as unavailable rather than the fabricated value zero. The normal fixture has a bounded observation window; an instant fixture covers the race.
 - P13/P14 validators now emit TRX and fail unless exact selected counters prove every test passed. P14 uses its exact test namespace instead of a drifting substring match.
+- P13 now rejects legacy Windows PowerShell and requires PowerShell 7.4 or newer on .NET 10 before doing work. Published .NET 10 trust types are loaded through checked reflection so the validator cannot be parsed against an incompatible host or silently bind a changed constructor contract.
 
 ## Reproduction
 
@@ -47,22 +48,22 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 ## Measured result
 
-Recorded evidence directory: `artifacts/test-results/p13-7f75d31cd690426f948278d4edc5a49c/` (generated from committed source at `8b94159`; evidence is intentionally not committed).
+Recorded evidence directory: `artifacts/test-results/p13-fb4cadf61897422b9da8b94ed8ad3749/` (generated from the exact source committed as `9877a60`; evidence is intentionally not committed).
 
 - Locked Release build: 0 warnings, 0 errors.
 - Reliability tests: passed 23, failed 0, skipped 0; exact counters parsed from the retained TRX.
 - Package trust tests: passed 21, failed 0, skipped 0; exact counters parsed from the retained TRX. The native Windows probe denied the complete unsigned local-validation package; positive `Valid` composition used an injected fixture only.
-- Current committed-source full suite: passed 289, failed 0, skipped 0; about 12 seconds.
-- Publish trees: 419 files, 177,426,240 bytes each; no path/length/SHA-256 differences. They embed .NET Core and Windows Desktop 10.0.12. The approved-binding code is present, but the external FFmpeg candidate and user registration state are not bundled.
-- Reproducible staging ZIP SHA-256: `380efaf64889bacc239f30f1d464450141430a732a65195aa00fcba1f7bbd71d` (74,102,616 bytes).
-- Reproducible unsigned MSIX: 72,958,960 bytes; SHA-256 `8bc849c6ba4a78bb810640b591fbeeca96d9fa8e9b77bf9345a91a183cb086e4`; synthetic identity `DCx.AgenticBrowser.LocalValidation`, publisher `CN=DCx Local Validation`, version `1.0.0.0`, x64. MakeAppx semantic pack and exact post-canonicalization unpack passed; real Windows trust returned `NotSigned` and denied it. Signing/install attempts and production actions: 0.
+- Current committed-source full suite: passed 305, failed 0, skipped 0; about 9 seconds.
+- Publish trees: 419 files, 177,511,744 bytes each; no path/length/SHA-256 differences. They embed .NET Core and Windows Desktop 10.0.12. The approved-binding code and unconfigured PayPal sandbox boundary are present, but external FFmpeg, user registration state and credentials are not bundled.
+- Reproducible staging ZIP SHA-256: `206c74091964b00b2cfdd8e4153c17c9c27eaff2a2c1b225261ee7b9a5218679` (74,123,802 bytes).
+- Reproducible unsigned MSIX: 72,982,597 bytes; SHA-256 `b2daaacc8964face3bd25a3f5890f7f99c72fb414964bf27d5b2a90c23f72ede`; synthetic identity `DCx.AgenticBrowser.LocalValidation`, publisher `CN=DCx Local Validation`, version `1.0.0.0`, x64. MakeAppx semantic pack and exact post-canonicalization unpack passed; real Windows trust returned `NotSigned` and denied it. Signing/install attempts and production actions: 0.
 - Trusted MakeAppx version `10.0.19041.5609 (WinBuild.160101.0800)`; executable SHA-256 `f6901ebd5818a623b08a2306499f09334c7dab14bf9c9381814506aa80475f78`; signer-certificate SHA-256 `da209e0fe8bf6363318b5a41e5b65f3391d17bcb8b99b91c320ad2d22ef3469f`.
 - CycloneDX components: 9; third-party license records: 9. Three embedded-runtime notice files were copied and hashed.
 - Unexpected secret matches: 0 across repository source and 12 selected DCx-owned/published-text files; exact synthetic scanner-fixture matches: 2.
-- Microsoft Defender antivirus and real-time protection: enabled; signatures current at version `1.461.65.0`, updated `2026-10-16T23:06:12Z`; publish-tree, ZIP and unsigned-MSIX no-remediation scans returned clean. Trusted scanner SHA-256: `a4291c5b4325895d13d32e232bf50c1b41356306803ac5dc75bba9aecb021141`; signer-certificate SHA-256: `06d10a20570d92f56d784ecf2e50b1277b855e55d19841633b107c27dd5ca778`.
+- Microsoft Defender antivirus and real-time protection: enabled; signatures current at version `1.461.72.0`, updated `2026-10-17T08:15:34Z`; publish-tree, ZIP and unsigned-MSIX no-remediation scans returned clean. Trusted scanner SHA-256: `a4291c5b4325895d13d32e232bf50c1b41356306803ac5dc75bba9aecb021141`; signer-certificate SHA-256: `06d10a20570d92f56d784ecf2e50b1277b855e55d19841633b107c27dd5ca778`.
 - Official NuGet direct/transitive vulnerability audit: 0 advisories; sole source `https://api.nuget.org/v3/index.json`.
 - Authenticode: `NotSigned`.
-- Offline UIA heading: `DCx is ready offline`; startup 2,477 ms; working set 462.2 MiB under the provisional 1 GiB ceiling.
+- Offline UIA heading: `DCx is ready offline`; startup 2,406 ms; working set 462.3 MiB under the provisional 1 GiB ceiling.
 - Installed Stable/Evergreen normal browsing passed the P01 native UIA gate. The separately environment-gated missing-runtime fixture was denied when launched without its gate; with the gate, UIA exposed `WebView2 Runtime required`, moved keyboard focus to the heading, disabled browser commands, kept the file/media viewer enabled, exposed only the reviewed official address/copy action and local recheck, created no WebView2 profile, and attempted 0 downloads, 0 installs and 0 production actions.
 - Crash-diagnostics UIA heading: `Privacy and crash diagnostics`; consent defaulted unchecked, explicit opt-in persisted notice version 1, purge preserved enabled consent, opt-out disabled and purged, and network transfers remained zero.
 - Recovery UIA heading: `DCx backup and recovery`; main-app launcher, path input, create, default-unchecked approval, restore and assertive status are exposed.
@@ -82,6 +83,7 @@ Recorded evidence directory: `artifacts/test-results/p13-7f75d31cd690426f948278d
 - Reproducible self-contained package builder and synthetic manifest: `scripts/build-unsigned-msix.ps1`, `packaging/msix/AppxManifest.xml`, `packaging/msix/README.md`, `docs/architecture/adr/0032-reproducible-unsigned-self-contained-msix.md`.
 - Truthful fast-process Whisper resource telemetry: `src/DCx.Core/LocalModels/WhisperCliTranscriber.cs`, `tests/DCx.Core.Tests/LocalModels/WhisperCliTranscriberTests.cs`, `tests/DCx.FakeWhisperCli/Program.cs`.
 - Stable-only WebView2 probe, accessible prerequisite UI and native UIA gate: `src/DCx.Desktop/WebView2RuntimeAvailability.cs`, `src/DCx.Desktop/MainWindow.xaml`, `src/DCx.Desktop/MainWindow.xaml.cs`, `src/DCx.Desktop/App.xaml.cs`, `scripts/validate-p13-webview2.ps1`.
+- Supported PowerShell host guard and version-independent .NET trust-type loading: `scripts/validate-p13.ps1`.
 
 ## Blockers and limits
 

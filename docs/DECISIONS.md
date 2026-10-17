@@ -36,5 +36,6 @@
 | [0032](architecture/adr/0032-reproducible-unsigned-self-contained-msix.md) | Build a reproducible unsigned self-contained MSIX without creating install authority | Accepted for inert local validation; signing/install blocked | 2026-10-17 |
 | [0033](architecture/adr/0033-explicit-whisper-file-registration.md) | Register an already-installed Whisper backend by exact approved runtime, model and license files | Accepted for fixture-backed registration; real backend blocked | 2026-10-17 |
 | [0034](architecture/adr/0034-explicit-ffmpeg-file-registration.md) | Require exact executable/license/signature review before bounded FFmpeg media processing | Accepted for bounded local consumers; real approval blocked | 2026-10-17 |
+| [0035](architecture/adr/0035-fail-closed-paypal-sandbox-boundary.md) | Bind official PayPal sandbox contracts to durable, item-checked payout reconciliation | Accepted for uncredentialed contract validation; credentialed acceptance blocked | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

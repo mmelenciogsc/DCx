@@ -11,13 +11,14 @@ Visual Studio is not required for the current command-line build. WSL is optiona
 
 ## Native Windows gate
 
-From PowerShell:
+From PowerShell 7.4 or newer on .NET 10:
 
 ```powershell
 Set-Location D:\DCx
 dotnet restore DCx.slnx --locked-mode
 dotnet build DCx.slnx --configuration Release --no-restore
 dotnet test DCx.slnx --configuration Release --no-build
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-p13.ps1
 ```
 
 From the current WSL development environment:

@@ -30,8 +30,11 @@ Checked 2026-10-17 from the development host.
 | ASP.NET Core minimal APIs | https://learn.microsoft.com/en-us/aspnet/core/fundamentals/minimal-apis | HTTP 200; used for the loopback read-only global-registry simulation endpoint. |
 | PayPal Subscriptions | https://developer.paypal.com/subscriptions/about/ | HTTP 200. No account/product availability or DCx merchant eligibility was inferred. |
 | PayPal Subscriptions API | https://developer.paypal.com/docs/api/subscriptions/v1/ | HTTP 200. P11 uses local contracts only and made no API call. |
-| PayPal Webhooks API | https://developer.paypal.com/docs/api/webhooks/v1/ | HTTP 200. The implemented HMAC verifier is explicitly a deterministic mock, not PayPal's production verification flow. |
+| PayPal REST authentication | https://developer.paypal.com/api/rest/authentication/ | Official contract audit recorded client-credentials Basic authentication and token path; page SHA-256 `b2ab9761c24c931a778bc82c4eccf9338a572a65155c7adb48fa5c919abe5c99`. No credential or API call was used. |
+| PayPal Webhooks API | https://developer.paypal.com/docs/api/webhooks/v1/ | HTTP 200. The deterministic HMAC event fixture remains local; a separate uncredentialed adapter now implements the official verification request shape. Credentialed sandbox authenticity is untested. |
+| PayPal Webhooks schema | https://developer.paypal.com/api/webhooks/v1/schema.json | Read-only official audit SHA-256 `a10f9d6d44b4732393bf07001979110e0f6a584efad07e31d0d4ad76d6300ca3`; verification statuses `SUCCESS` and `FAILURE` recorded. |
 | PayPal Payouts | https://developer.paypal.com/docs/payouts/ | HTTP 200. Merchant/region/recipient eligibility remains unverified. |
 | PayPal Payouts integration | https://developer.paypal.com/docs/payouts/standard/integrate-api/ | HTTP 200. Sandbox/idempotency guidance reviewed; no credential, sandbox request or payout was used. |
+| PayPal Payouts batch schema | https://developer.paypal.com/api/payments.payouts-batch/v1/schema.json | Read-only official audit SHA-256 `d0e01b9cb185a9ed9f1ace47a94796869ffee3dd754bb41cd50baed575b34298`; batch states `DENIED`, `PENDING`, `PROCESSING`, `SUCCESS`, `CANCELED` recorded. |
 
 The remaining supplied official references are verified immediately before their associated integration phase. An HTTP success alone never proves account entitlement, commercial authorization, licensing suitability, or API availability.
