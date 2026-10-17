@@ -27,6 +27,26 @@ public static class CareLedgerJournal
                 new LedgerPosting(LedgerAccount.ContributorPayable, paidCents, 0),
                 new LedgerPosting(LedgerAccount.Cash, 0, paidCents),
             ]);
+
+    public static LedgerJournalEntry SandboxPayoutReturn(
+        string eventId,
+        long returnedCents,
+        DateTimeOffset occurredUtc)
+    {
+        if (returnedCents <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(returnedCents));
+        }
+
+        return new LedgerJournalEntry(
+            eventId,
+            occurredUtc,
+            "sandbox_contributor_payout_return",
+            [
+                new LedgerPosting(LedgerAccount.Cash, returnedCents, 0),
+                new LedgerPosting(LedgerAccount.ContributorPayable, 0, returnedCents),
+            ]);
+    }
 }
 
 public static class PayoutBatchPreviewFactory

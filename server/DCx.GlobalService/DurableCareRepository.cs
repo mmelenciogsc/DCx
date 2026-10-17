@@ -21,9 +21,23 @@ public sealed record DurablePayoutItemState(
     bool Succeeded,
     string ProviderStatus);
 
+public sealed record DurablePayoutItemAdjustment(
+    string BatchId,
+    int Ordinal,
+    string ContributorPseudonym,
+    long AmountCents,
+    string FromProviderStatus,
+    string ToProviderStatus,
+    string LedgerEventId,
+    DateTimeOffset OccurredUtc);
+
 public sealed record DurablePendingPayout(
     PayoutBatchPreview Preview,
     DateTimeOffset CreatedUtc,
+    DateTimeOffset UpdatedUtc);
+
+public sealed record DurableTerminalPayout(
+    PayoutBatchPreview Preview,
     DateTimeOffset UpdatedUtc);
 
 public sealed record PayoutReconciliationSummary(
@@ -31,6 +45,12 @@ public sealed record PayoutReconciliationSummary(
     int Completed,
     int StillPending,
     int Resubmitted);
+
+public sealed record PayoutTerminalReconciliationSummary(
+    int Scanned,
+    int Corrected,
+    int Unchanged,
+    int ProviderPending);
 
 public sealed record DurableWebhookAuditRecord(
     string EventId,
@@ -463,6 +483,301 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
         return pending;
     }
 
+    public async Task<IReadOnlyList<DurableTerminalPayout>> GetTerminalPayoutsAsync(
+        DateTimeOffset updatedBeforeOrAt,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit));
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT preview_sha256, preview_json, updated_utc
+            FROM payout_batches
+            WHERE status IN ('succeeded', 'partially_succeeded') AND updated_utc <= $cutoff
+            ORDER BY updated_utc, batch_id
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$cutoff", updatedBeforeOrAt.ToUniversalTime().ToString("O"));
+        command.Parameters.AddWithValue("$limit", limit);
+        var terminal = new List<DurableTerminalPayout>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            PayoutBatchPreview preview;
+            try
+            {
+                preview = JsonSerializer.Deserialize<PayoutBatchPreview>(reader.GetString(1))
+                    ?? throw new InvalidOperationException("A durable payout preview is empty.");
+            }
+            catch (JsonException exception)
+            {
+                throw new InvalidOperationException(
+                    $"A durable payout preview is unreadable: {exception.GetType().Name}.");
+            }
+
+            if (!string.Equals(reader.GetString(0), PayoutPreviewSha(preview), StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("A durable payout preview failed its stored digest.");
+            }
+
+            terminal.Add(new DurableTerminalPayout(
+                preview,
+                DateTimeOffset.Parse(reader.GetString(2))));
+        }
+
+        return terminal;
+    }
+
+    public async Task<bool> ReconcileTerminalPayoutAsync(
+        PayoutBatchPreview preview,
+        PayoutBatchResult result,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedItems = PayoutContractValidation.NormalizeTerminalResult(preview, result);
+        var resultSha = PayoutResultSha(result, normalizedItems);
+        await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            var sqliteTransaction = (SqliteTransaction)transaction;
+            var command = connection.CreateCommand();
+            command.Transaction = sqliteTransaction;
+            command.CommandText = """
+                SELECT preview_sha256, status, provider_status, result_sha256, paid_cents
+                FROM payout_batches WHERE batch_id = $batch;
+                """;
+            command.Parameters.AddWithValue("$batch", preview.BatchId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                throw new InvalidOperationException("The terminal payout batch does not exist.");
+            }
+
+            var previewSha = reader.GetString(0);
+            var status = reader.GetString(1);
+            var providerStatus = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var existingResultSha = reader.IsDBNull(3) ? null : reader.GetString(3);
+            var paidCents = reader.GetInt64(4);
+            await reader.DisposeAsync().ConfigureAwait(false);
+            if (!string.Equals(previewSha, PayoutPreviewSha(preview), StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The terminal payout preview failed its stored digest.");
+            }
+
+            if (status is not ("succeeded" or "partially_succeeded") ||
+                string.IsNullOrWhiteSpace(providerStatus) || string.IsNullOrWhiteSpace(existingResultSha))
+            {
+                throw new InvalidOperationException("The payout batch is not eligible for terminal reconciliation.");
+            }
+
+            command.Parameters.Clear();
+            command.CommandText = """
+                SELECT contributor_pseudonym, amount_cents, recipient_snapshot_id,
+                       destination_sha256, succeeded, provider_status
+                FROM payout_item_results
+                WHERE batch_id = $batch
+                ORDER BY ordinal;
+                """;
+            command.Parameters.AddWithValue("$batch", preview.BatchId);
+            var storedItems = new List<DurablePayoutItemState>();
+            await using (var itemReader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+            {
+                while (await itemReader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    storedItems.Add(new DurablePayoutItemState(
+                        preview.BatchId,
+                        itemReader.GetString(0),
+                        itemReader.GetInt64(1),
+                        itemReader.GetString(2),
+                        itemReader.GetString(3),
+                        itemReader.GetInt32(4) == 1,
+                        itemReader.GetString(5)));
+                }
+            }
+
+            if (storedItems.Count != preview.Items.Count)
+            {
+                throw new InvalidOperationException("The terminal payout item state is incomplete.");
+            }
+
+            for (var index = 0; index < preview.Items.Count; index++)
+            {
+                var approved = preview.Items[index];
+                var stored = storedItems[index];
+                if (!string.Equals(stored.ContributorPseudonym, approved.ContributorPseudonym, StringComparison.Ordinal) ||
+                    stored.AmountCents != approved.AmountCents ||
+                    !string.Equals(stored.RecipientSnapshotId, approved.RecipientApproval.SnapshotId, StringComparison.Ordinal) ||
+                    !string.Equals(stored.DestinationSha256, approved.RecipientApproval.DestinationSha256, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("The terminal payout item state conflicts with its approved preview.");
+                }
+            }
+
+            var storedPaidCents = storedItems.Where(item => item.Succeeded).Sum(item => item.AmountCents);
+            if (storedPaidCents != paidCents)
+            {
+                throw new InvalidOperationException("The terminal payout paid total conflicts with its item states.");
+            }
+
+            var storedOutcome = status == "succeeded"
+                ? PayoutBatchOutcome.Succeeded
+                : PayoutBatchOutcome.PartiallySucceeded;
+            var storedResult = new PayoutBatchResult(
+                preview.BatchId,
+                storedOutcome,
+                providerStatus,
+                storedItems.Select(item => new PayoutItemResult(
+                    item.ContributorPseudonym,
+                    item.AmountCents,
+                    item.Succeeded,
+                    item.ProviderStatus)).ToArray());
+            if (!string.Equals(
+                    existingResultSha,
+                    PayoutResultSha(storedResult, storedResult.ItemResults!),
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The terminal payout result failed its stored digest.");
+            }
+
+            if (string.Equals(existingResultSha, resultSha, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (!string.Equals(providerStatus, result.ProviderStatus, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The terminal payout provider status changed unexpectedly.");
+            }
+
+            var transitionedOrdinals = new List<int>();
+            long returnedCents = 0;
+            for (var index = 0; index < storedItems.Count; index++)
+            {
+                var stored = storedItems[index];
+                var current = normalizedItems[index];
+                if (!stored.Succeeded)
+                {
+                    if (current.Succeeded ||
+                        !string.Equals(stored.ProviderStatus, current.ProviderStatus, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "A terminal payout reconciliation cannot promote or rewrite an unsuccessful item.");
+                    }
+
+                    continue;
+                }
+
+                if (current.Succeeded)
+                {
+                    if (!string.Equals(stored.ProviderStatus, current.ProviderStatus, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "A terminal payout reconciliation cannot rewrite a successful item.");
+                    }
+
+                    continue;
+                }
+
+                if (!IsPayoutReturnStatus(current.ProviderStatus))
+                {
+                    throw new InvalidOperationException(
+                        "Only a provider return, refund or reversal may correct a successful payout item.");
+                }
+
+                returnedCents = checked(returnedCents + stored.AmountCents);
+                transitionedOrdinals.Add(index);
+            }
+
+            if (transitionedOrdinals.Count == 0 || returnedCents <= 0)
+            {
+                throw new InvalidOperationException("The terminal payout reconciliation has no valid correction.");
+            }
+
+            var remainingPaidCents = checked(paidCents - returnedCents);
+            if (remainingPaidCents < 0)
+            {
+                throw new InvalidOperationException("The terminal payout correction exceeds its paid total.");
+            }
+
+            var targetStatus = remainingPaidCents == 0 ? "failed" : "partially_succeeded";
+            var ledgerEventId = $"payout_return:{resultSha}";
+            foreach (var ordinal in transitionedOrdinals)
+            {
+                var stored = storedItems[ordinal];
+                var current = normalizedItems[ordinal];
+                command.Parameters.Clear();
+                command.CommandText = """
+                    UPDATE payout_item_results
+                    SET succeeded = 0, provider_status = $to_status
+                    WHERE batch_id = $batch AND ordinal = $ordinal
+                      AND succeeded = 1 AND provider_status = $from_status;
+                    """;
+                command.Parameters.AddWithValue("$to_status", current.ProviderStatus);
+                command.Parameters.AddWithValue("$batch", preview.BatchId);
+                command.Parameters.AddWithValue("$ordinal", ordinal);
+                command.Parameters.AddWithValue("$from_status", stored.ProviderStatus);
+                if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+                {
+                    throw new InvalidOperationException("The terminal payout item correction conflicted.");
+                }
+
+                command.Parameters.Clear();
+                command.CommandText = """
+                    INSERT INTO payout_item_adjustments(
+                        batch_id, ordinal, from_provider_status, to_provider_status,
+                        amount_cents, ledger_event_id, occurred_utc)
+                    VALUES($batch, $ordinal, $from_status, $to_status,
+                        $amount, $ledger_event, $occurred);
+                    """;
+                command.Parameters.AddWithValue("$batch", preview.BatchId);
+                command.Parameters.AddWithValue("$ordinal", ordinal);
+                command.Parameters.AddWithValue("$from_status", stored.ProviderStatus);
+                command.Parameters.AddWithValue("$to_status", current.ProviderStatus);
+                command.Parameters.AddWithValue("$amount", stored.AmountCents);
+                command.Parameters.AddWithValue("$ledger_event", ledgerEventId);
+                command.Parameters.AddWithValue("$occurred", now.ToUniversalTime().ToString("O"));
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            command.Parameters.Clear();
+            command.CommandText = """
+                UPDATE payout_batches
+                SET status = $status, result_sha256 = $result_sha,
+                    paid_cents = $paid, updated_utc = $updated
+                WHERE batch_id = $batch AND status = $prior_status
+                  AND result_sha256 = $prior_result_sha AND paid_cents = $prior_paid;
+                """;
+            command.Parameters.AddWithValue("$status", targetStatus);
+            command.Parameters.AddWithValue("$result_sha", resultSha);
+            command.Parameters.AddWithValue("$paid", remainingPaidCents);
+            command.Parameters.AddWithValue("$updated", now.ToUniversalTime().ToString("O"));
+            command.Parameters.AddWithValue("$batch", preview.BatchId);
+            command.Parameters.AddWithValue("$prior_status", status);
+            command.Parameters.AddWithValue("$prior_result_sha", existingResultSha);
+            command.Parameters.AddWithValue("$prior_paid", paidCents);
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+            {
+                throw new InvalidOperationException("The terminal payout correction conflicted.");
+            }
+
+            await PostInternalAsync(
+                    connection,
+                    sqliteTransaction,
+                    CareLedgerJournal.SandboxPayoutReturn(ledgerEventId, returnedCents, now),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        finally
+        {
+            mutationLock.Release();
+        }
+    }
+
     public async Task<long> BalanceAsync(
         LedgerAccount account,
         CancellationToken cancellationToken = default)
@@ -547,6 +862,42 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
                 reader.GetString(3),
                 reader.GetInt32(4) == 1,
                 reader.GetString(5)));
+        }
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<DurablePayoutItemAdjustment>> GetPayoutItemAdjustmentsAsync(
+        string batchId,
+        CancellationToken cancellationToken = default)
+    {
+        PayPalSandboxValidation.RequireLocalBatchId(batchId);
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT adjustment.ordinal, item.contributor_pseudonym, adjustment.amount_cents,
+                   adjustment.from_provider_status, adjustment.to_provider_status,
+                   adjustment.ledger_event_id, adjustment.occurred_utc
+            FROM payout_item_adjustments AS adjustment
+            INNER JOIN payout_item_results AS item
+              ON item.batch_id = adjustment.batch_id AND item.ordinal = adjustment.ordinal
+            WHERE adjustment.batch_id = $batch
+            ORDER BY adjustment.ordinal;
+            """;
+        command.Parameters.AddWithValue("$batch", batchId);
+        var results = new List<DurablePayoutItemAdjustment>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            results.Add(new DurablePayoutItemAdjustment(
+                batchId,
+                reader.GetInt32(0),
+                reader.GetString(1),
+                reader.GetInt64(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                DateTimeOffset.Parse(reader.GetString(6))));
         }
 
         return results;
@@ -658,7 +1009,7 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
         command.CommandText = "PRAGMA user_version;";
         var schemaVersion = Convert.ToInt32(
             await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
-        if (schemaVersion > 5)
+        if (schemaVersion > 6)
         {
             throw new InvalidOperationException("The CARE ledger schema is newer than this application.");
         }
@@ -809,6 +1160,19 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
                 UNIQUE(batch_id, recipient_snapshot_id),
                 FOREIGN KEY(batch_id) REFERENCES payout_batches(batch_id)
             );
+            CREATE TABLE IF NOT EXISTS payout_item_adjustments(
+                batch_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                from_provider_status TEXT NOT NULL,
+                to_provider_status TEXT NOT NULL CHECK(to_provider_status IN (
+                    'RETURNED', 'REFUNDED', 'REVERSED')),
+                amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+                ledger_event_id TEXT NOT NULL,
+                occurred_utc TEXT NOT NULL,
+                PRIMARY KEY(batch_id, ordinal),
+                FOREIGN KEY(batch_id, ordinal)
+                    REFERENCES payout_item_results(batch_id, ordinal)
+            );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         command.CommandText = """
@@ -817,7 +1181,7 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
             WHERE provider_batch_id IS NOT NULL;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        command.CommandText = "PRAGMA user_version = 5;";
+        command.CommandText = "PRAGMA user_version = 6;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -899,6 +1263,9 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
             result.ProviderStatus,
             Items = normalizedItems,
         })));
+
+    private static bool IsPayoutReturnStatus(string status) =>
+        status is "RETURNED" or "REFUNDED" or "REVERSED";
 
     private static void ValidatePayout(
         PayoutBatchPreview preview,
@@ -1464,6 +1831,75 @@ public sealed class DurablePayoutCoordinator(
         }
 
         return new PayoutReconciliationSummary(pending.Count, completed, stillPending, resubmitted);
+    }
+
+    public async Task<PayoutTerminalReconciliationSummary> ReconcileTerminalAsync(
+        DateTimeOffset updatedBeforeOrAt,
+        DateTimeOffset now,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        if (provider is not IReconcilablePayoutSandboxProvider reconcilable)
+        {
+            throw new InvalidOperationException("The sandbox payout provider does not support terminal reconciliation.");
+        }
+
+        var terminal = await repository.GetTerminalPayoutsAsync(updatedBeforeOrAt, limit, cancellationToken)
+            .ConfigureAwait(false);
+        var corrected = 0;
+        var unchanged = 0;
+        var providerPending = 0;
+        foreach (var item in terminal)
+        {
+            var lookup = await reconcilable.LookupSandboxAsync(item.Preview, cancellationToken)
+                .ConfigureAwait(false);
+            if (!string.Equals(lookup.BatchId, item.Preview.BatchId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The sandbox payout lookup returned a conflicting batch identifier.");
+            }
+
+            PayoutBatchResult? result = lookup.State switch
+            {
+                SandboxPayoutLookupState.NotFound => throw new InvalidOperationException(
+                    "A completed sandbox payout disappeared from the provider; automatic resend is prohibited."),
+                SandboxPayoutLookupState.Pending => null,
+                SandboxPayoutLookupState.Succeeded => new PayoutBatchResult(
+                    item.Preview.BatchId,
+                    PayoutBatchOutcome.Succeeded,
+                    ValidateLookupStatus(lookup.ProviderStatus),
+                    lookup.ItemResults),
+                SandboxPayoutLookupState.Failed => new PayoutBatchResult(
+                    item.Preview.BatchId,
+                    PayoutBatchOutcome.Failed,
+                    ValidateLookupStatus(lookup.ProviderStatus),
+                    lookup.ItemResults),
+                SandboxPayoutLookupState.PartiallySucceeded => new PayoutBatchResult(
+                    item.Preview.BatchId,
+                    PayoutBatchOutcome.PartiallySucceeded,
+                    ValidateLookupStatus(lookup.ProviderStatus),
+                    lookup.ItemResults),
+                _ => throw new InvalidOperationException("The sandbox payout lookup state is invalid."),
+            };
+
+            if (result is null)
+            {
+                providerPending++;
+                continue;
+            }
+
+            if (await repository.ReconcileTerminalPayoutAsync(
+                    item.Preview, result, now, cancellationToken).ConfigureAwait(false))
+            {
+                corrected++;
+            }
+            else
+            {
+                unchanged++;
+            }
+        }
+
+        return new PayoutTerminalReconciliationSummary(
+            terminal.Count, corrected, unchanged, providerPending);
     }
 
     private static string ValidateLookupStatus(string? status)

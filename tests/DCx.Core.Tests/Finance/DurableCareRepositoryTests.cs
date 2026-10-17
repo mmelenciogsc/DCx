@@ -159,7 +159,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(5L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(6L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -176,7 +176,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         {
             await connection.OpenAsync();
             var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 6;";
+            command.CommandText = "PRAGMA user_version = 7;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -188,7 +188,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(6L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(7L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -460,6 +460,128 @@ public sealed class DurableCareRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task TerminalReconciliation_ReturnsPaidItemsExactlyOnceWithoutResending()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var preview = new PayoutBatchPreview(
+            "batch:post-terminal-return",
+            PayoutExecutionMode.Sandbox,
+            new DateOnly(2026, 4, 1),
+            [
+                new PayoutItem("contributor:one", 500, Approval("contributor:one")),
+                new PayoutItem("contributor:two", 700, Approval("contributor:two")),
+            ]);
+        await AccrueAsync(repository, preview);
+        Assert.True(await repository.ReservePayoutAsync(
+            preview, true, true, preview.EligibilityDate, now));
+        var initial = new PayoutBatchResult(
+            preview.BatchId,
+            PayoutBatchOutcome.Succeeded,
+            "SUCCESS",
+            preview.Items.Select(item => new PayoutItemResult(
+                item.ContributorPseudonym, item.AmountCents, true, "SUCCESS")).ToArray());
+        Assert.True(await repository.CompletePayoutAsync(preview, initial, now));
+
+        var provider = new ReconcilableFixtureProvider();
+        provider.SetLookup(
+            preview.BatchId,
+            SandboxPayoutLookupState.PartiallySucceeded,
+            "SUCCESS",
+            [
+                new PayoutItemResult("contributor:one", 500, false, "RETURNED"),
+                new PayoutItemResult("contributor:two", 700, true, "SUCCESS"),
+            ]);
+        var reopened = await DurableCareRepository.OpenAsync(root);
+        var coordinator = new DurablePayoutCoordinator(reopened, provider);
+        var first = await coordinator.ReconcileTerminalAsync(now.AddMinutes(1), now.AddMinutes(1));
+
+        Assert.Equal(new PayoutTerminalReconciliationSummary(1, 1, 0, 0), first);
+        Assert.Equal(0, provider.SendCalls);
+        var partial = (await reopened.GetPayoutStateAsync(preview.BatchId))!;
+        Assert.Equal("partially_succeeded", partial.Status);
+        Assert.Equal(700, partial.PaidCents);
+        Assert.Equal(-700, await reopened.BalanceAsync(LedgerAccount.Cash));
+        Assert.Equal(-500, await reopened.BalanceAsync(LedgerAccount.ContributorPayable));
+        var firstAdjustments = await reopened.GetPayoutItemAdjustmentsAsync(preview.BatchId);
+        var firstAdjustment = Assert.Single(firstAdjustments);
+        Assert.Equal("RETURNED", firstAdjustment.ToProviderStatus);
+        Assert.Equal(500, firstAdjustment.AmountCents);
+        Assert.True(await reopened.ReconcilesAsync());
+
+        var again = await coordinator.ReconcileTerminalAsync(now.AddMinutes(2), now.AddMinutes(2));
+        Assert.Equal(new PayoutTerminalReconciliationSummary(1, 0, 1, 0), again);
+        Assert.Single(await reopened.GetPayoutItemAdjustmentsAsync(preview.BatchId));
+        Assert.Equal(0, provider.SendCalls);
+
+        provider.SetLookup(
+            preview.BatchId,
+            SandboxPayoutLookupState.Failed,
+            "SUCCESS",
+            [
+                new PayoutItemResult("contributor:one", 500, false, "RETURNED"),
+                new PayoutItemResult("contributor:two", 700, false, "REVERSED"),
+            ]);
+        var final = await coordinator.ReconcileTerminalAsync(now.AddMinutes(3), now.AddMinutes(3));
+
+        Assert.Equal(new PayoutTerminalReconciliationSummary(1, 1, 0, 0), final);
+        var failed = (await reopened.GetPayoutStateAsync(preview.BatchId))!;
+        Assert.Equal("failed", failed.Status);
+        Assert.Equal(0, failed.PaidCents);
+        Assert.Equal(0, await reopened.BalanceAsync(LedgerAccount.Cash));
+        Assert.Equal(-1200, await reopened.BalanceAsync(LedgerAccount.ContributorPayable));
+        Assert.Equal(2, (await reopened.GetPayoutItemAdjustmentsAsync(preview.BatchId)).Count);
+        Assert.Equal(0, provider.SendCalls);
+        Assert.True(await reopened.ReconcilesAsync());
+    }
+
+    [Fact]
+    public async Task TerminalReconciliation_FailsClosedOnPromotionRewriteOrMissingProviderBatch()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var preview = new PayoutBatchPreview(
+            "batch:terminal-conflict",
+            PayoutExecutionMode.Sandbox,
+            new DateOnly(2026, 4, 1),
+            [
+                new PayoutItem("contributor:one", 500, Approval("contributor:one")),
+                new PayoutItem("contributor:two", 700, Approval("contributor:two")),
+            ]);
+        await AccrueAsync(repository, preview);
+        Assert.True(await repository.ReservePayoutAsync(
+            preview, true, true, preview.EligibilityDate, now));
+        var initial = new PayoutBatchResult(
+            preview.BatchId,
+            PayoutBatchOutcome.PartiallySucceeded,
+            "SUCCESS",
+            [
+                new PayoutItemResult("contributor:one", 500, true, "SUCCESS"),
+                new PayoutItemResult("contributor:two", 700, false, "FAILED"),
+            ]);
+        Assert.True(await repository.CompletePayoutAsync(preview, initial, now));
+        var provider = new ReconcilableFixtureProvider();
+        provider.SetLookup(
+            preview.BatchId,
+            SandboxPayoutLookupState.Succeeded,
+            "SUCCESS",
+            [
+                new PayoutItemResult("contributor:one", 500, true, "SUCCESS"),
+                new PayoutItemResult("contributor:two", 700, true, "SUCCESS"),
+            ]);
+        var coordinator = new DurablePayoutCoordinator(repository, provider);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            coordinator.ReconcileTerminalAsync(now.AddMinutes(1), now.AddMinutes(1)));
+        Assert.Equal(500, (await repository.GetPayoutStateAsync(preview.BatchId))!.PaidCents);
+        Assert.Empty(await repository.GetPayoutItemAdjustmentsAsync(preview.BatchId));
+        Assert.Equal(0, provider.SendCalls);
+
+        provider.SetLookup(preview.BatchId, SandboxPayoutLookupState.NotFound, null);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            coordinator.ReconcileTerminalAsync(now.AddMinutes(2), now.AddMinutes(2)));
+        Assert.Equal(0, provider.SendCalls);
+    }
+
+    [Fact]
     public async Task SchemaThreeReservedPayout_IsQuarantinedForRecipientReapproval()
     {
         Directory.CreateDirectory(root);
@@ -509,7 +631,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var version = reopened.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(5L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(6L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     public void Dispose()
@@ -576,8 +698,13 @@ public sealed class DurableCareRepositoryTests : IDisposable
 
         public int SendCalls { get; private set; }
 
-        public void SetLookup(string batchId, SandboxPayoutLookupState state, string? providerStatus) =>
-            lookups[batchId] = new SandboxPayoutLookupResult(batchId, state, providerStatus);
+        public void SetLookup(
+            string batchId,
+            SandboxPayoutLookupState state,
+            string? providerStatus,
+            IReadOnlyList<PayoutItemResult>? itemResults = null) =>
+            lookups[batchId] = new SandboxPayoutLookupResult(
+                batchId, state, providerStatus, itemResults);
 
         public Task<SandboxPayoutLookupResult> LookupSandboxAsync(
             PayoutBatchPreview preview,

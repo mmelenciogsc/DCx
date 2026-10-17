@@ -122,7 +122,7 @@ public static class CurrentReleaseReadiness
             Issue("p10-ccb-sandbox", "Production hostile community-code isolation", ReadinessSeverity.Critical,
                 "Security engineering", "Deploy the gated package pipeline only to an approved Ubuntu 24.04 environment with seccomp, cgroup-v2, immutable-image, authenticated-review and external penetration-test evidence before enabling CCB publication.", "docs/progress/PHASE-10.md"),
             Issue("p11-paypal", "PayPal sandbox eligibility and reconciliation", ReadinessSeverity.Critical,
-                "Finance platform and owner", "Provide approved sandbox credentials, exact US$3 plan/product configuration and merchant/payout eligibility evidence; implement accessible recipient-snapshot preparation/approval, then run credentialed event/payout acceptance, failed-item remediation and post-terminal payout-reversal reconciliation.", "docs/progress/PHASE-11.md"),
+                "Finance platform and owner", "Provide approved sandbox credentials, exact US$3 plan/product configuration and merchant/payout eligibility evidence; implement accessible recipient-snapshot preparation/approval and separately approved failed-item remediation, then run credentialed event/payout acceptance.", "docs/progress/PHASE-11.md"),
             Issue("p12-live-acceptance", "Live provider and human acceptance scenarios", ReadinessSeverity.Major,
                 "Quality and accessibility", "Run separately authorized Facebook, QuickBooks, YouTube, installer and assistive-technology acceptance.", "docs/progress/PHASE-12.md"),
             Issue("p13-signed-installer", "Signed installer and clean-VM lifecycle", ReadinessSeverity.Critical,
