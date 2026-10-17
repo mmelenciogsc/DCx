@@ -37,6 +37,19 @@ function Get-MainWindow([int]$processId) {
         $condition)
 }
 
+function Get-WindowById([int]$processId, [string]$automationId) {
+    $processCondition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+        $processId)
+    $idCondition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+        $automationId)
+    $condition = New-Object System.Windows.Automation.AndCondition($processCondition, $idCondition)
+    return [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $condition)
+}
+
 function Find-ById($root, [string]$automationId) {
     $condition = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
@@ -260,11 +273,57 @@ try {
     $status = Find-ById $window "StatusText"
     $recoveryLauncher = Wait-For { Find-ById $window "RecoveryButton" } "The main window recovery launcher was not exposed through UIA."
     $recoveryLauncherName = $recoveryLauncher.Current.Name
+    $diagnosticsLauncher = Wait-For { Find-ById $window "CrashDiagnosticsButton" } "The crash diagnostics launcher was not exposed through UIA."
     $null = Wait-For { $status.Current.Name -eq "DCx is ready offline. No website was contacted during startup." } "Offline startup status was not exposed."
     $startupMilliseconds = [long]((Get-Date) - $started).TotalMilliseconds
     $process.Refresh()
     $workingSetMiB = [math]::Round($process.WorkingSet64 / 1MB, 1)
     if ($workingSetMiB -gt 1024) { throw "Offline startup exceeded the provisional 1 GiB working-set ceiling." }
+
+    $diagnosticsLauncher.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $diagnosticsWindow = Wait-For {
+        Get-WindowById $process.Id "CrashDiagnosticsWindow"
+    } "The privacy and crash diagnostics window did not open."
+    $diagnosticsHeading = Wait-For { Find-ById $diagnosticsWindow "CrashDiagnosticsHeading" } "The crash diagnostics heading was not exposed through UIA."
+    $diagnosticsConsent = Wait-For { Find-ById $diagnosticsWindow "CrashReportingConsentBox" } "The crash diagnostics consent control was not exposed through UIA."
+    $diagnosticsSave = Wait-For { Find-ById $diagnosticsWindow "SaveCrashReportingConsentButton" } "The crash diagnostics save control was not exposed through UIA."
+    $diagnosticsDelete = Wait-For { Find-ById $diagnosticsWindow "DeleteCrashReportsButton" } "The crash diagnostics purge control was not exposed through UIA."
+    $diagnosticsStatus = Wait-For { Find-ById $diagnosticsWindow "CrashDiagnosticsStatus" } "The crash diagnostics live status was not exposed through UIA."
+    $diagnosticsClose = Wait-For { Find-ById $diagnosticsWindow "CloseCrashDiagnosticsButton" } "The crash diagnostics close control was not exposed through UIA."
+    $diagnosticsHeadingName = $diagnosticsHeading.Current.Name
+    $consentToggle = $diagnosticsConsent.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+    if ($consentToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "Local crash diagnostics did not default to unchecked."
+    }
+    $null = Wait-For {
+        $diagnosticsStatus.Current.Name -eq "Local crash diagnostics are disabled. No crash reports are retained or sent."
+    } "The default-disabled crash diagnostics state was not exposed."
+
+    $consentToggle.Toggle()
+    $diagnosticsSave.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $diagnosticsStatus.Current.Name -eq "Local crash diagnostics are enabled. 0 of 20 crash reports are retained. Nothing is sent automatically."
+    } "The explicit crash diagnostics opt-in was not applied."
+    $consentPath = Join-Path $env:DCX_DATA_ROOT "reliability\crash-report-consent.json"
+    $savedConsent = Get-Content -LiteralPath $consentPath -Raw | ConvertFrom-Json
+    if (-not $savedConsent.enabled -or $savedConsent.noticeVersion -ne 1) {
+        throw "The local crash diagnostics consent record did not reflect explicit opt-in."
+    }
+
+    $diagnosticsDelete.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $diagnosticsStatus.Current.Name -eq "All retained crash reports were deleted. Local crash diagnostics remain enabled. Nothing was sent."
+    } "The explicit local crash-report purge action did not complete."
+    $consentToggle.Toggle()
+    $diagnosticsSave.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $diagnosticsStatus.Current.Name -eq "Local crash diagnostics are disabled. No crash reports are retained or sent."
+    } "The crash diagnostics opt-out did not purge and disable reporting."
+    $savedConsent = Get-Content -LiteralPath $consentPath -Raw | ConvertFrom-Json
+    if ($savedConsent.enabled) { throw "The local crash diagnostics consent record remained enabled after opt-out." }
+    $retainedReports = @(Get-ChildItem -LiteralPath (Join-Path $env:DCX_DATA_ROOT "reliability\crash-reports") -File)
+    if ($retainedReports.Count -ne 0) { throw "Local crash reports remained after opt-out." }
+    $diagnosticsClose.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 
     $recoveryProcess = Start-Process $publishedExe -ArgumentList "--recovery" -PassThru
     $recoveryWindow = Wait-For { Get-MainWindow $recoveryProcess.Id } "The recovery window did not start."
@@ -327,7 +386,7 @@ try {
         captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
         release_build_warnings = 0
         release_build_errors = 0
-        reliability_tests_passed = 14
+        reliability_tests_passed = 18
         publish_file_count = $manifestOne.Count
         publish_bytes = [long](($manifestOne | Measure-Object length -Sum).Sum)
         reproducible_publish = $true
@@ -341,6 +400,10 @@ try {
         offline_heading = $offlineHeadingName
         offline_startup_ms = $startupMilliseconds
         offline_working_set_mib = $workingSetMiB
+        crash_diagnostics_uia_heading = $diagnosticsHeadingName
+        crash_diagnostics_default_unchecked = $true
+        crash_diagnostics_consent_and_purge = $true
+        crash_diagnostics_network_transfers = 0
         recovery_uia_heading = $recoveryHeading.Current.Name
         recovery_launcher_uia_name = $recoveryLauncherName
         recovery_denied_while_running = $true
@@ -364,6 +427,7 @@ try {
     "Offline startup UIA=$offlineHeadingName"
     "Offline startup milliseconds=$startupMilliseconds"
     "Offline working set MiB=$workingSetMiB"
+    "Accessible default-off local crash diagnostics and purge=PASS"
     "Accessible recovery UIA=$($recoveryHeading.Current.Name)"
     "Closed-app backup and approved restore=PASS"
     "Backup while DCx running denied=PASS"

@@ -1,0 +1,89 @@
+<Window x:Class="DCx.Desktop.CrashDiagnosticsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DCx privacy and crash diagnostics"
+        Width="720"
+        Height="620"
+        MinWidth="560"
+        MinHeight="480"
+        AutomationProperties.AutomationId="CrashDiagnosticsWindow"
+        AutomationProperties.Name="DCx privacy and crash diagnostics window">
+    <DockPanel Margin="20">
+        <TextBlock x:Name="StatusText"
+                   DockPanel.Dock="Bottom"
+                   Margin="0,16,0,0"
+                   Padding="10"
+                   Text="Loading local crash diagnostics status."
+                   TextWrapping="Wrap"
+                   Background="#F3F3F3"
+                   AutomationProperties.AutomationId="CrashDiagnosticsStatus"
+                   AutomationProperties.Name="Loading local crash diagnostics status."
+                   AutomationProperties.LiveSetting="Assertive" />
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Focusable="False">
+            <StackPanel>
+                <TextBlock FontSize="26"
+                           FontWeight="SemiBold"
+                           Text="Privacy and crash diagnostics"
+                           AutomationProperties.AutomationId="CrashDiagnosticsHeading"
+                           AutomationProperties.Name="Privacy and crash diagnostics" />
+                <TextBlock Margin="0,12,0,0"
+                           TextWrapping="Wrap"
+                           Text="Crash diagnostics are disabled by default. Enabling this option stores minimized reports only on this device. DCx never sends them automatically." />
+
+                <CheckBox x:Name="ConsentBox"
+                          Margin="0,18,0,0"
+                          FontWeight="SemiBold"
+                          Content="_Store minimized crash diagnostics locally on this device"
+                          AutomationProperties.AutomationId="CrashReportingConsentBox"
+                          AutomationProperties.Name="Store minimized crash diagnostics locally on this device"
+                          AutomationProperties.HelpText="Unchecked by default. Save applies the setting. Disabling also deletes all retained crash reports." />
+
+                <GroupBox Margin="0,16,0,0" Header="Exactly what a report contains">
+                    <StackPanel Margin="12,8">
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="UTC time. A closed component category. A closed error category. The DCx application version. Whether the process was terminating." />
+                        <TextBlock Margin="0,10,0,0"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap"
+                                   Text="Never included: exception messages, stack traces, memory dumps, prompts, page URLs, local paths, keystrokes, account identifiers, or user identifiers." />
+                    </StackPanel>
+                </GroupBox>
+
+                <TextBlock Margin="0,14,0,0"
+                           TextWrapping="Wrap"
+                           Text="DCx retains at most 20 reports. Turning this option off deletes them. You can also delete retained reports without changing your current setting." />
+
+                <WrapPanel Margin="0,18,0,0">
+                    <Button x:Name="SaveButton"
+                            MinWidth="150"
+                            MinHeight="36"
+                            Margin="0,0,10,10"
+                            Content="_Save setting"
+                            AutomationProperties.AutomationId="SaveCrashReportingConsentButton"
+                            AutomationProperties.Name="Save crash reporting setting"
+                            Click="OnSaveClick" />
+                    <Button x:Name="DeleteButton"
+                            MinWidth="180"
+                            MinHeight="36"
+                            Margin="0,0,10,10"
+                            Content="_Delete retained reports"
+                            AutomationProperties.AutomationId="DeleteCrashReportsButton"
+                            AutomationProperties.Name="Delete retained crash reports"
+                            AutomationProperties.HelpText="Permanently deletes all retained local crash reports without changing the current reporting setting."
+                            Click="OnDeleteClick" />
+                    <Button MinWidth="100"
+                            MinHeight="36"
+                            Margin="0,0,0,10"
+                            Content="_Close"
+                            IsCancel="True"
+                            AutomationProperties.AutomationId="CloseCrashDiagnosticsButton"
+                            AutomationProperties.Name="Close privacy and crash diagnostics"
+                            Click="OnCloseClick" />
+                </WrapPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

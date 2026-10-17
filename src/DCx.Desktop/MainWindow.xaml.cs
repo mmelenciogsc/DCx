@@ -47,6 +47,7 @@ public partial class MainWindow : Window
     private OpenAiControlWindow? _openAiControlWindow;
     private ContentViewerWindow? _contentViewerWindow;
     private ContributionsWindow? _contributionsWindow;
+    private CrashDiagnosticsWindow? _crashDiagnosticsWindow;
 
     public MainWindow()
     {
@@ -946,6 +947,24 @@ public partial class MainWindow : Window
         {
             SetStatus($"Backup and recovery could not open. {exception.Message}");
         }
+    }
+
+    private void OnCrashDiagnosticsClick(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Opening privacy and local crash diagnostics.");
+        if (_crashDiagnosticsWindow is { IsVisible: true })
+        {
+            _crashDiagnosticsWindow.Activate();
+            return;
+        }
+
+        _crashDiagnosticsWindow = new CrashDiagnosticsWindow(
+            (Application.Current as App)?.CrashReportStore)
+        {
+            Owner = this,
+        };
+        _crashDiagnosticsWindow.Closed += (_, _) => _crashDiagnosticsWindow = null;
+        _crashDiagnosticsWindow.Show();
     }
 
     private void OnReadinessClick(object sender, RoutedEventArgs e)
