@@ -45,6 +45,15 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - Checkpoints record decision metadata and measurements but omit task prompt/output bodies.
 - Capability exceptions are classified without persisting exception messages that could contain private content.
 
+## Implemented local-model controls through partial P06
+
+- Ollama is restricted to loopback HTTP. Model names, prompts, images, embedding batches, vector dimensions and JSON responses are bounded; inconsistent/nonfinite vectors fail closed.
+- Model capability and license metadata are inspected locally. Selection respects measured VRAM/RAM budgets and uses deterministic least-resource embedding preference.
+- Remote fallback requires connectivity plus separate provider approval and is unavailable for private input when no local backend exists.
+- Whisper executable and model files are SHA-256 pinned and reverified for every run. Only regular signature-checked WAV input is accepted.
+- Whisper runs without shell interpolation, with a scrubbed environment, typed arguments, timeout/tree kill, transcript size/reparse checks and deleted operation storage. Child diagnostics are drained but never retained.
+- Current Whisper and embedding successes are deterministic adapter fixtures, not accuracy or installed-backend evidence. P06 remains blocked pending approved binaries/models and real quality/resource benchmarks.
+
 ## Implemented content controls through P07
 
 - Local admission canonicalizes paths, rejects direct reparse files, applies per-kind size ceilings and verifies binary signatures before viewer/parser dispatch.

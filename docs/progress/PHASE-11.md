@@ -30,7 +30,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 - Locked Release build: 0 warnings, 0 errors.
 - P11 tests: passed 10, failed 0, skipped 0; 273 ms in the recorded composed run.
-- Current full suite after P14: passed 122, failed 0, skipped 0.
+- Current full suite after the latest P06 hardening: passed 134, failed 0, skipped 0.
 - Payment, refund, entitlement, balanced-entry and payout state survive repository reopen.
 - Same event/content is idempotent after restart; same event ID with different content fails closed.
 - Failed payout creates durable terminal state without a cash posting; successful payout clears contributor payable and reconciles.
