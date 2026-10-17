@@ -113,10 +113,7 @@ public sealed class GlobalServiceE2eTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(root))
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        TestDirectory.DeleteIfExists(root);
     }
 
     private static int ReserveEphemeralPort()

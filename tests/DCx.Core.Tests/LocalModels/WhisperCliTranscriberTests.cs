@@ -61,7 +61,7 @@ public sealed class WhisperCliTranscriberTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        TestDirectory.DeleteIfExists(root);
     }
 
     private static async Task<WhisperCliTranscriber> CreateAsync(

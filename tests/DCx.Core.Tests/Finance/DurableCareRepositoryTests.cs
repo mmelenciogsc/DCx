@@ -172,10 +172,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(root))
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        TestDirectory.DeleteIfExists(root);
     }
 
     private PayPalSandboxWebhookEvent Event(string eventId, string transmissionId, string eventType, long amount) =>

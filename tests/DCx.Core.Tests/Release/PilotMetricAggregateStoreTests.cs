@@ -96,6 +96,6 @@ public sealed class PilotMetricAggregateStoreTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        TestDirectory.DeleteIfExists(root);
     }
 }

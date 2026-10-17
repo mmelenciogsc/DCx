@@ -255,10 +255,7 @@ public sealed class GlobalReplicaTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(root))
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        TestDirectory.DeleteIfExists(root);
     }
 
     private static GlobalResourceRecord Resource(

@@ -96,10 +96,7 @@ public sealed class ContributionGovernanceTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(root))
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        TestDirectory.DeleteIfExists(root);
     }
 
     private ContributionCandidate Candidate(string candidateId, string resourceId, string body) => new(

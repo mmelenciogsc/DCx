@@ -55,10 +55,7 @@ public sealed class QuickBooksSandboxExportTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(root))
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        TestDirectory.DeleteIfExists(root);
     }
 
     private static string Read(ZipArchiveEntry entry)
