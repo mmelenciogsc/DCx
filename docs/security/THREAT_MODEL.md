@@ -112,9 +112,10 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 
 - Money uses checked integer cents. Journal entries must balance and conflicting event IDs fail closed.
 - The defined contributor pool is zero for nonpositive net and rejected above 40% aggregate; allocation conserves exact cents deterministically.
-- Sandbox webhooks require fixture integrity and unique transmission/event IDs. Refund/reversal suspends entitlement and posts a correcting balanced entry.
+- Sandbox webhooks require fixture integrity, bounded schema/identifiers and strict event/transmission replay semantics. Exact replay is idempotent; reuse of either identifier with different content fails closed, and rejected invalid input does not poison an identifier.
+- Entitlement state is reduced monotonically by signed occurrence time. Older events cannot overwrite newer state, and same-time deactivation dominates activation. Financial correction entries remain independent, so a stale refund/reversal can post and reconcile without regressing a newer entitlement.
 - Payout execution requires sandbox mode, verified eligibility, explicit owner approval, Net 60 and a unique batch. Live mode has no provider path and always fails.
-- SQLite persists canonical event hashes, postings, webhook replay identifiers, entitlement and payout terminal state with WAL and full synchronous writes. Reopen tests prove local idempotency and conflicting-event denial.
+- SQLite persists canonical event hashes, postings, webhook replay identifiers, minimized reducer decisions, entitlement source provenance and payout terminal state with WAL and full synchronous writes. Additive schema-v2 migration preserves prior state, and unknown future schemas fail closed. Reopen tests prove local idempotency, causal ordering and conflicting-event denial.
 - Reserved payout batches retain canonical previews and SHA-256 digests. Restart reconciliation first looks up the stable batch ID: accepted/failed batches become terminal without resend, provider-pending batches remain reserved, and provider-not-found batches are resent idempotently with the same ID.
 - These controls remain local mocks. Official PayPal webhook authenticity, provider lookup/status semantics and idempotency still require sandbox acceptance; account/recipient eligibility, key custody and legal/accounting policy remain blockers.
 

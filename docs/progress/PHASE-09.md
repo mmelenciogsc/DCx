@@ -34,7 +34,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 - Locked restore and native Release build passed with 0 warnings/errors.
 - P09 filtered tests: passed 9, failed 0, skipped 0; about 1 second in the recorded validation.
-- Current full suite after P13 controlled-update admission hardening: passed 193, failed 0, skipped 0; about 8 seconds.
+- Current full suite after P11 causal-ordering hardening: passed 198, failed 0, skipped 0; about 9 seconds.
 - A real child Kestrel process served three chained trust-policy revisions and a signed SQLite-backed release over loopback HTTP; a fresh production client transport caught up all revisions, synchronized and searched it.
 - Two distinct client roots synchronized the same chain; the P08 private sentinel remained present and absent from global results.
 - Wrong-key release activation was rejected with no active pointer.

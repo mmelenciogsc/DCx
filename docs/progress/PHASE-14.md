@@ -32,7 +32,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 exact-namespace release/readiness tests: passed 10, failed 0, skipped 0; about 1 second. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
-- Current expanded full suite after controlled-update admission hardening: passed 193, failed 0, skipped 0; about 8 seconds.
+- Current expanded full suite after P11 causal-ordering hardening: passed 198, failed 0, skipped 0; about 9 seconds.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -40,7 +40,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-
 - Decision: `NO_GO`.
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled consent state, blocker list, metric-definition list and refresh action. The validator confirmed that no control named `Activate production` exists.
-- Evidence: `artifacts/test-results/p14-f366e676191e42e5abda61926c00fb4b/go-no-go.json` with `p14-readiness.trx` beside it (generated and intentionally not committed).
+- Evidence: `artifacts/test-results/p14-d69f99ca88034c83abfb86f899ea6188/go-no-go.json` with `p14-readiness.trx` beside it (generated and intentionally not committed).
 
 ## Changed files in the latest milestone
 
