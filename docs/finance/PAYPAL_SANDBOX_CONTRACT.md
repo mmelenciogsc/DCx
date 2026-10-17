@@ -20,10 +20,10 @@ The audit performed only three HTTPS GET requests to these documentation resourc
 - Payout submission: `POST /v1/payments/payouts` with stable sender batch/item IDs and exact USD values.
 - Reconciliation: `GET /v1/payments/payouts/{provider-batch-id}` with items requested. Batch states are `DENIED`, `PENDING`, `PROCESSING`, `SUCCESS` and `CANCELED`.
 
-The production class exposes sandbox behavior only. Live payout mode has no transport path. Responses remain untrusted until strict shape, identity, item and amount checks pass.
+The production class exposes sandbox behavior only. Live payout mode has no transport path. An approved item binds an immutable recipient-snapshot ID and destination digest; both the eligible directory record and returned provider receiver must match it. Responses remain untrusted until strict shape, identity, receiver, item and amount checks pass. Completed mixed outcomes post only successful items and hold failed amounts in contributor payable without automatic retry.
 
 ## Acceptance boundary
 
 The local handler-backed tests establish serialization, validation, idempotency and accounting behavior without contacting PayPal. They do not establish that an account can use Subscriptions or Payouts, that recipients are eligible, that webhooks are configured correctly, or that regional/legal requirements are met.
 
-Credentialed sandbox acceptance is blocked pending owner authorization and credentials. Before it can run, DCx also needs a durable owner-approved recipient snapshot and an item-level partial-payout ledger/remediation flow. No real payment, payout or subscription should be initiated from this implementation.
+Credentialed sandbox acceptance is blocked pending owner authorization and credentials. Before it can run, DCx also needs an accessible owner-approval surface backed by a protected immutable recipient-snapshot directory, subscription mapping, separately approved failed-item retry/remediation and continued reconciliation for later returned/refunded/reversed items. No real payment, payout or subscription should be initiated from this implementation.
