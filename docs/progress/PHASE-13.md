@@ -1,7 +1,7 @@
 # P13 — Packaging, security and reliability
 
 - Status: BLOCKED (substantial local reliability, self-contained unsigned-MSIX staging, Defender and dependency-advisory checks pass; signed installer, clean-VM, independent security and human-AT gates remain absent)
-- Implementation commits: `82452fe`, `3e9b172`, `1b32cdf`, `26da605`, `7b0a03b`, `a69f5bf`, `e20a7d3`, `993149e`, `54f66bc`, `acc8e62`, `bcfe167`, `8b94159`, `9877a60`, `faf6b71`, `1631ebb`, `599cee9`, `ec37d1f`, `a662abb`, `8583b29`, `d5624a6`, `9576d63`, `261f6ee`, `76d0750`, `562667b`, `f66dd20`, `3bf9452`, `23ed1d9`, `9140183`, `8cb2db4`, `eb81ac3`, `66c4c8c`, `05345b9`, `0c72488`, `70f8dd7`, `abd91c0`
+- Implementation commits: `82452fe`, `3e9b172`, `1b32cdf`, `26da605`, `7b0a03b`, `a69f5bf`, `e20a7d3`, `993149e`, `54f66bc`, `acc8e62`, `bcfe167`, `8b94159`, `9877a60`, `faf6b71`, `1631ebb`, `599cee9`, `ec37d1f`, `a662abb`, `8583b29`, `d5624a6`, `9576d63`, `261f6ee`, `76d0750`, `562667b`, `f66dd20`, `3bf9452`, `23ed1d9`, `9140183`, `8cb2db4`, `eb81ac3`, `66c4c8c`, `05345b9`, `0c72488`, `70f8dd7`, `abd91c0`, `7829af1`
 - Documentation commit: recorded by the commit containing this file
 
 The generated ZIP and synthetic-identity MSIX are unsigned self-contained x64 local-validation artifacts. Neither is an installer or production release.
@@ -48,22 +48,22 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 ## Measured result
 
-Recorded evidence directory: `artifacts/test-results/p13-3d0db4c8c05045448cc2efe626fa2ed3/` (generated from the exact source committed through `abd91c0`; evidence is intentionally not committed).
+Recorded evidence directory: `artifacts/test-results/p13-12fe6f00223044be8bc31814313b1818/` (generated from the exact source committed through `7829af1`; evidence is intentionally not committed).
 
 - Locked Release build: 0 warnings, 0 errors.
 - Reliability tests: passed 23, failed 0, skipped 0; exact counters parsed from the retained TRX.
 - Package trust tests: passed 21, failed 0, skipped 0; exact counters parsed from the retained TRX. The native Windows probe denied the complete unsigned local-validation package; positive `Valid` composition used an injected fixture only.
-- Current committed-source full suite: passed 378, failed 0, skipped 0; about 11 seconds under the repository-mandated native Windows PowerShell wrapper.
-- Publish trees: 419 files, 177,755,968 bytes each; no path/length/SHA-256 differences. They embed .NET Core and Windows Desktop 10.0.12. The protected recipient workflow, approval-bound local-model benchmark core and default-unavailable CARE operations/blocked-case window are present; no benchmark approval UI is wired. The loopback client code has no normal-mode configuration, while the GlobalService simulation API, schema-v11 audit/alert/disposition state and monitor are not part of the desktop publish. External FFmpeg, per-user model/recipient state, protected credentials and recipient metadata are not bundled.
-- Reproducible staging ZIP SHA-256: `75e72dba0b06dd89767a5ea3413479ca51fceb40dd697a08bd4d333862659750` (74,215,903 bytes).
-- Reproducible unsigned MSIX: 73,073,128 bytes; SHA-256 `32399c7a8ae526ef8131b2b236a59b32bd30878d7baafde21eddd8ddcc5f6445`; synthetic identity `DCx.AgenticBrowser.LocalValidation`, publisher `CN=DCx Local Validation`, version `1.0.0.0`, x64. MakeAppx semantic pack and exact post-canonicalization unpack passed; real Windows trust returned `NotSigned` and denied it. Signing/install attempts and production actions: 0.
+- Current committed-source full suite: passed 385, failed 0, skipped 0; about 9 seconds under the repository-mandated native Windows PowerShell wrapper.
+- Publish trees: 419 files, 177,814,848 bytes each; no path/length/SHA-256 differences. They embed .NET Core and Windows Desktop 10.0.12. The protected recipient workflow, strict-manifest accessible local-model benchmark review and default-unavailable CARE operations/blocked-case window are present. The loopback client code has no normal-mode configuration, while the GlobalService simulation API, schema-v11 audit/alert/disposition state and monitor are not part of the desktop publish. External FFmpeg, per-user model/benchmark/recipient state, protected credentials and recipient metadata are not bundled.
+- Reproducible staging ZIP SHA-256: `02a96a9c97e5ffacb7fe7c21d57c85c8d00512de170bc79b34b48b272c889bc3` (74,238,843 bytes).
+- Reproducible unsigned MSIX: 73,094,963 bytes; SHA-256 `e2ca54c6a74603a727073541d17b27e4572804f412e1bfb6b9ff1aaf3718e0ea`; synthetic identity `DCx.AgenticBrowser.LocalValidation`, publisher `CN=DCx Local Validation`, version `1.0.0.0`, x64. MakeAppx semantic pack and exact post-canonicalization unpack passed; real Windows trust returned `NotSigned` and denied it. Signing/install attempts and production actions: 0.
 - Trusted MakeAppx version `10.0.19041.5609 (WinBuild.160101.0800)`; executable SHA-256 `f6901ebd5818a623b08a2306499f09334c7dab14bf9c9381814506aa80475f78`; signer-certificate SHA-256 `da209e0fe8bf6363318b5a41e5b65f3391d17bcb8b99b91c320ad2d22ef3469f`.
 - CycloneDX components: 9; third-party license records: 9. Three embedded-runtime notice files were copied and hashed.
 - Unexpected secret matches: 0 across repository source and 12 selected DCx-owned/published-text files; exact synthetic scanner-fixture matches: 2.
 - Microsoft Defender antivirus and real-time protection: enabled; signatures current at version `1.461.72.0`, updated `2026-10-17T08:15:34Z`; publish-tree, ZIP and unsigned-MSIX no-remediation scans returned clean. Trusted scanner SHA-256: `a4291c5b4325895d13d32e232bf50c1b41356306803ac5dc75bba9aecb021141`; signer-certificate SHA-256: `06d10a20570d92f56d784ecf2e50b1277b855e55d19841633b107c27dd5ca778`.
 - Official NuGet direct/transitive vulnerability audit: 0 advisories; sole source `https://api.nuget.org/v3/index.json`.
 - Authenticode: `NotSigned`.
-- Offline UIA heading: `DCx is ready offline`; startup 2,411 ms; working set 463.9 MiB under the provisional 1 GiB ceiling.
+- Offline UIA heading: `DCx is ready offline`; startup 2,210 ms; working set 464.5 MiB under the provisional 1 GiB ceiling.
 - Installed Stable/Evergreen normal browsing passed the P01 native UIA gate. The separately environment-gated missing-runtime fixture was denied when launched without its gate; with the gate, UIA exposed `WebView2 Runtime required`, moved keyboard focus to the heading, disabled browser commands, kept the file/media viewer enabled, exposed only the reviewed official address/copy action and local recheck, created no WebView2 profile, and attempted 0 downloads, 0 installs and 0 production actions.
 - Crash-diagnostics UIA heading: `Privacy and crash diagnostics`; consent defaulted unchecked, explicit opt-in persisted notice version 1, purge preserved enabled consent, opt-out disabled and purged, and network transfers remained zero.
 - Recovery UIA heading: `DCx backup and recovery`; main-app launcher, path input, create, default-unchecked approval, restore and assertive status are exposed.

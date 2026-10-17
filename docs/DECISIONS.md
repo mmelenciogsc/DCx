@@ -51,6 +51,7 @@
 | [0047](architecture/adr/0047-durable-aggregate-care-alert-outbox.md) | Persist chained aggregate CARE alerts with exact at-least-once delivery receipts | Accepted for shared-SQLite local simulation; external notification and distributed scheduling blocked | 2026-10-18 |
 | [0048](architecture/adr/0048-opaque-care-blocked-case-disposition.md) | Review opaque blocked CARE cases and append only non-financial dispositions | Accepted for default-off local simulation; production closure/requeue and notification policy remain blocked | 2026-10-18 |
 | [0049](architecture/adr/0049-bounded-local-model-quality-evaluation.md) | Score local transcription/retrieval quality and resources without retaining raw observations | Accepted for deterministic evaluation; real Whisper/embedding acceptance blocked | 2026-10-18 |
-| [0050](architecture/adr/0050-approval-bound-local-model-benchmark-runs.md) | Bind benchmark execution to exact approved backend, fixture and policy digests | Accepted for core/generated fixtures; accessible real-backend approval blocked | 2026-10-18 |
+| [0050](architecture/adr/0050-approval-bound-local-model-benchmark-runs.md) | Bind benchmark execution to exact approved backend, fixture and policy digests | Accepted for core execution; accessible workflow governed by 0051 | 2026-10-18 |
+| [0051](architecture/adr/0051-accessible-local-benchmark-review.md) | Admit strict local benchmark manifests through one accessible exact-review approval | Accepted for fixture-backed local execution; real backend acceptance blocked | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

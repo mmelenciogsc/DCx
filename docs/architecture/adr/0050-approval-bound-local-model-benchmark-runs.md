@@ -1,6 +1,6 @@
 # ADR 0050: Bind local-model benchmark execution to exact approved inputs
 
-- Status: Accepted for core execution and generated fixtures; accessible real-backend approval remains blocked
+- Status: Accepted for core execution; accessible review is governed by ADR 0051 and real-backend acceptance remains blocked
 - Date: 2026-10-18
 
 ## Context
@@ -24,7 +24,7 @@ Evidence schema v1 contains only the approval/backend/suite/policy digests, DCx 
 - Exact review and exact execution are cryptographically linked without persisting benchmark content.
 - Fixture mutation, policy substitution, missing/expired approval, backend identity change, malformed output, missing unload and cancellation fail closed.
 - Generated tests prove file locking, cancellation cleanup, deterministic batching, digest stability, privacy shape and composition through the pinned fake Whisper process.
-- The explicit-approval parameter is a core enforcement seam, not an accessible approval surface. A real benchmark still needs keyboard/UIA review that displays the exact digests and thresholds, begins unchecked and invokes this runner only after approval.
+- ADR 0051 supplies the keyboard/UIA review surface, strict manifest admission, single-use default-off approval, execution revalidation and aggregate evidence store. This core parameter remains the enforcement seam beneath that UI.
 - No model/runtime was downloaded, installed, registered or approved by this decision. Real Whisper/embedding quality, GPU/CPU resource measurements, license suitability and human assistive-technology acceptance remain blocked.
 
 ## Alternatives rejected
