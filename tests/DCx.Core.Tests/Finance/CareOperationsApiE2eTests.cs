@@ -32,6 +32,7 @@ public sealed class CareOperationsApiE2eTests : IDisposable
         var providerHandler = VerifiedWebhookHandler();
         using var adapter = Adapter(providerHandler);
         var received = DateTimeOffset.UtcNow.AddMinutes(-1).ToUniversalTime();
+        await CreateBlockedRefundAsync(repository, adapter, received);
         await QueuePaymentAsync(
             repository,
             adapter,
@@ -44,7 +45,7 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             "FIRST",
             "I-CARE-API-FIRST",
             received);
-        Assert.Equal(4, providerHandler.Calls);
+        Assert.Equal(12, providerHandler.Calls);
 
         var endpoint = new Uri($"http://127.0.0.1:{ReserveEphemeralPort()}/");
         var startInfo = new ProcessStartInfo("dotnet")
@@ -117,6 +118,39 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             Assert.DoesNotContain("FIRST", serializedHealth, StringComparison.Ordinal);
             Assert.DoesNotContain("subscription", serializedHealth, StringComparison.OrdinalIgnoreCase);
 
+            var blockedCases = await source.ListBlockedCasesAsync();
+            var blockedCase = Assert.Single(blockedCases);
+            var serializedCase = JsonSerializer.Serialize(blockedCase);
+            Assert.DoesNotContain("BLOCKED", serializedCase, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("subscription", serializedCase, StringComparison.OrdinalIgnoreCase);
+            var unapprovedDisposition = await Assert.ThrowsAsync<CareOperationsTransportException>(
+                () => source.RecordDispositionAsync(new CareBlockedCaseDispositionRequest(
+                    blockedCase.CaseId,
+                    blockedCase.ReviewSha256,
+                    CareBlockedCaseReviewPolicy.InvestigationRequested,
+                    ExplicitlyApproved: false)));
+            Assert.Equal("care_blocked_case_approval_required", unapprovedDisposition.Code);
+            var staleDisposition = await Assert.ThrowsAsync<CareOperationsTransportException>(
+                () => source.RecordDispositionAsync(new CareBlockedCaseDispositionRequest(
+                    blockedCase.CaseId,
+                    new string('f', 64),
+                    CareBlockedCaseReviewPolicy.InvestigationRequested,
+                    ExplicitlyApproved: true)));
+            Assert.Equal("care_blocked_case_review_stale", staleDisposition.Code);
+            var disposition = await source.RecordDispositionAsync(
+                new CareBlockedCaseDispositionRequest(
+                    blockedCase.CaseId,
+                    blockedCase.ReviewSha256,
+                    CareBlockedCaseReviewPolicy.InvestigationRequested,
+                    ExplicitlyApproved: true));
+            Assert.Equal(0, disposition.ProviderCalls);
+            Assert.Equal(0, disposition.FinancialMutations);
+            Assert.Equal(
+                CareBlockedCaseReviewPolicy.InvestigationRequested,
+                Assert.Single(await source.ListBlockedCasesAsync()).DispositionCode);
+            Assert.Single(await repository.GetBlockedCaseDispositionAuditAsync());
+            Assert.Equal(12, providerHandler.Calls);
+
             var processUri = new Uri(endpoint, "api/care/operations/process");
             using (var unapproved = await SendProcessAsync(
                        client, processUri, operatorToken, firstReview, explicitlyApproved: false))
@@ -142,7 +176,7 @@ public sealed class CareOperationsApiE2eTests : IDisposable
                 "SECOND",
                 "I-CARE-API-SECOND",
                 received);
-            Assert.Equal(8, providerHandler.Calls);
+            Assert.Equal(16, providerHandler.Calls);
 
             var exactReview = await source.RefreshAsync();
             Assert.Equal(2, exactReview.Due);
@@ -151,14 +185,14 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             Assert.Equal(2, result.Scanned);
             Assert.Equal(2, result.Completed);
             Assert.Equal(0, result.ProviderCalls);
-            Assert.Equal("clear", result.Health.StatusCode);
-            Assert.Equal(600, await repository.BalanceAsync(LedgerAccount.Cash));
-            Assert.Equal(8, providerHandler.Calls);
+            Assert.Equal("operator_action_required", result.Health.StatusCode);
+            Assert.Equal(800, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.Equal(16, providerHandler.Calls);
             var replay = await Assert.ThrowsAsync<CareOperationsTransportException>(() =>
                 source.ProcessDueAsync(exactReview, explicitlyApproved: true));
             Assert.Equal("care_operations_review_stale", replay.Code);
-            Assert.Equal(600, await repository.BalanceAsync(LedgerAccount.Cash));
-            Assert.Equal(8, providerHandler.Calls);
+            Assert.Equal(800, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.Equal(16, providerHandler.Calls);
             var audit = await repository.GetCareOperatorActionAuditAsync();
             Assert.Equal(
                 [
@@ -192,7 +226,10 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             }
 
             var diagnostics = await outputTask + await errorTask;
-            Assert.Contains(CareOperationsMonitor.RetryDueCode, diagnostics, StringComparison.Ordinal);
+            Assert.Contains(
+                CareOperationsMonitor.OperatorActionRequiredCode,
+                diagnostics,
+                StringComparison.Ordinal);
             Assert.DoesNotContain(operatorToken, diagnostics, StringComparison.Ordinal);
             Assert.DoesNotContain(wrongToken, diagnostics, StringComparison.Ordinal);
             Assert.DoesNotContain("WH-CARE-API", diagnostics, StringComparison.Ordinal);
@@ -219,6 +256,49 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             webhook,
             PlanId,
             received));
+    }
+
+    private static async Task CreateBlockedRefundAsync(
+        DurableCareRepository repository,
+        PayPalSandboxHttpAdapter adapter,
+        DateTimeOffset received)
+    {
+        var delayedRefund = OfficialWebhook(
+            "WH-CARE-API-BLOCKED-REFUND",
+            "PAYMENT.SALE.REFUNDED",
+            "refund",
+            "{\"id\":\"REFUND-CARE-API-BLOCKED\",\"state\":\"completed\",\"sale_id\":\"SALE-CARE-API-BLOCKED\",\"amount\":{\"total\":\"2.50\",\"currency\":\"USD\"}}" );
+        var activation = OfficialWebhook(
+            "WH-CARE-API-BLOCKED-ACTIVE",
+            "BILLING.SUBSCRIPTION.ACTIVATED",
+            "subscription",
+            $"{{\"id\":\"I-CARE-API-BLOCKED\",\"plan_id\":\"{PlanId}\",\"status\":\"ACTIVE\"}}");
+        var payment = OfficialWebhook(
+            "WH-CARE-API-BLOCKED-PAYMENT",
+            "PAYMENT.SALE.COMPLETED",
+            "sale",
+            "{\"id\":\"SALE-CARE-API-BLOCKED\",\"state\":\"completed\",\"billing_agreement_id\":\"I-CARE-API-BLOCKED\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}" );
+        var acceptedRefund = OfficialWebhook(
+            "WH-CARE-API-BLOCKED-ACCEPTED",
+            "PAYMENT.SALE.REFUNDED",
+            "refund",
+            "{\"id\":\"REFUND-CARE-API-ACCEPTED\",\"state\":\"completed\",\"sale_id\":\"SALE-CARE-API-BLOCKED\",\"amount\":{\"total\":\"1.00\",\"currency\":\"USD\"}}" );
+
+        Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+            adapter, Evidence("transmission:care-api-blocked-refund"),
+            delayedRefund, PlanId, received));
+        Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+            adapter, Evidence("transmission:care-api-blocked-active"),
+            activation, PlanId, received));
+        Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+            adapter, Evidence("transmission:care-api-blocked-payment"),
+            payment, PlanId, received));
+        Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+            adapter, Evidence("transmission:care-api-blocked-accepted"),
+            acceptedRefund, PlanId, received));
+        Assert.Equal(
+            new WebhookQuarantineReprocessSummary(1, 0, 0, 1),
+            await repository.ReprocessQuarantinedOfficialWebhooksAsync(received));
     }
 
     private static async Task ActivateAsync(

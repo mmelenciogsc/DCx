@@ -84,6 +84,52 @@ public sealed class CareOperationsTests
             UnavailableCareOperationsSource.Instance.ProcessDueAsync(health, true));
     }
 
+    [Fact]
+    public void BlockedCaseContract_IsOpaqueBoundedAndNonFinancial()
+    {
+        var review = BlockedCase();
+        CareBlockedCaseReviewPolicy.RequireList([review]);
+        CareBlockedCaseReviewPolicy.RequireRequest(new CareBlockedCaseDispositionRequest(
+            review.CaseId,
+            review.ReviewSha256,
+            CareBlockedCaseReviewPolicy.InvestigationRequested,
+            ExplicitlyApproved: true));
+        CareBlockedCaseReviewPolicy.RequireResult(new CareBlockedCaseDispositionResult(
+            review.CaseId,
+            CareBlockedCaseReviewPolicy.InvestigationRequested,
+            Now,
+            ProviderCalls: 0,
+            FinancialMutations: 0));
+
+        Assert.Equal(
+            [
+                "CaseId", "EventKind", "ReasonCode", "AttemptCount",
+                "FirstReceivedUtc", "LastAttemptUtc", "ReviewSha256", "DispositionCode",
+            ],
+            typeof(CareBlockedCaseReview).GetProperties().Select(item => item.Name).ToArray());
+        Assert.Throws<InvalidOperationException>(() =>
+            CareBlockedCaseReviewPolicy.RequireResult(new CareBlockedCaseDispositionResult(
+                review.CaseId,
+                CareBlockedCaseReviewPolicy.RetainedBlocked,
+                Now,
+                ProviderCalls: 0,
+                FinancialMutations: 1)));
+    }
+
+    [Fact]
+    public async Task UnavailableBlockedCaseSource_DoesNotInferAnEmptyCaseList()
+    {
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            UnavailableCareBlockedCaseReviewSource.Instance.ListBlockedCasesAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            UnavailableCareBlockedCaseReviewSource.Instance.RecordDispositionAsync(
+                new CareBlockedCaseDispositionRequest(
+                    new string('a', 32),
+                    new string('b', 64),
+                    CareBlockedCaseReviewPolicy.RetainedBlocked,
+                    ExplicitlyApproved: true)));
+    }
+
     private static CareOperationsHealth Health(
         string status,
         int pending,
@@ -99,4 +145,14 @@ public sealed class CareOperationsTests
         pending == 0 ? null : Now,
         pending == 0 ? null : Now.AddMinutes(1),
         canProcess);
+
+    private static CareBlockedCaseReview BlockedCase() => new(
+        new string('a', 32),
+        "refund",
+        "policy_rejected",
+        2,
+        Now.AddMinutes(-2),
+        Now.AddMinutes(-1),
+        new string('b', 64),
+        CareBlockedCaseReviewPolicy.Unreviewed);
 }

@@ -86,6 +86,42 @@ public sealed class LoopbackCareOperationsSourceTests
         Assert.Equal("care_operations_response_invalid", error.Code);
     }
 
+    [Fact]
+    public async Task BlockedCaseList_RejectsIdentifierBearingUnknownFields()
+    {
+        var handler = new StaticHandler(request => Json(
+            request,
+            """
+            [{"caseId":"0123456789abcdef0123456789abcdef","eventKind":"refund","reasonCode":"policy_rejected","attemptCount":1,"firstReceivedUtc":"2026-10-18T00:58:00+00:00","lastAttemptUtc":"2026-10-18T00:59:00+00:00","reviewSha256":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789","dispositionCode":"unreviewed","eventId":"must-not-cross-boundary"}]
+            """));
+        using var source = new LoopbackCareOperationsSource(handler, Origin, Token);
+
+        var error = await Assert.ThrowsAsync<CareOperationsTransportException>(() =>
+            source.ListBlockedCasesAsync());
+
+        Assert.Equal("care_operations_response_invalid", error.Code);
+    }
+
+    [Fact]
+    public async Task BlockedCaseDisposition_RejectsFinancialOrProviderEffects()
+    {
+        var handler = new StaticHandler(request => Json(
+            request,
+            """
+            {"caseId":"0123456789abcdef0123456789abcdef","dispositionCode":"retained_blocked","recordedUtc":"2026-10-18T01:00:00+00:00","providerCalls":0,"financialMutations":1}
+            """));
+        using var source = new LoopbackCareOperationsSource(handler, Origin, Token);
+
+        var error = await Assert.ThrowsAsync<CareOperationsTransportException>(() =>
+            source.RecordDispositionAsync(new CareBlockedCaseDispositionRequest(
+                "0123456789abcdef0123456789abcdef",
+                "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+                CareBlockedCaseReviewPolicy.RetainedBlocked,
+                ExplicitlyApproved: true)));
+
+        Assert.Equal("care_blocked_case_response_invalid", error.Code);
+    }
+
     private static HttpResponseMessage Json(HttpRequestMessage request, string body) => new(HttpStatusCode.OK)
     {
         RequestMessage = request,

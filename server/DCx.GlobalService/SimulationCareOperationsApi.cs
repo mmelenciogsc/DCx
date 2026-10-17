@@ -100,7 +100,9 @@ internal static class SimulationCareOperationsApi
             CareOperationsProcessRequest processRequest;
             try
             {
-                processRequest = await ReadRequestAsync(request, cancellationToken).ConfigureAwait(false);
+                processRequest = await ReadRequestAsync<CareOperationsProcessRequest>(
+                        request, cancellationToken)
+                    .ConfigureAwait(false);
                 CareOperationsPolicy.RequireHealth(processRequest.ReviewedHealth);
             }
             catch (InvalidDataException)
@@ -144,6 +146,80 @@ internal static class SimulationCareOperationsApi
                 };
             }
         });
+        group.MapGet("/blocked-cases", async (
+            HttpRequest request,
+            CancellationToken cancellationToken) =>
+        {
+            var error = Authorize(request, options);
+            if (error is not null) return error;
+            try
+            {
+                var cases = await source.ListBlockedCasesAsync(cancellationToken).ConfigureAwait(false);
+                CareBlockedCaseReviewPolicy.RequireList(cases);
+                return Results.Ok(cases);
+            }
+            catch (InvalidOperationException)
+            {
+                return Error(StatusCodes.Status409Conflict, "care_blocked_cases_state_invalid");
+            }
+        });
+        group.MapPost("/blocked-cases/{caseId}/disposition", async (
+            string caseId,
+            HttpRequest request,
+            CancellationToken cancellationToken) =>
+        {
+            var authorizationError = Authorize(request, options);
+            if (authorizationError is not null) return authorizationError;
+            CareBlockedCaseDispositionRequest dispositionRequest;
+            try
+            {
+                dispositionRequest = await ReadRequestAsync<CareBlockedCaseDispositionRequest>(
+                        request, cancellationToken)
+                    .ConfigureAwait(false);
+                CareBlockedCaseReviewPolicy.RequireRequest(dispositionRequest);
+                if (!string.Equals(caseId, dispositionRequest.CaseId, StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        "The CARE blocked-case route does not match the request.");
+                }
+            }
+            catch (InvalidDataException)
+            {
+                return Error(StatusCodes.Status400BadRequest, "care_blocked_case_request_invalid");
+            }
+            catch (IOException)
+            {
+                return Error(StatusCodes.Status400BadRequest, "care_blocked_case_request_invalid");
+            }
+            catch (InvalidOperationException)
+            {
+                return Error(StatusCodes.Status400BadRequest, "care_blocked_case_request_invalid");
+            }
+            catch (ArgumentException)
+            {
+                return Error(StatusCodes.Status400BadRequest, "care_blocked_case_request_invalid");
+            }
+
+            try
+            {
+                return Results.Ok(await source.RecordDispositionAsync(
+                        dispositionRequest, cancellationToken)
+                    .ConfigureAwait(false));
+            }
+            catch (InvalidOperationException exception)
+            {
+                return exception.Message switch
+                {
+                    "Explicit approval is required to record a CARE blocked-case disposition." =>
+                        Error(StatusCodes.Status403Forbidden, "care_blocked_case_approval_required"),
+                    "The reviewed CARE blocked case changed before disposition." =>
+                        Error(StatusCodes.Status409Conflict, "care_blocked_case_review_stale"),
+                    "The CARE blocked case is unavailable or no longer blocked." =>
+                        Error(StatusCodes.Status409Conflict, "care_blocked_case_unavailable"),
+                    _ => Error(StatusCodes.Status409Conflict, "care_blocked_case_disposition_failed"),
+                };
+            }
+        });
     }
 
     private static IResult? Authorize(
@@ -170,7 +246,7 @@ internal static class SimulationCareOperationsApi
             : Error(StatusCodes.Status401Unauthorized, "authentication_invalid");
     }
 
-    private static async Task<CareOperationsProcessRequest> ReadRequestAsync(
+    private static async Task<T> ReadRequestAsync<T>(
         HttpRequest request,
         CancellationToken cancellationToken)
     {
@@ -204,7 +280,7 @@ internal static class SimulationCareOperationsApi
 
             try
             {
-                return JsonSerializer.Deserialize<CareOperationsProcessRequest>(bytes, JsonOptions)
+                return JsonSerializer.Deserialize<T>(bytes, JsonOptions)
                     ?? throw new InvalidDataException("The CARE operations request is empty.");
             }
             catch (JsonException)

@@ -20,9 +20,12 @@ public sealed class CareOperationsTransportException(string code) : Exception(co
 /// A validation-only source for the explicitly enabled literal-loopback global-service fixture.
 /// Normal desktop launches do not instantiate this type.
 /// </summary>
-public sealed class LoopbackCareOperationsSource : ICareOperationsSource, IDisposable
+public sealed class LoopbackCareOperationsSource :
+    ICareOperationsSource,
+    ICareBlockedCaseReviewSource,
+    IDisposable
 {
-    private const int MaximumResponseBytes = 16 * 1024;
+    private const int MaximumResponseBytes = 64 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = false,
@@ -144,6 +147,88 @@ public sealed class LoopbackCareOperationsSource : ICareOperationsSource, IDispo
             catch (InvalidOperationException)
             {
                 throw new CareOperationsTransportException("care_operations_response_invalid");
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(responseBody);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(body);
+        }
+    }
+
+    public async Task<IReadOnlyList<CareBlockedCaseReview>> ListBlockedCasesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        using var request = CreateAuthorizedRequest(
+            HttpMethod.Get, "api/care/operations/blocked-cases");
+        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                throw new CareOperationsTransportException(ReadErrorCode(body));
+            }
+
+            EnsureJsonResponse(response);
+            var cases = Deserialize<List<CareBlockedCaseReview>>(body);
+            CareBlockedCaseReviewPolicy.RequireList(cases);
+            return cases;
+        }
+        catch (InvalidOperationException)
+        {
+            throw new CareOperationsTransportException("care_blocked_cases_response_invalid");
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(body);
+        }
+    }
+
+    public async Task<CareBlockedCaseDispositionResult> RecordDispositionAsync(
+        CareBlockedCaseDispositionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        CareBlockedCaseReviewPolicy.RequireRequest(request);
+        var body = JsonSerializer.SerializeToUtf8Bytes(request, JsonOptions);
+        try
+        {
+            using var message = CreateAuthorizedRequest(
+                HttpMethod.Post,
+                $"api/care/operations/blocked-cases/{request.CaseId}/disposition");
+            message.Content = new ByteArrayContent(body);
+            message.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            using var response = await SendAsync(message, cancellationToken).ConfigureAwait(false);
+            var responseBody = await ReadBoundedAsync(
+                    response.Content, cancellationToken)
+                .ConfigureAwait(false);
+            try
+            {
+                if (response.StatusCode != HttpStatusCode.OK)
+                {
+                    throw new CareOperationsTransportException(ReadErrorCode(responseBody));
+                }
+
+                EnsureJsonResponse(response);
+                var result = Deserialize<CareBlockedCaseDispositionResult>(responseBody);
+                CareBlockedCaseReviewPolicy.RequireResult(result);
+                if (!string.Equals(result.CaseId, request.CaseId, StringComparison.Ordinal) ||
+                    !string.Equals(
+                        result.DispositionCode, request.DispositionCode, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "The CARE blocked-case result does not match the request.");
+                }
+
+                return result;
+            }
+            catch (InvalidOperationException)
+            {
+                throw new CareOperationsTransportException(
+                    "care_blocked_case_response_invalid");
             }
             finally
             {

@@ -679,6 +679,17 @@ public sealed partial class DurableCareRepository
             throw new InvalidOperationException(
                 "The quarantined webhook retry state conflicted with durable state.");
         }
+
+        if (!keepPending)
+        {
+            await CreateBlockedCaseReferenceAsync(
+                    connection,
+                    transaction,
+                    record.EventId,
+                    attemptedUtc.ToUniversalTime(),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
     private static PayPalSandboxVerifiedWebhook ToVerifiedWebhook(

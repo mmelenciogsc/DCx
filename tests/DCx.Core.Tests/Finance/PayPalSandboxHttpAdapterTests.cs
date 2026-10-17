@@ -626,6 +626,107 @@ public sealed class PayPalSandboxHttpAdapterTests
             Assert.Equal(
                 new WebhookQuarantineReprocessSummary(0, 0, 0, 0),
                 await repository.ReprocessQuarantinedOfficialWebhooksAsync(received.AddDays(1)));
+
+            var caseDatabase = new SqliteConnectionStringBuilder
+            {
+                DataSource = Path.Combine(root, "care-ledger.sqlite3"),
+                Pooling = false,
+            }.ToString();
+            await using (var caseConnection = new SqliteConnection(caseDatabase))
+            {
+                await caseConnection.OpenAsync();
+                var countCases = caseConnection.CreateCommand();
+                countCases.CommandText = "SELECT COUNT(*) FROM care_blocked_cases;";
+                Assert.Equal(1L, (long)(await countCases.ExecuteScalarAsync())!);
+            }
+
+            var operatorPseudonym = new string('c', 64);
+            var operations = new DurableCareOperationsSource(
+                repository,
+                processingCapabilityEnabled: false,
+                timeProvider: new FixedTimeProvider(received.AddMinutes(1)),
+                operatorPseudonymSha256: operatorPseudonym);
+            var cases = await operations.ListBlockedCasesAsync();
+            var blockedCase = Assert.Single(cases);
+            Assert.Equal("refund", blockedCase.EventKind);
+            Assert.Equal("policy_rejected", blockedCase.ReasonCode);
+            Assert.Equal(CareBlockedCaseReviewPolicy.Unreviewed, blockedCase.DispositionCode);
+            Assert.Equal(32, blockedCase.CaseId.Length);
+            Assert.Equal(64, blockedCase.ReviewSha256.Length);
+            var publicJson = JsonSerializer.Serialize(blockedCase);
+            Assert.DoesNotContain("WH-BLOCKED", publicJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("SALE-BLOCKED", publicJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("I-BLOCKED", publicJson, StringComparison.Ordinal);
+
+            var request = new CareBlockedCaseDispositionRequest(
+                blockedCase.CaseId,
+                blockedCase.ReviewSha256,
+                CareBlockedCaseReviewPolicy.InvestigationRequested,
+                ExplicitlyApproved: false);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                operations.RecordDispositionAsync(request));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                operations.RecordDispositionAsync(request with
+                {
+                    ReviewedSha256 = new string('d', 64),
+                    ExplicitlyApproved = true,
+                }));
+
+            var disposition = await operations.RecordDispositionAsync(request with
+            {
+                ExplicitlyApproved = true,
+            });
+            Assert.Equal(CareBlockedCaseReviewPolicy.InvestigationRequested,
+                disposition.DispositionCode);
+            Assert.Equal(0, disposition.ProviderCalls);
+            Assert.Equal(0, disposition.FinancialMutations);
+            Assert.Equal(8, handler.Calls);
+            Assert.Equal(200, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.Equal("blocked", (await repository.GetOfficialWebhookQuarantineAsync(
+                "WH-BLOCKED-REFUND"))!.State);
+            Assert.Single(await repository.GetBlockedCaseDispositionAuditAsync());
+
+            var exactReplay = await operations.RecordDispositionAsync(request with
+            {
+                ExplicitlyApproved = true,
+            });
+            Assert.Equal(disposition, exactReplay);
+            Assert.Single(await repository.GetBlockedCaseDispositionAuditAsync());
+
+            var retained = await operations.RecordDispositionAsync(request with
+            {
+                DispositionCode = CareBlockedCaseReviewPolicy.RetainedBlocked,
+                ExplicitlyApproved = true,
+            });
+            Assert.Equal(CareBlockedCaseReviewPolicy.RetainedBlocked,
+                retained.DispositionCode);
+            var audit = await repository.GetBlockedCaseDispositionAuditAsync();
+            Assert.Equal(2, audit.Count);
+            Assert.Equal(operatorPseudonym, audit[0].OperatorPseudonymSha256);
+            Assert.Equal(audit[0].RecordSha256, audit[1].PreviousRecordSha256);
+
+            var reopened = await DurableCareRepository.OpenAsync(root);
+            var reopenedOperations = new DurableCareOperationsSource(
+                reopened,
+                timeProvider: new FixedTimeProvider(received.AddMinutes(2)),
+                operatorPseudonymSha256: operatorPseudonym);
+            Assert.Equal(
+                CareBlockedCaseReviewPolicy.RetainedBlocked,
+                Assert.Single(await reopenedOperations.ListBlockedCasesAsync()).DispositionCode);
+            var reopenedAudit = await reopened.GetBlockedCaseDispositionAuditAsync();
+            Assert.Equal(2, reopenedAudit.Count);
+            var auditJson = JsonSerializer.Serialize(reopenedAudit);
+            Assert.DoesNotContain("WH-BLOCKED", auditJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("SALE-BLOCKED", auditJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("I-BLOCKED", auditJson, StringComparison.Ordinal);
+
+            await using var tamperConnection = new SqliteConnection(caseDatabase);
+            await tamperConnection.OpenAsync();
+            var tamper = tamperConnection.CreateCommand();
+            tamper.CommandText = "UPDATE care_blocked_cases SET created_utc = created_utc;";
+            await Assert.ThrowsAsync<SqliteException>(() => tamper.ExecuteNonQueryAsync());
+            tamper.CommandText = "DELETE FROM care_blocked_case_dispositions;";
+            await Assert.ThrowsAsync<SqliteException>(() => tamper.ExecuteNonQueryAsync());
         }
         finally
         {

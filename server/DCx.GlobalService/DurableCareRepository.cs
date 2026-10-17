@@ -1033,7 +1033,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         command.CommandText = "PRAGMA user_version;";
         var schemaVersion = Convert.ToInt32(
             await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
-        if (schemaVersion > 10)
+        if (schemaVersion > 11)
         {
             throw new InvalidOperationException("The CARE ledger schema is newer than this application.");
         }
@@ -1375,8 +1375,68 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             BEGIN
                 SELECT RAISE(ABORT, 'CARE alert delivery is append-only');
             END;
+            CREATE TABLE IF NOT EXISTS care_blocked_cases(
+                event_id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL UNIQUE CHECK(
+                    length(case_id) = 32 AND
+                    case_id = lower(case_id) AND
+                    case_id NOT GLOB '*[^0-9a-f]*'),
+                review_sha256 TEXT NOT NULL UNIQUE CHECK(
+                    length(review_sha256) = 64 AND
+                    review_sha256 = lower(review_sha256) AND
+                    review_sha256 NOT GLOB '*[^0-9a-f]*'),
+                created_utc TEXT NOT NULL,
+                FOREIGN KEY(event_id) REFERENCES webhook_event_quarantine(event_id)
+            );
+            CREATE TABLE IF NOT EXISTS care_blocked_case_dispositions(
+                sequence INTEGER PRIMARY KEY CHECK(sequence > 0),
+                case_id TEXT NOT NULL,
+                occurred_utc TEXT NOT NULL,
+                operator_pseudonym_sha256 TEXT NOT NULL CHECK(
+                    length(operator_pseudonym_sha256) = 64 AND
+                    operator_pseudonym_sha256 = lower(operator_pseudonym_sha256) AND
+                    operator_pseudonym_sha256 NOT GLOB '*[^0-9a-f]*'),
+                disposition_code TEXT NOT NULL CHECK(disposition_code IN (
+                    'investigation_requested', 'retained_blocked')),
+                reviewed_sha256 TEXT NOT NULL CHECK(
+                    length(reviewed_sha256) = 64 AND
+                    reviewed_sha256 = lower(reviewed_sha256) AND
+                    reviewed_sha256 NOT GLOB '*[^0-9a-f]*'),
+                previous_record_sha256 TEXT NOT NULL CHECK(
+                    length(previous_record_sha256) = 64 AND
+                    previous_record_sha256 = lower(previous_record_sha256) AND
+                    previous_record_sha256 NOT GLOB '*[^0-9a-f]*'),
+                record_sha256 TEXT NOT NULL UNIQUE CHECK(
+                    length(record_sha256) = 64 AND
+                    record_sha256 = lower(record_sha256) AND
+                    record_sha256 NOT GLOB '*[^0-9a-f]*'),
+                FOREIGN KEY(case_id) REFERENCES care_blocked_cases(case_id)
+            );
+            CREATE TRIGGER IF NOT EXISTS care_blocked_cases_no_update
+            BEFORE UPDATE ON care_blocked_cases
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE blocked-case bindings are immutable');
+            END;
+            CREATE TRIGGER IF NOT EXISTS care_blocked_cases_no_delete
+            BEFORE DELETE ON care_blocked_cases
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE blocked-case bindings are immutable');
+            END;
+            CREATE TRIGGER IF NOT EXISTS care_blocked_case_dispositions_no_update
+            BEFORE UPDATE ON care_blocked_case_dispositions
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE blocked-case dispositions are append-only');
+            END;
+            CREATE TRIGGER IF NOT EXISTS care_blocked_case_dispositions_no_delete
+            BEFORE DELETE ON care_blocked_case_dispositions
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE blocked-case dispositions are append-only');
+            END;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await BackfillBlockedCaseReferencesAsync(
+                connection, DateTimeOffset.UtcNow, cancellationToken)
+            .ConfigureAwait(false);
         command.CommandText = """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_payout_batches_provider_batch_id
             ON payout_batches(provider_batch_id)
@@ -1385,7 +1445,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             ON webhook_event_quarantine(state, next_attempt_utc, occurred_utc, event_id);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        command.CommandText = "PRAGMA user_version = 10;";
+        command.CommandText = "PRAGMA user_version = 11;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 

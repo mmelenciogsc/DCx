@@ -261,10 +261,10 @@ try {
     } "The inert fixture boundary was not exposed."
     $operationsSummaryBefore = Wait-For {
         $value = Get-Value $operationsWindow "CareOperationsSummary"
-        if ($value -like "*Status: retry_due.*" -and
+        if ($value -like "*Status: operator_action_required.*" -and
             $value -like "*Pending: 2.*" -and
             $value -like "*Due now: 2.*" -and
-            $value -like "*Blocked: 0.*" -and
+            $value -like "*Blocked: 1.*" -and
             $value -like "*Local processing available: yes.*" -and
             $value -like "*Data source: deterministic local fixture.*") { $value }
     } "The generated aggregate CARE operations state was not exposed."
@@ -281,7 +281,8 @@ try {
     $operationsActionIds = @(
         "RefreshCareOperationsButton",
         "ApproveCareOperationsProcessBox",
-        "ProcessDueCareOperationsButton")
+        "ProcessDueCareOperationsButton",
+        "LoadBlockedCareCasesButton")
     $operationsAccessKeys = @()
     foreach ($automationId in $operationsActionIds) {
         $action = Find-ById $operationsWindow $automationId
@@ -294,6 +295,89 @@ try {
     if (@($operationsAccessKeys | Sort-Object -Unique).Count -ne
         $operationsAccessKeys.Count) {
         throw "CARE operations actions expose duplicate access keys."
+    }
+
+    Invoke-ById $operationsWindow "LoadBlockedCareCasesButton" | Out-Null
+    $blockedList = Wait-For {
+        $element = Find-ById $operationsWindow "BlockedCareCasesList"
+        if ($null -ne $element) {
+            $items = $element.FindAll(
+                [System.Windows.Automation.TreeScope]::Children,
+                [System.Windows.Automation.Condition]::TrueCondition)
+            if ($items.Count -eq 1) { $element }
+        }
+    } "The privacy-minimized blocked CARE case was not exposed."
+    $blockedItems = $blockedList.FindAll(
+        [System.Windows.Automation.TreeScope]::Children,
+        [System.Windows.Automation.Condition]::TrueCondition)
+    $blockedItems[0].GetCurrentPattern(
+        [System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    $blockedDetailsBefore = Wait-For {
+        $value = Get-Value $operationsWindow "BlockedCareCaseDetails"
+        if ($value -like "*Opaque case reference: 0123456789abcdef0123456789abcdef.*" -and
+            $value -like "*Event kind: refund.*" -and
+            $value -like "*Reason: policy_rejected.*" -and
+            $value -like "*Current disposition: unreviewed.*" -and
+            $value -notlike "*subscription*" -and
+            $value -notlike "*recipient*") { $value }
+    } "The exact privacy-minimized blocked CARE case review was not exposed."
+    $blockedActionIds = @(
+        "InvestigateBlockedCareCaseOption",
+        "RetainBlockedCareCaseOption",
+        "ApproveBlockedCareDispositionBox",
+        "RecordBlockedCareDispositionButton")
+    foreach ($automationId in $blockedActionIds) {
+        $action = Find-ById $operationsWindow $automationId
+        if ($null -eq $action -or -not $action.Current.IsKeyboardFocusable -or
+            [string]::IsNullOrWhiteSpace($action.Current.AccessKey)) {
+            throw "The $automationId action lacks a keyboard-focusable access key."
+        }
+        $operationsAccessKeys += $action.Current.AccessKey
+    }
+    if (@($operationsAccessKeys | Sort-Object -Unique).Count -ne
+        $operationsAccessKeys.Count) {
+        throw "CARE operations and blocked-case actions expose duplicate access keys."
+    }
+    $dispositionApproval = Find-ById $operationsWindow "ApproveBlockedCareDispositionBox"
+    $dispositionApprovalToggle = $dispositionApproval.GetCurrentPattern(
+        [System.Windows.Automation.TogglePattern]::Pattern)
+    if ($dispositionApprovalToggle.Current.ToggleState -ne
+        [System.Windows.Automation.ToggleState]::Off) {
+        throw "Blocked-case disposition approval did not default to unchecked."
+    }
+    Invoke-ById $operationsWindow "RecordBlockedCareDispositionButton" | Out-Null
+    $null = Wait-For {
+        $status = Find-ById $operationsWindow "CareOperationsStatus"
+        if ($null -ne $status -and $status.Current.Name -like
+            "No disposition was recorded.*explicitly approve it first.*") { $status }
+    } "Blocked-case disposition without approval did not fail closed."
+    if ($dispositionApprovalToggle.Current.ToggleState -ne
+        [System.Windows.Automation.ToggleState]::Off -or
+        -not $dispositionApproval.Current.HasKeyboardFocus) {
+        throw "Denied blocked-case disposition did not reset and focus explicit approval."
+    }
+    $investigationOption = Find-ById $operationsWindow "InvestigateBlockedCareCaseOption"
+    $investigationOption.GetCurrentPattern(
+        [System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    $dispositionApprovalToggle.Toggle()
+    Invoke-ById $operationsWindow "RecordBlockedCareDispositionButton" | Out-Null
+    $dispositionStatus = Wait-For {
+        $status = Find-ById $operationsWindow "CareOperationsStatus"
+        if ($null -ne $status -and $status.Current.Name -eq
+            "Non-financial disposition recorded as investigation_requested. Provider calls 0. Financial mutations 0. The event remains blocked.") { $status }
+    } "The approved non-financial blocked-case disposition was not announced."
+    $dispositionStatusName = [string]$dispositionStatus.Current.Name
+    $blockedDetailsAfter = Wait-For {
+        $element = Find-ById $operationsWindow "BlockedCareCaseDetails"
+        $value = $element.GetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+        if ($value -like "*Current disposition: investigation_requested.*" -and
+            $value -like "*no authority to change the blocked event or any financial state.*" -and
+            $element.Current.HasKeyboardFocus) { $value }
+    } "The recorded disposition or focus was not exposed on the exact case."
+    if ($dispositionApprovalToggle.Current.ToggleState -ne
+        [System.Windows.Automation.ToggleState]::Off) {
+        throw "Blocked-case disposition approval was not reset after recording."
     }
 
     Invoke-ById $operationsWindow "ProcessDueCareOperationsButton" | Out-Null
@@ -324,8 +408,9 @@ try {
         $element = Find-ById $operationsWindow "CareOperationsSummary"
         $value = $element.GetCurrentPattern(
             [System.Windows.Automation.ValuePattern]::Pattern).Current.Value
-        if ($value -like "*Status: clear.*" -and
+        if ($value -like "*Status: operator_action_required.*" -and
             $value -like "*Pending: 0.*" -and
+            $value -like "*Blocked: 1.*" -and
             $value -like "*Completed audit records: 2.*" -and
             $value -like "*Local processing available: no.*" -and
             $element.Current.HasKeyboardFocus) { $value }
@@ -362,6 +447,14 @@ try {
         operations_summary_before = $operationsSummaryBefore
         operations_summary_after = $operationsSummaryAfter
         operations_status_after_process = $operationsCompletedStatusName
+        blocked_case_review_before = $blockedDetailsBefore
+        blocked_case_review_after = $blockedDetailsAfter
+        blocked_case_approval_default_unchecked = $true
+        blocked_case_without_approval_denied = $true
+        blocked_case_status_after_disposition = $dispositionStatusName
+        blocked_case_provider_calls = 0
+        blocked_case_financial_mutations = 0
+        blocked_case_remained_blocked = $true
         operations_provider_calls = 0
         operations_production_actions = 0
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $evidencePath -Encoding utf8NoBOM
@@ -371,6 +464,7 @@ try {
     "P11 exact destination protected and metadata minimized=PASS"
     "P11 provider eligibility remains false=PASS"
     "P11 CARE operations default-off local cycle and focus=PASS"
+    "P11 accessible blocked-case review and non-financial disposition=PASS"
     "P11 CARE operations aggregate-only provider calls=0 production actions=0"
     "P11 recipient UI network requests=0 payout attempts=0"
     "P11 recipient UI evidence=$evidencePath"

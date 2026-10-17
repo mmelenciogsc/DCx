@@ -95,6 +95,72 @@
                                 Click="OnProcessClick" />
                     </StackPanel>
                 </GroupBox>
+
+                <GroupBox Margin="0,18,0,0" Header="Review blocked cases">
+                    <StackPanel Margin="12,8">
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="Review opaque generated case references without provider, subscription, sale, account, recipient, or contributor identifiers. A disposition records operator intent only. It never requeues, rejects, applies, refunds, pays, or contacts a provider." />
+                        <Button x:Name="LoadBlockedCasesButton"
+                                Width="190"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="_Load blocked cases"
+                                AutomationProperties.AutomationId="LoadBlockedCareCasesButton"
+                                AutomationProperties.Name="Load blocked CARE cases"
+                                AutomationProperties.HelpText="Reads at most one hundred privacy-minimized blocked cases. No provider request occurs."
+                                Click="OnLoadBlockedCasesClick" />
+                        <ListBox x:Name="BlockedCasesList"
+                                 MinHeight="100"
+                                 MaxHeight="180"
+                                 Margin="0,12,0,0"
+                                 DisplayMemberPath="Display"
+                                 AutomationProperties.AutomationId="BlockedCareCasesList"
+                                 AutomationProperties.Name="Blocked CARE cases"
+                                 SelectionChanged="OnBlockedCaseSelectionChanged" />
+                        <TextBox x:Name="BlockedCaseDetails"
+                                 MinHeight="110"
+                                 Margin="0,12,0,0"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="Load and select a blocked case to review it."
+                                 AutomationProperties.AutomationId="BlockedCareCaseDetails"
+                                 AutomationProperties.Name="Load and select a blocked case to review it." />
+                        <RadioButton x:Name="InvestigationDisposition"
+                                     Margin="0,12,0,0"
+                                     GroupName="BlockedDisposition"
+                                     Content="Request _investigation"
+                                     AutomationProperties.AutomationId="InvestigateBlockedCareCaseOption"
+                                     AutomationProperties.Name="Request investigation for the selected blocked CARE case" />
+                        <RadioButton x:Name="RetainDisposition"
+                                     Margin="0,8,0,0"
+                                     GroupName="BlockedDisposition"
+                                     Content="Retain _blocked"
+                                     AutomationProperties.AutomationId="RetainBlockedCareCaseOption"
+                                     AutomationProperties.Name="Retain the selected CARE case as blocked" />
+                        <CheckBox x:Name="DispositionApprovalBox"
+                                  Margin="0,12,0,0"
+                                  FontWeight="SemiBold"
+                                  IsChecked="False"
+                                  Content="I reviewed this exact case and _confirm the selected non-financial disposition"
+                                  AutomationProperties.AutomationId="ApproveBlockedCareDispositionBox"
+                                  AutomationProperties.Name="I reviewed this exact case and confirm the selected non-financial disposition"
+                                  AutomationProperties.HelpText="Initially unchecked and reset after every load, selection change, or attempt." />
+                        <Button x:Name="RecordDispositionButton"
+                                Width="210"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="Recor_d disposition"
+                                AutomationProperties.AutomationId="RecordBlockedCareDispositionButton"
+                                AutomationProperties.Name="Record blocked CARE case disposition"
+                                AutomationProperties.HelpText="Requires exact-case review and explicit approval. Financial mutations and provider calls are prohibited."
+                                Click="OnRecordDispositionClick" />
+                    </StackPanel>
+                </GroupBox>
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

@@ -6,7 +6,7 @@ namespace DCx.GlobalService;
 /// Exposes aggregate verified-event quarantine health and an explicitly gated,
 /// local-only replay operation. It never contacts a payment provider.
 /// </summary>
-public sealed class DurableCareOperationsSource : ICareOperationsSource
+public sealed class DurableCareOperationsSource : ICareOperationsSource, ICareBlockedCaseReviewSource
 {
     private readonly DurableCareRepository repository;
     private readonly bool processingCapabilityEnabled;
@@ -60,6 +60,27 @@ public sealed class DurableCareOperationsSource : ICareOperationsSource
             processLimit,
             operatorPseudonymSha256,
             cancellationToken);
+
+    public Task<IReadOnlyList<CareBlockedCaseReview>> ListBlockedCasesAsync(
+        CancellationToken cancellationToken = default) =>
+        repository.ListBlockedCasesAsync(cancellationToken);
+
+    public Task<CareBlockedCaseDispositionResult> RecordDispositionAsync(
+        CareBlockedCaseDispositionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (operatorPseudonymSha256 is null)
+        {
+            throw new InvalidOperationException(
+                "CARE blocked-case disposition identity is not configured.");
+        }
+
+        return repository.RecordBlockedCaseDispositionAsync(
+            request,
+            operatorPseudonymSha256,
+            timeProvider.GetUtcNow(),
+            cancellationToken);
+    }
 
     internal static CareOperationsHealth ToCareOperationsHealth(
         WebhookQuarantineHealthSnapshot snapshot,

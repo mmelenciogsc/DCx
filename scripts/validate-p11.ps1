@@ -65,6 +65,8 @@ try {
     "Chained privacy-minimized append-only CARE operator decision audit=PASS"
     "Default-off read-only aggregate CARE transition monitor=PASS"
     "Durable chained aggregate alert outbox and at-least-once delivery receipts=PASS"
+    "Accessible opaque blocked-case review and append-only non-financial disposition=PASS"
+    "Blocked-case disposition provider calls=0 financial mutations=0"
     "Quarantine reprocessing provider calls=0"
     "Malformed/unverified event denial before ledger mutation=PASS"
     "Stable PayPal request ID and sender batch retry fixture=PASS"

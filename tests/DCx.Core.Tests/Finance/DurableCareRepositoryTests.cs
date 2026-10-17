@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using DCx.Core.Finance;
 using DCx.GlobalService;
 using Microsoft.Data.Sqlite;
@@ -159,7 +160,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(10L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(11L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -176,7 +177,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         {
             await connection.OpenAsync();
             var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 11;";
+            command.CommandText = "PRAGMA user_version = 12;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -188,7 +189,67 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(11L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(12L, (long)(await versionCommand.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task SchemaTen_BackfillsOpaqueCaseForExistingBlockedEvent()
+    {
+        _ = await DurableCareRepository.OpenAsync(root);
+        var databasePath = Path.Combine(root, "care-ledger.sqlite3");
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Pooling = false,
+        }.ToString();
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO webhook_event_quarantine(
+                    event_id, transmission_id, event_type, provider_object_id,
+                    subscription_id, plan_id, related_sale_id, amount_cents,
+                    currency, occurred_utc, payload_sha256, expected_plan_id,
+                    verified_event_sha256, reason_code, state, attempt_count,
+                    first_received_utc, last_attempt_utc, next_attempt_utc,
+                    completed_utc)
+                VALUES(
+                    'WH-LEGACY-BLOCKED', 'transmission:legacy-blocked',
+                    'PAYMENT.SALE.REFUNDED', 'REFUND-LEGACY-BLOCKED',
+                    NULL, NULL, 'SALE-LEGACY-BLOCKED', 100, 'USD', $occurred,
+                    $payload, 'P-DCX300', $verified,
+                    'paypal_sandbox_quarantine_reprocess_blocked', 'blocked', 1,
+                    $first, $attempted, NULL, NULL);
+                DROP TRIGGER care_blocked_case_dispositions_no_delete;
+                DROP TRIGGER care_blocked_case_dispositions_no_update;
+                DROP TRIGGER care_blocked_cases_no_delete;
+                DROP TRIGGER care_blocked_cases_no_update;
+                DROP TABLE care_blocked_case_dispositions;
+                DROP TABLE care_blocked_cases;
+                PRAGMA user_version = 10;
+                """;
+            command.Parameters.AddWithValue("$occurred", now.AddMinutes(-2).ToString("O"));
+            command.Parameters.AddWithValue("$first", now.AddMinutes(-1).ToString("O"));
+            command.Parameters.AddWithValue("$attempted", now.ToString("O"));
+            command.Parameters.AddWithValue("$payload", new string('a', 64));
+            command.Parameters.AddWithValue("$verified", new string('b', 64));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var reopened = await DurableCareRepository.OpenAsync(root);
+        var blockedCase = Assert.Single(await reopened.ListBlockedCasesAsync());
+        Assert.Equal("refund", blockedCase.EventKind);
+        Assert.Equal("policy_rejected", blockedCase.ReasonCode);
+        Assert.Equal(CareBlockedCaseReviewPolicy.Unreviewed, blockedCase.DispositionCode);
+        Assert.DoesNotContain("LEGACY", JsonSerializer.Serialize(blockedCase),
+            StringComparison.Ordinal);
+
+        await using var verifiedConnection = new SqliteConnection(connectionString);
+        await verifiedConnection.OpenAsync();
+        var version = verifiedConnection.CreateCommand();
+        version.CommandText = "PRAGMA user_version;";
+        Assert.Equal(11L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -225,7 +286,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await verified.OpenAsync();
         var version = verified.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(10L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(11L, (long)(await version.ExecuteScalarAsync())!);
         var table = verified.CreateCommand();
         table.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'payout_item_remediations';";
         Assert.Equal(1L, (long)(await table.ExecuteScalarAsync())!);
@@ -872,7 +933,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var version = reopened.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(10L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(11L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     public void Dispose()
