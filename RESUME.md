@@ -21,8 +21,9 @@
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p10.ps1
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p11.ps1
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p12-fixtures.ps1
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p13.ps1
    ```
 
 5. Continue only the earliest uncompleted phase. Record commands, results, changed files, blockers, and the milestone commit in its phase document. Never infer manual screen-reader or external-service success from automated tests.
 
-Current implementation includes P00–P11's recorded native/local capabilities and blockers plus P12's seven-scenario fixture composition at `1c51f9d`. P06, P09–P13 remain honestly blocked as detailed in status; no external production action occurred. P13's audit found no packaging/signing/SBOM toolchain, certificate, clean VM or human AT signoff. Do not install/elevate, contact external providers or the owner's server, use credentials, publish, subscribe, pay, sign or transact. Resume from the earliest blocker the owner authorizes; do not mark P14 ready while these gates remain.
+Current implementation includes P00–P11's recorded native/local capabilities and blockers, P12's eight-scenario fixture composition at `10ac274`, and P13 offline/recovery/reproducible-staging work at `82452fe`. P06 and P09–P13 remain honestly blocked as detailed in status; no external production action occurred. P13 has no packaging/signing/vulnerability-scanner toolchain, certificate, clean VM or human AT signoff. Its deterministic ZIP is unsigned staging output, not an installer. Do not install/elevate, contact external providers or the owner's server, use credentials, publish, subscribe, pay, sign or transact. Resume from the earliest blocker the owner authorizes; do not mark P14 ready while these gates remain.

@@ -89,7 +89,17 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - The defined contributor pool is zero for nonpositive net and rejected above 40% aggregate; allocation conserves exact cents deterministically.
 - Sandbox webhooks require fixture integrity and unique transmission/event IDs. Refund/reversal suspends entitlement and posts a correcting balanced entry.
 - Payout execution requires sandbox mode, verified eligibility, explicit owner approval, Net 60 and a unique batch. Live mode has no provider path and always fails.
-- These controls are local mocks. Production webhook authenticity, durable idempotency, account/recipient eligibility, reconciliation, key custody and legal/accounting policy remain blockers.
+- SQLite persists canonical event hashes, postings, webhook replay identifiers, entitlement and payout terminal state with WAL and full synchronous writes. Reopen tests prove local idempotency and conflicting-event denial.
+- These controls remain local mocks. Production webhook authenticity, asynchronous provider reconciliation/outbox, account/recipient eligibility, key custody and legal/accounting policy remain blockers.
+
+## Implemented release/recovery controls through partial P13
+
+- Offline startup uses an embedded semantic document, permits its data navigation only as the first app-controlled navigation, and performs no website request.
+- Backup scope is allowlisted to browser metadata and private knowledge. WebView2 profiles/cookies and Windows protected secrets are excluded.
+- Backup and restore reject filesystem roots, reparse points, archives inside protected data, traversal/absolute/ADS paths, duplicates and size/count excess. SHA-256 and length are checked before any current data is replaced.
+- Restore stages content and retains/moves prior roots for rollback. Production orchestration must close DCx first because live SQLite/WAL snapshots are not implemented.
+- Two publish trees and ZIPs are compared by path/length/digest. Published files receive binary secret-pattern scanning. Synthetic hostile-input fixtures are allowlisted only in their two source test files.
+- These controls do not replace code signing, AV/vulnerability scans, clean-VM lifecycle testing or human assistive-technology acceptance.
 
 ## Security gate policy
 

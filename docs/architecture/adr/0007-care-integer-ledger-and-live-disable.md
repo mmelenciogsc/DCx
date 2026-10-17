@@ -7,4 +7,4 @@ CARE calculations and double-entry postings use checked integer US-dollar cents.
 
 Payout previews carry an explicit mode. The coordinator accepts only `Sandbox`, requires verified eligibility, explicit owner approval and the Net 60 date, and rejects a duplicate batch. `Live` always throws; there is no live provider implementation or fallback.
 
-This decision does not establish the final accounting policy. A durable immutable server ledger, PayPal sandbox credentials, actual webhook-verification API, provider reconciliation, account eligibility, tax/regulatory analysis and owner approval are still blockers.
+The local sandbox service now persists immutable hashed events, postings, replay identifiers, entitlements and payout state in SQLite and verifies restart behavior. This decision does not establish the final accounting policy. PayPal sandbox credentials, the actual webhook-verification API, asynchronous provider reconciliation/outbox, account eligibility, tax/regulatory analysis and owner approval are still blockers.
