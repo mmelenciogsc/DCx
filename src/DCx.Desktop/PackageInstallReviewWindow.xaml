@@ -58,10 +58,12 @@
                   Grid.Row="3"
                   Margin="0,16,0,12"
                   IsChecked="False"
-                  Content="I approve this exact, digest-bound current-user package installation request."
                   AutomationProperties.AutomationId="PackageInstallApproval"
                   AutomationProperties.Name="Approve this exact digest-bound current-user package installation request"
-                  AutomationProperties.HelpText="Unchecked by default. In validation mode, checking this records an inert approval receipt and does not permit execution." />
+                  AutomationProperties.HelpText="Unchecked by default. In validation mode, checking this records an inert approval receipt and does not permit execution.">
+            <TextBlock Text="I approve this exact, digest-bound current-user package installation request."
+                       TextWrapping="Wrap" />
+        </CheckBox>
 
         <StackPanel Grid.Row="4"
                     Margin="0,0,0,14"

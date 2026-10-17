@@ -388,6 +388,12 @@ public sealed class PackageInstallReviewSession : IAsyncDisposable
                 DenyAndRelease();
                 throw;
             }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                DenyAndRelease();
+                throw new PackageInstallReviewException("package_review_file_unavailable");
+            }
 
             State = PackageInstallReviewState.ApprovedForValidation;
             ReleaseLease();
