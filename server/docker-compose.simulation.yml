@@ -1,0 +1,19 @@
+services:
+  global-registry:
+    build:
+      context: ..
+      dockerfile: server/DCx.GlobalService/Dockerfile
+    environment:
+      DCX_GLOBAL_SIMULATION: "1"
+      DCX_GLOBAL_DATA_ROOT: /data
+      DCX_GLOBAL_SIGNING_KEY: /run/secrets/simulation-key.pk8
+    ports:
+      - "127.0.0.1:5087:5087"
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./simulation-data:/data
+      - ./simulation-key.pk8:/run/secrets/simulation-key.pk8:ro
+    security_opt:
+      - no-new-privileges:true

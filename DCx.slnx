@@ -3,10 +3,14 @@
     <Project Path="src/DCx.Core/DCx.Core.csproj" />
     <Project Path="src/DCx.Desktop/DCx.Desktop.csproj" />
   </Folder>
+  <Folder Name="/server/">
+    <Project Path="server/DCx.GlobalService/DCx.GlobalService.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DCx.BossBenchmark/DCx.BossBenchmark.csproj" />
     <Project Path="tests/DCx.Core.Tests/DCx.Core.Tests.csproj" />
     <Project Path="tests/DCx.FakeCodexAppServer/DCx.FakeCodexAppServer.csproj" />
+    <Project Path="tests/DCx.GlobalSyncBenchmark/DCx.GlobalSyncBenchmark.csproj" />
     <Project Path="tests/DCx.NativeFixture/DCx.NativeFixture.csproj" />
     <Project Path="tests/DCx.WebFixtureServer/DCx.WebFixtureServer.csproj" />
   </Folder>

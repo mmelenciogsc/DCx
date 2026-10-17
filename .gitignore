@@ -15,4 +15,5 @@ artifacts/test-results/
 !.env.example
 secrets.json
 appsettings.Local.json
-
+server/simulation-data/
+server/simulation-key.pk8

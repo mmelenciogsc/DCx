@@ -128,6 +128,13 @@
           "Microsoft.Data.Sqlite": "[10.0.13, )"
         }
       },
+      "dcx.globalservice": {
+        "type": "Project",
+        "dependencies": {
+          "DCx.Core": "[1.0.0, )",
+          "Microsoft.Data.Sqlite": "[10.0.13, )"
+        }
+      },
       "Microsoft.Data.Sqlite": {
         "type": "CentralTransitive",
         "requested": "[10.0.13, )",
