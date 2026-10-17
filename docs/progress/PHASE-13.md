@@ -1,7 +1,7 @@
 # P13 — Packaging, security and reliability
 
 - Status: BLOCKED (substantial local reliability/release-staging checks pass; installer/signing/scanner/clean-VM/human-AT gates absent)
-- Implementation commits: `82452fe`, `3e9b172`
+- Implementation commits: `82452fe`, `3e9b172`, `1b32cdf`
 - Documentation commit: recorded by the commit containing this file
 
 The generated ZIP is an unsigned framework-dependent staging artifact. It is not an installer or production release.
@@ -18,30 +18,43 @@ The generated ZIP is an unsigned framework-dependent staging artifact. It is not
 - CycloneDX 1.6 inventory for the seven shipped NuGet dependencies plus package license metadata.
 - Repository-source scan with two exact synthetic hostile-input fixtures allowlisted; every published file receives ASCII binary secret-pattern scanning with no allowlist.
 - Authenticode state, startup time and working set are recorded without misrepresenting unsigned output.
+- Normal-mode unhandled UI, background-task and terminating-process hooks record only after explicit versioned opt-in and never mark an exception handled.
+- Each local crash record has exactly six fields: schema version, UTC time, closed component category, closed error category, terminating flag and application version. Messages, stack traces, dumps, prompts, URLs, paths, keystrokes, accounts and user identifiers are structurally absent.
+- Reports remain under the per-user application-data root, reject reparse boundaries, use atomic bounded JSON writes and retain at most 20. There is no network transport.
+- A keyboard/UIA-accessible privacy dialog exposes the default-unchecked setting, exact data notice, retained count, explicit purge that preserves the current setting and opt-out that purges reports.
 
 ## Reproduction
 
 ```bash
 cd /mnt/d/DCx
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p13.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 ```
 
 ## Measured result
 
-Recorded evidence directory: `artifacts/test-results/p13-19dc6457cd1c4e6e8e524a5d6bdcffa2/` (generated and intentionally not committed).
+Recorded evidence directory: `artifacts/test-results/p13-68a32eb139334accba2a1f303110380e/` (generated and intentionally not committed).
 
 - Locked Release build: 0 warnings, 0 errors.
-- Reliability tests: passed 14, failed 0, skipped 0; 187 ms.
-- Current full suite after durable contribution-intent recovery: passed 168, failed 0, skipped 0; about 1 second.
-- Publish trees: 42 files, 62,760,355 bytes each; no path/length/SHA-256 differences.
-- Reproducible staging ZIP SHA-256: `e02ee45103d999030cadad88f5e34946186402a90bf403450b338a4eb781242e`.
+- Reliability tests: passed 18, failed 0, skipped 0; 178 ms.
+- Current full suite after local crash-diagnostics hardening: passed 172, failed 0, skipped 0; about 2 seconds.
+- Publish trees: 42 files, 62,878,627 bytes each; no path/length/SHA-256 differences.
+- Reproducible staging ZIP SHA-256: `98875028ee0e399ec0956fd4526b62b3e4b4a8a2ee4ef2214d4e0c672fb90f43`.
 - CycloneDX components: 7; third-party license records: 7.
 - Unexpected secret matches: 0; exact synthetic scanner-fixture matches: 2.
 - Authenticode: `NotSigned`.
-- Offline UIA heading: `DCx is ready offline`; startup 2,253 ms; working set 461.2 MiB under the provisional 1 GiB ceiling.
+- Offline UIA heading: `DCx is ready offline`; startup 2,607 ms; working set 462.2 MiB under the provisional 1 GiB ceiling.
+- Crash-diagnostics UIA heading: `Privacy and crash diagnostics`; consent defaulted unchecked, explicit opt-in persisted notice version 1, purge preserved enabled consent, opt-out disabled and purged, and network transfers remained zero.
 - Recovery UIA heading: `DCx backup and recovery`; main-app launcher, path input, create, default-unchecked approval, restore and assertive status are exposed.
 - Backup while main DCx held the lease was denied and wrote no archive. After main exit, backup and approved restore passed; restore without approval was denied; excluded synthetic WebView2 cookie data remained unchanged.
 - Production actions: 0.
+
+## Changed files in the latest milestone
+
+- Minimized local store and policy: `src/DCx.Core/Reliability/LocalCrashReportStore.cs`.
+- Non-suppressing exception hooks and accessible privacy surface: `src/DCx.Desktop/App.xaml.cs`, `src/DCx.Desktop/MainWindow.xaml`, `src/DCx.Desktop/MainWindow.xaml.cs`, `src/DCx.Desktop/CrashDiagnosticsWindow.xaml`, `src/DCx.Desktop/CrashDiagnosticsWindow.xaml.cs`.
+- Privacy, retention, purge and hostile-filesystem tests: `tests/DCx.Core.Tests/Reliability/LocalCrashReportStoreTests.cs`.
+- Native consent/purge evidence: `scripts/validate-p13.ps1`.
 
 ## Blockers and limits
 
@@ -51,4 +64,6 @@ Recorded evidence directory: `artifacts/test-results/p13-19dc6457cd1c4e6e8e524a5
 - No clean Windows 11 VM installation/uninstallation/upgrade/rollback run occurred.
 - Live SQLite/WAL snapshotting is not claimed; the exclusive lease deliberately requires main DCx to be closed during backup and restore.
 - No human JAWS, NVDA or Narrator signoff occurred.
+- Crash diagnostics deliberately sacrifice message/stack detail for privacy. They have no export, upload, symbolication or support-ingestion path; any future transfer requires a new reviewed notice, item preview and explicit approval boundary.
+- Recovery/readiness utility processes do not initialize this store because they intentionally run outside the normal app's exclusive data lease. Their failures are not represented as covered by the current hooks.
 - P13 remains BLOCKED until signed MSIX install/update/uninstall on a clean VM, vulnerability and AV scans, WebView2/.NET prerequisite handling and human AT acceptance all pass.

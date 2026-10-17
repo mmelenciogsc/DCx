@@ -44,7 +44,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 - Locked native Release build: 0 warnings, 0 errors; 1.23 seconds in the recorded dedicated run.
 - P10 tests: passed 24, failed 0, skipped 0; about 1 second in the recorded native gate.
-- Full suite: passed 168, failed 0, skipped 0; about 1 second.
+- Current full suite after local crash-diagnostics hardening: passed 172, failed 0, skipped 0; about 2 seconds.
 - Eligible CKB item: quarantined, absent from catalog before review, approved into a signed release, synchronized by a client, then withdrawn/deprecated.
 - Secret/PII/dummy item: remained quarantined and reviewer publication failed closed.
 - Receipt: one qualified event; replay, contributor self-use and invalid integrity excluded.

@@ -21,6 +21,7 @@
 | Usage receipts | Local journal + server minimal record | Policy-defined | Qualified event fields only |
 | CARE ledger | Authoritative service | Accounting/legal policy | PayPal and contributor views as required |
 | Recovery archive | User-chosen local path | User-controlled | Never by default |
+| Minimized crash reports | Per-user local application data, default off | Maximum 20; purge on opt-out or explicit delete | No transport implemented |
 | Pilot metric aggregates | Local SQLite, default off | Purged on local opt-out; final policy pending | No transport implemented |
 
 Retention periods, export/deletion behavior, telemetry consent, regional requirements, and a production privacy notice remain P10/P14 legal-review gates.
@@ -32,5 +33,7 @@ P08 stores each local profile in a different hashed directory beneath the curren
 P10 adds local contribution preparation but keeps it off by default and provides no upload action. A prepared item contains only the exact content the user reviewed and remains quarantined. Usage receipts intentionally have no prompt, body, browser URL or file-path field; rejection/qualification logs store decision codes rather than private content.
 
 P13 recovery archives include browser history/bookmarks and private CKB/CCB only. WebView2 profiles, cookies, authenticated sessions, global replicas and Windows Credential Manager secrets are excluded. Archives are not encrypted by the current implementation, so the user-selected destination must be protected appropriately; encryption, retention UI and secure deletion remain release blockers.
+
+P13 minimized crash diagnostics also default off under a versioned notice. An enabled report contains only schema version, UTC time, a closed component category, a closed error category, a terminating flag and application version. The schema has no exception message, stack, dump, prompt, response, URL, path, keystroke, account or user identifier. Atomic bounded files inherit the per-user application-data protection and are capped at 20. The accessible UI can delete reports without changing consent; opt-out purges all reports. No export or network transport exists, and future transfer is not authorized by local consent.
 
 P14's pilot metric store persists aggregate counts, sums, minimums and maximums by UTC day, reviewed metric key and closed enum dimension. Its schema has no raw-event timestamp, prompt/output body, URL, local path, keystroke, field value, private artifact body, provider account identifier or user identifier. Recording defaults off; consent notice versions cannot roll back; local opt-out purges aggregates. No product event source or network transport is connected. This implementation is not authorization to collect metrics: an approved notice, accessible enrollment/withdrawal, final retention/deletion policy and explicit pilot approval remain blocked.

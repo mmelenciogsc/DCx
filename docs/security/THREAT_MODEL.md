@@ -118,6 +118,9 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - Normal DCx holds an exclusive file lease scoped to its canonical data root. The separate recovery mode must acquire that lease for the whole backup or restore, preventing live SQLite/WAL copying and concurrent recovery operations.
 - Restore requires a default-unchecked UI acknowledgment, stages content, and retains/moves prior roots for rollback. A denied operation does not create an archive or replace current data.
 - Two publish trees and ZIPs are compared by path/length/digest. Published files receive binary secret-pattern scanning. Synthetic hostile-input fixtures are allowlisted only in their two source test files.
+- Crash capture is versioned-consent/default-off and records closed categories rather than exception content. Its six-field schema excludes messages, stacks, dumps, prompts, URLs, paths and identities; strict bounded atomic files remain local and retain at most 20.
+- UI, task and process exception hooks do not mark exceptions handled or alter runtime failure semantics. Recording failure is swallowed only at the optional diagnostic boundary so it cannot prevent normal startup or mask the original crash.
+- Accessible deletion preserves the current setting, while opt-out purges retained reports. No upload/export transport exists; local consent cannot authorize a future transfer.
 - These controls do not replace code signing, AV/vulnerability scans, clean-VM lifecycle testing or human assistive-technology acceptance.
 
 ## Implemented readiness controls through partial P14
