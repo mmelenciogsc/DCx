@@ -18,8 +18,8 @@ DCx is under construction. It is not a validated release, installer, production 
 | P09 Global registry/sync | BLOCKED (partial implementation) | At `1be3f9e`, 7/7 signed-sync tests and an actual loopback Kestrel/SQLite client pass: two clients, wrong-signature denial, resume, atomic activation, rollback, lazy artifacts and private isolation. Required Compose run is blocked by absent native Docker and denied WSL daemon/no Compose plugin. |
 | P10 Contributions/governance | BLOCKED (partial implementation) | At `4016c2c`, 8/8 policy/governance tests and native UIA pass: unchecked consent, digest-bound approval, quarantine/scanners, CKB propagation/withdrawal, lineage and fraud exclusions. CCB review remains denied until a real untrusted-code sandbox exists. |
 | P11 PayPal/CARE | BLOCKED (partial implementation) | At `2f97540`, 6/6 local finance tests and 100/100 full tests pass: $3 signed mocks, refunds, balanced ledger, aggregate ≤40% positive-net pool, splits, Net60 and sandbox-only payout gates. PayPal sandbox credentials/eligibility and durable ledger are absent. |
-| P12 Full vertical E2E | In progress (fixtures only) | Cross-phase local scenario harness and honest live-service blockers are active work; no live Facebook, QuickBooks, YouTube, PayPal or package installation is claimed. |
-| P13 Packaging/security/reliability | Not started | No installer or signing identity. |
+| P12 Full vertical E2E | BLOCKED (partial fixtures) | Seven cross-phase fixture validators pass at `1c51f9d` with zero production actions. Facebook-specific, QuickBooks sandbox-to-XLSX, YouTube frame Q&A, package install, Compose/CCB sandbox and real PayPal acceptance remain absent. |
+| P13 Packaging/security/reliability | In progress (audit only) | Installer/tooling feasibility, SBOM/license/security and user-mode packaging work are active; no signed installer or clean-VM result exists. |
 | P14 Pilot/release readiness | Not started | Production activation off. |
 
 ## Environment facts affecting the program

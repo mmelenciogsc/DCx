@@ -20,8 +20,9 @@
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p09.ps1
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p10.ps1
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p11.ps1
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p12-fixtures.ps1
    ```
 
 5. Continue only the earliest uncompleted phase. Record commands, results, changed files, blockers, and the milestone commit in its phase document. Never infer manual screen-reader or external-service success from automated tests.
 
-Current implementation includes the native/browser/broker/provider/BOSS foundation, P07 content/document/media, P08 private CKB/CCB, P09 signed global sync, P10 consent-gated CKB governance and P11's local CARE/PayPal mock model at `2f97540`. P06 is blocked on Whisper/embeddings; P09 on Compose; P10 on a CCB sandbox; P11 on real PayPal sandbox eligibility/credentials and a durable ledger. P12 fixture-only vertical composition is active. Do not install/elevate, contact the owner's server or external providers, use credentials, publish, subscribe, pay or transact. Consult the status and P12 phase document before continuing.
+Current implementation includes P00–P11's recorded native/local capabilities and blockers plus P12's seven-scenario fixture composition at `1c51f9d`. P06, P09, P10, P11 and P12 remain honestly blocked as detailed in status; no external production action occurred. P13 packaging/security/reliability audit is active. Do not install/elevate, contact external providers or the owner's server, use credentials, publish, subscribe, pay, sign or transact. Consult the status and P13 phase document before continuing.
