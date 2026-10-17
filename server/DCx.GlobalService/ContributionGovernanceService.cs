@@ -19,7 +19,9 @@ public sealed record AuthoritativeUsageContext(
 public sealed class ContributionGovernanceService
 {
     private const int MaximumRecoveryBatch = 100;
+    private const int MaximumPublicationAttempts = 20;
     private const int MaximumPublicationChangeJsonBytes = 256 * 1024;
+    private static readonly TimeSpan PublicationLeaseDuration = TimeSpan.FromMinutes(5);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -37,6 +39,7 @@ public sealed class ContributionGovernanceService
     private readonly ContributionScanner scanner = new();
     private readonly CcbPackageValidator ccbPackageValidator = new();
     private readonly SemaphoreSlim mutationLock = new(1, 1);
+    private readonly string workerId = $"worker-{Guid.NewGuid():N}";
 
     private ContributionGovernanceService(
         string root,
@@ -263,16 +266,7 @@ public sealed class ContributionGovernanceService
                 cancellationToken).ConfigureAwait(false);
             await NotifyCheckpointAsync(
                 ContributionPublicationCheckpoint.IntentStored, intent.OperationId, cancellationToken).ConfigureAwait(false);
-            var release = await registry.PublishIdempotentAsync(
-                intent.OperationId,
-                [intent.Change],
-                intent.RequestedUtc,
-                cancellationToken).ConfigureAwait(false);
-            await NotifyCheckpointAsync(
-                ContributionPublicationCheckpoint.RegistryCommitted, intent.OperationId, cancellationToken).ConfigureAwait(false);
-            await CompletePublicationIntentAsync(connection, intent, release, cancellationToken).ConfigureAwait(false);
-
-            return release;
+            return await PublishClaimedIntentAsync(connection, intent, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -309,15 +303,7 @@ public sealed class ContributionGovernanceService
                 cancellationToken).ConfigureAwait(false);
             await NotifyCheckpointAsync(
                 ContributionPublicationCheckpoint.IntentStored, intent.OperationId, cancellationToken).ConfigureAwait(false);
-            var release = await registry.PublishIdempotentAsync(
-                intent.OperationId,
-                [intent.Change],
-                intent.RequestedUtc,
-                cancellationToken).ConfigureAwait(false);
-            await NotifyCheckpointAsync(
-                ContributionPublicationCheckpoint.RegistryCommitted, intent.OperationId, cancellationToken).ConfigureAwait(false);
-            await CompletePublicationIntentAsync(connection, intent, release, cancellationToken).ConfigureAwait(false);
-            return release;
+            return await PublishClaimedIntentAsync(connection, intent, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -332,18 +318,34 @@ public sealed class ContributionGovernanceService
         {
             await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
             var intents = await ReadPendingPublicationIntentsAsync(connection, cancellationToken).ConfigureAwait(false);
+            var processed = 0;
             foreach (var intent in intents)
             {
-                await ValidatePublicationIntentAsync(connection, intent, cancellationToken).ConfigureAwait(false);
-                var release = await registry.PublishIdempotentAsync(
-                    intent.OperationId,
-                    [intent.Change],
-                    intent.RequestedUtc,
-                    cancellationToken).ConfigureAwait(false);
-                await CompletePublicationIntentAsync(connection, intent, release, cancellationToken).ConfigureAwait(false);
+                var lease = await TryClaimPublicationIntentAsync(connection, intent, cancellationToken)
+                    .ConfigureAwait(false);
+                if (lease is null) continue;
+                try
+                {
+                    await ValidatePublicationIntentAsync(connection, intent, cancellationToken).ConfigureAwait(false);
+                    await RenewPublicationLeaseAsync(connection, lease, cancellationToken).ConfigureAwait(false);
+                    var release = await registry.PublishIdempotentAsync(
+                        intent.OperationId,
+                        [intent.Change],
+                        intent.RequestedUtc,
+                        cancellationToken).ConfigureAwait(false);
+                    await RenewPublicationLeaseAsync(connection, lease, cancellationToken).ConfigureAwait(false);
+                    await CompletePublicationIntentAsync(
+                        connection, intent, lease, release, cancellationToken).ConfigureAwait(false);
+                    processed++;
+                }
+                catch
+                {
+                    await TryReleasePublicationLeaseAsync(connection, lease).ConfigureAwait(false);
+                    throw;
+                }
             }
 
-            return intents.Count;
+            return processed;
         }
         finally
         {
@@ -471,6 +473,20 @@ public sealed class ContributionGovernanceService
                 completed_utc TEXT,
                 UNIQUE(submission_id, action),
                 FOREIGN KEY(submission_id) REFERENCES contributions(submission_id)
+            );
+            CREATE TABLE IF NOT EXISTS publication_intent_leases(
+                operation_id TEXT PRIMARY KEY,
+                lease_owner TEXT,
+                lease_token TEXT UNIQUE,
+                acquired_utc TEXT,
+                expires_utc TEXT,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(operation_id) REFERENCES publication_intents(operation_id) ON DELETE CASCADE,
+                CHECK(attempt_count >= 0 AND attempt_count <= 20),
+                CHECK(
+                    (lease_owner IS NULL AND lease_token IS NULL AND acquired_utc IS NULL AND expires_utc IS NULL) OR
+                    (lease_owner IS NOT NULL AND lease_token IS NOT NULL AND acquired_utc IS NOT NULL AND expires_utc IS NOT NULL)
+                )
             );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -691,6 +707,43 @@ public sealed class ContributionGovernanceService
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task<GlobalReleaseDescriptor> PublishClaimedIntentAsync(
+        SqliteConnection connection,
+        PublicationIntent intent,
+        CancellationToken cancellationToken)
+    {
+        var lease = await TryClaimPublicationIntentAsync(connection, intent, cancellationToken)
+            .ConfigureAwait(false)
+            ?? throw new ContributionPolicyException("publication_intent_busy");
+        try
+        {
+            await ValidatePublicationIntentAsync(connection, intent, cancellationToken).ConfigureAwait(false);
+            await RenewPublicationLeaseAsync(connection, lease, cancellationToken).ConfigureAwait(false);
+            var release = await registry.PublishIdempotentAsync(
+                intent.OperationId,
+                [intent.Change],
+                intent.RequestedUtc,
+                cancellationToken).ConfigureAwait(false);
+            await NotifyCheckpointAsync(
+                ContributionPublicationCheckpoint.RegistryCommitted,
+                intent.OperationId,
+                cancellationToken).ConfigureAwait(false);
+            await RenewPublicationLeaseAsync(connection, lease, cancellationToken).ConfigureAwait(false);
+            await CompletePublicationIntentAsync(
+                connection, intent, lease, release, cancellationToken).ConfigureAwait(false);
+            return release;
+        }
+        catch
+        {
+            if (publicationFaultInjector is null)
+            {
+                await TryReleasePublicationLeaseAsync(connection, lease).ConfigureAwait(false);
+            }
+
+            throw;
+        }
+    }
+
     private async Task<PublicationIntent> StorePublicationIntentAsync(
         SqliteConnection connection,
         string submissionId,
@@ -786,6 +839,190 @@ public sealed class ContributionGovernanceService
         }
 
         return intents;
+    }
+
+    private async Task<PublicationLease?> TryClaimPublicationIntentAsync(
+        SqliteConnection connection,
+        PublicationIntent intent,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var expires = now.Add(PublicationLeaseDuration);
+        var token = Guid.NewGuid().ToString("N");
+        var priorState = await ReadPublicationLeaseStateAsync(
+            connection, intent.OperationId, cancellationToken).ConfigureAwait(false);
+        if (priorState?.LeaseToken is not null && priorState.ExpiresUtc > now) return null;
+        if (priorState?.AttemptCount >= MaximumPublicationAttempts)
+        {
+            throw new ContributionPolicyException("publication_lease_attempt_limit");
+        }
+
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO publication_intent_leases(
+                operation_id, lease_owner, lease_token, acquired_utc, expires_utc, attempt_count)
+            SELECT $operation, $owner, $token, $acquired, $expires, 1
+            FROM publication_intents
+            WHERE operation_id = $operation AND completed = 0
+            ON CONFLICT(operation_id) DO UPDATE SET
+                lease_owner = excluded.lease_owner,
+                lease_token = excluded.lease_token,
+                acquired_utc = excluded.acquired_utc,
+                expires_utc = excluded.expires_utc,
+                attempt_count = publication_intent_leases.attempt_count + 1
+            WHERE publication_intent_leases.attempt_count < $maximum_attempts
+              AND (publication_intent_leases.lease_token IS NULL OR publication_intent_leases.expires_utc <= $acquired);
+            """;
+        command.Parameters.AddWithValue("$operation", intent.OperationId);
+        command.Parameters.AddWithValue("$owner", workerId);
+        command.Parameters.AddWithValue("$token", token);
+        command.Parameters.AddWithValue("$acquired", now.ToString("O"));
+        command.Parameters.AddWithValue("$expires", expires.ToString("O"));
+        command.Parameters.AddWithValue("$maximum_attempts", MaximumPublicationAttempts);
+        var changed = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        var state = await ReadPublicationLeaseStateAsync(connection, intent.OperationId, cancellationToken)
+            .ConfigureAwait(false);
+        if (changed == 1)
+        {
+            if (state is null || state.LeaseOwner != workerId || state.LeaseToken != token ||
+                state.AcquiredUtc != now || state.ExpiresUtc != expires)
+            {
+                throw new ContributionPolicyException("publication_lease_claim_conflict");
+            }
+
+            return new PublicationLease(intent.OperationId, workerId, token, expires);
+        }
+
+        var currentIntent = await ReadPublicationIntentAsync(connection, intent.OperationId, cancellationToken)
+            .ConfigureAwait(false);
+        if (currentIntent is null || currentIntent.Completed) return null;
+        if (state is null)
+        {
+            throw new ContributionPolicyException("publication_lease_missing");
+        }
+
+        if (state.LeaseToken is not null && state.ExpiresUtc > now) return null;
+        if (state.AttemptCount >= MaximumPublicationAttempts)
+        {
+            throw new ContributionPolicyException("publication_lease_attempt_limit");
+        }
+
+        throw new ContributionPolicyException("publication_lease_claim_conflict");
+    }
+
+    private static async Task<PublicationLeaseState?> ReadPublicationLeaseStateAsync(
+        SqliteConnection connection,
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT operation_id, lease_owner, lease_token, acquired_utc, expires_utc, attempt_count
+            FROM publication_intent_leases
+            WHERE operation_id = $operation;
+            """;
+        command.Parameters.AddWithValue("$operation", operationId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) return null;
+
+        var storedOperationId = reader.GetString(0);
+        var owner = reader.IsDBNull(1) ? null : reader.GetString(1);
+        var token = reader.IsDBNull(2) ? null : reader.GetString(2);
+        var acquiredText = reader.IsDBNull(3) ? null : reader.GetString(3);
+        var expiresText = reader.IsDBNull(4) ? null : reader.GetString(4);
+        var attempts = reader.GetInt32(5);
+        var allLeaseFieldsNull = owner is null && token is null && acquiredText is null && expiresText is null;
+        var allLeaseFieldsPresent = owner is not null && token is not null && acquiredText is not null && expiresText is not null;
+        if (storedOperationId != operationId || attempts is < 1 or > MaximumPublicationAttempts ||
+            !allLeaseFieldsNull && !allLeaseFieldsPresent)
+        {
+            throw new ContributionPolicyException("publication_lease_corrupt");
+        }
+
+        if (allLeaseFieldsNull)
+        {
+            return new PublicationLeaseState(operationId, attempts, null, null, null, null);
+        }
+
+        if (owner!.Length is < 1 or > 64 ||
+            owner.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '-' and not '_') ||
+            token!.Length != 32 || !token.All(char.IsAsciiHexDigit) ||
+            !DateTimeOffset.TryParseExact(
+                acquiredText,
+                "O",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var acquiredUtc) ||
+            !DateTimeOffset.TryParseExact(
+                expiresText,
+                "O",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var expiresUtc) ||
+            acquiredUtc.Offset != TimeSpan.Zero || expiresUtc.Offset != TimeSpan.Zero || expiresUtc <= acquiredUtc)
+        {
+            throw new ContributionPolicyException("publication_lease_corrupt");
+        }
+
+        return new PublicationLeaseState(
+            operationId,
+            attempts,
+            owner,
+            token.ToLowerInvariant(),
+            acquiredUtc,
+            expiresUtc);
+    }
+
+    private static async Task RenewPublicationLeaseAsync(
+        SqliteConnection connection,
+        PublicationLease lease,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var expires = now.Add(PublicationLeaseDuration);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE publication_intent_leases
+            SET expires_utc = $expires
+            WHERE operation_id = $operation AND lease_owner = $owner AND lease_token = $token
+              AND expires_utc > $now
+              AND EXISTS(
+                  SELECT 1 FROM publication_intents
+                  WHERE operation_id = $operation AND completed = 0
+              );
+            """;
+        command.Parameters.AddWithValue("$expires", expires.ToString("O"));
+        command.Parameters.AddWithValue("$operation", lease.OperationId);
+        command.Parameters.AddWithValue("$owner", lease.Owner);
+        command.Parameters.AddWithValue("$token", lease.Token);
+        command.Parameters.AddWithValue("$now", now.ToString("O"));
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new ContributionPolicyException("publication_lease_lost");
+        }
+    }
+
+    private static async Task TryReleasePublicationLeaseAsync(
+        SqliteConnection connection,
+        PublicationLease lease)
+    {
+        try
+        {
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE publication_intent_leases
+                SET lease_owner = NULL, lease_token = NULL, acquired_utc = NULL, expires_utc = NULL
+                WHERE operation_id = $operation AND lease_owner = $owner AND lease_token = $token;
+                """;
+            command.Parameters.AddWithValue("$operation", lease.OperationId);
+            command.Parameters.AddWithValue("$owner", lease.Owner);
+            command.Parameters.AddWithValue("$token", lease.Token);
+            await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The lease expires automatically; preserve the original publication failure.
+        }
     }
 
     private static PublicationIntent ParsePublicationIntent(SqliteDataReader reader)
@@ -921,12 +1158,30 @@ public sealed class ContributionGovernanceService
     private static async Task CompletePublicationIntentAsync(
         SqliteConnection connection,
         PublicationIntent intent,
+        PublicationLease lease,
         GlobalReleaseDescriptor release,
         CancellationToken cancellationToken)
     {
+        var completedUtc = DateTimeOffset.UtcNow;
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         var command = connection.CreateCommand();
         command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM publication_intent_leases
+            WHERE operation_id = $operation AND lease_owner = $owner AND lease_token = $token
+              AND expires_utc > $completed;
+            """;
+        command.Parameters.AddWithValue("$operation", intent.OperationId);
+        command.Parameters.AddWithValue("$owner", lease.Owner);
+        command.Parameters.AddWithValue("$token", lease.Token);
+        command.Parameters.AddWithValue("$completed", completedUtc.ToString("O"));
+        if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 1)
+        {
+            throw new ContributionPolicyException("publication_lease_lost");
+        }
+
+        command.Parameters.Clear();
         if (intent.Action == PublicationIntentAction.Approval)
         {
             command.CommandText = """
@@ -961,14 +1216,35 @@ public sealed class ContributionGovernanceService
         command.CommandText = """
             UPDATE publication_intents
             SET completed = 1, release_sequence = $release, completed_utc = $completed
-            WHERE operation_id = $operation AND completed = 0;
+            WHERE operation_id = $operation AND completed = 0
+              AND EXISTS(
+                  SELECT 1 FROM publication_intent_leases
+                  WHERE operation_id = $operation AND lease_owner = $owner AND lease_token = $token
+                    AND expires_utc > $completed
+              );
             """;
         command.Parameters.AddWithValue("$release", release.Sequence);
-        command.Parameters.AddWithValue("$completed", DateTimeOffset.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$completed", completedUtc.ToString("O"));
         command.Parameters.AddWithValue("$operation", intent.OperationId);
+        command.Parameters.AddWithValue("$owner", lease.Owner);
+        command.Parameters.AddWithValue("$token", lease.Token);
         if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
         {
             throw new ContributionPolicyException("publication_intent_completion_conflict");
+        }
+
+        command.Parameters.Clear();
+        command.CommandText = """
+            UPDATE publication_intent_leases
+            SET lease_owner = NULL, lease_token = NULL, acquired_utc = NULL, expires_utc = NULL
+            WHERE operation_id = $operation AND lease_owner = $owner AND lease_token = $token;
+            """;
+        command.Parameters.AddWithValue("$operation", intent.OperationId);
+        command.Parameters.AddWithValue("$owner", lease.Owner);
+        command.Parameters.AddWithValue("$token", lease.Token);
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new ContributionPolicyException("publication_lease_lost");
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -1124,4 +1400,18 @@ public sealed class ContributionGovernanceService
         DateTimeOffset RequestedUtc,
         bool Completed,
         long? ReleaseSequence);
+
+    private sealed record PublicationLease(
+        string OperationId,
+        string Owner,
+        string Token,
+        DateTimeOffset ExpiresUtc);
+
+    private sealed record PublicationLeaseState(
+        string OperationId,
+        int AttemptCount,
+        string? LeaseOwner,
+        string? LeaseToken,
+        DateTimeOffset? AcquiredUtc,
+        DateTimeOffset? ExpiresUtc);
 }

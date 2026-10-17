@@ -165,6 +165,7 @@ public sealed class ContributionGovernanceTests : IDisposable
             crashingApproval.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now));
         Assert.Equal(1, (await registry.GetLatestAsync())!.Sequence);
 
+        await ExpirePublicationLeasesAsync(governanceRoot);
         var recoveredApproval = await ContributionGovernanceService.OpenAsync(governanceRoot, registry);
         Assert.Equal(0, await recoveredApproval.RecoverPendingPublicationsAsync());
         Assert.Equal(1, (await registry.GetLatestAsync())!.Sequence);
@@ -183,6 +184,160 @@ public sealed class ContributionGovernanceTests : IDisposable
         var (state, completedIntents) = await ReadRecoveryStateAsync(governanceRoot, prepared.SubmissionId);
         Assert.Equal(ContributionState.Withdrawn, state);
         Assert.Equal(2L, completedIntents);
+    }
+
+    [Fact]
+    public async Task ConcurrentRecovery_ClaimsReviewerIntentOnceAcrossServiceInstances()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var privateKey = key.ExportPkcs8PrivateKey();
+        var registryRoot = Path.Combine(root, "concurrent-lease-registry");
+        await using var registryOne = await GlobalRegistryRepository.OpenAsync(registryRoot, privateKey);
+        await using var registryTwo = await GlobalRegistryRepository.OpenAsync(registryRoot, privateKey);
+        var governanceRoot = Path.Combine(root, "concurrent-lease-governance");
+        var fault = new ThrowOncePublicationFaultInjector(ContributionPublicationCheckpoint.IntentStored);
+        var crashing = await ContributionGovernanceService.OpenForTestingAsync(
+            governanceRoot, registryOne, null, fault);
+        var candidate = Candidate(
+            "candidate:concurrent-lease",
+            "resource:concurrent-lease",
+            "A durable reviewer intent claimed once across concurrent governance service instances.");
+        var prepared = Prepare(candidate, "nonce-concurrent-lease-123");
+        await crashing.IntakeAsync(prepared, now);
+        await Assert.ThrowsAsync<SimulatedPublicationCrashException>(() =>
+            crashing.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now));
+
+        var services = await Task.WhenAll(
+            ContributionGovernanceService.OpenAsync(governanceRoot, registryOne),
+            ContributionGovernanceService.OpenAsync(governanceRoot, registryTwo));
+
+        Assert.Equal(0, await services[0].RecoverPendingPublicationsAsync());
+        Assert.Equal(0, await services[1].RecoverPendingPublicationsAsync());
+        Assert.Equal(1, (await registryOne.GetLatestAsync())!.Sequence);
+        var (state, completedIntents) = await ReadRecoveryStateAsync(governanceRoot, prepared.SubmissionId);
+        var (attempts, activeLeases) = await ReadPublicationLeaseStateAsync(governanceRoot);
+        Assert.Equal(ContributionState.Approved, state);
+        Assert.Equal(1L, completedIntents);
+        Assert.Equal(1L, attempts);
+        Assert.Equal(0L, activeLeases);
+    }
+
+    [Fact]
+    public async Task ExpiredLease_IsReclaimedAndFencesTheOriginalWorkerCompletion()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "lease-fencing-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "lease-fencing-governance");
+        var fault = new BlockingPublicationFaultInjector(ContributionPublicationCheckpoint.RegistryCommitted);
+        var first = await ContributionGovernanceService.OpenForTestingAsync(
+            governanceRoot, registry, null, fault);
+        var candidate = Candidate(
+            "candidate:lease-fencing",
+            "resource:lease-fencing",
+            "An expired publication lease is reclaimed without granting new reviewer authority.");
+        var prepared = Prepare(candidate, "nonce-lease-fencing-12345");
+        await first.IntakeAsync(prepared, now);
+
+        var firstPublication = first.ApproveAndPublishAsync(
+            prepared.SubmissionId, "reviewer:fixture", now);
+        await fault.Reached.WaitAsync(TimeSpan.FromSeconds(10));
+        var second = await ContributionGovernanceService.OpenAsync(governanceRoot, registry);
+        Assert.Equal(0, await second.RecoverPendingPublicationsAsync());
+        Assert.Equal(ContributionState.Quarantined,
+            (await ReadRecoveryStateAsync(governanceRoot, prepared.SubmissionId)).State);
+
+        await ExpirePublicationLeasesAsync(governanceRoot);
+        Assert.Equal(1, await second.RecoverPendingPublicationsAsync());
+        fault.Release();
+        var lost = await Assert.ThrowsAsync<ContributionPolicyException>(async () => await firstPublication);
+
+        Assert.Equal("publication_lease_lost", lost.Code);
+        Assert.Equal(1, (await registry.GetLatestAsync())!.Sequence);
+        var (state, completedIntents) = await ReadRecoveryStateAsync(governanceRoot, prepared.SubmissionId);
+        var (attempts, activeLeases) = await ReadPublicationLeaseStateAsync(governanceRoot);
+        Assert.Equal(ContributionState.Approved, state);
+        Assert.Equal(1L, completedIntents);
+        Assert.Equal(2L, attempts);
+        Assert.Equal(0L, activeLeases);
+    }
+
+    [Fact]
+    public async Task AutomaticRecovery_RejectsMalformedPublicationLease()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "lease-tamper-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "lease-tamper-governance");
+        var fault = new ThrowOncePublicationFaultInjector(ContributionPublicationCheckpoint.RegistryCommitted);
+        var crashing = await ContributionGovernanceService.OpenForTestingAsync(
+            governanceRoot, registry, null, fault);
+        var candidate = Candidate(
+            "candidate:lease-tamper",
+            "resource:lease-tamper",
+            "A malformed publication worker lease must fail closed during automatic recovery.");
+        var prepared = Prepare(candidate, "nonce-lease-tamper-123456");
+        await crashing.IntakeAsync(prepared, now);
+        await Assert.ThrowsAsync<SimulatedPublicationCrashException>(() =>
+            crashing.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now));
+
+        await UpdateGovernanceAsync(
+            governanceRoot,
+            """
+            UPDATE publication_intent_leases
+            SET lease_token = 'invalid-token',
+                acquired_utc = '2000-01-01T00:00:00.0000000+00:00',
+                expires_utc = '2000-01-01T00:01:00.0000000+00:00';
+            """);
+        var exception = await Assert.ThrowsAsync<ContributionPolicyException>(() =>
+            ContributionGovernanceService.OpenAsync(governanceRoot, registry));
+
+        Assert.Equal("publication_lease_corrupt", exception.Code);
+        Assert.Equal(ContributionState.Quarantined,
+            (await ReadRecoveryStateAsync(governanceRoot, prepared.SubmissionId)).State);
+    }
+
+    [Fact]
+    public async Task AutomaticRecovery_StopsAtBoundedPublicationAttemptLimit()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "lease-attempt-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "lease-attempt-governance");
+        var fault = new ThrowOncePublicationFaultInjector(ContributionPublicationCheckpoint.IntentStored);
+        var crashing = await ContributionGovernanceService.OpenForTestingAsync(
+            governanceRoot, registry, null, fault);
+        var candidate = Candidate(
+            "candidate:lease-attempt-limit",
+            "resource:lease-attempt-limit",
+            "A bounded retry fixture prevents an authorized intent from looping forever.");
+        var prepared = Prepare(candidate, "nonce-lease-attempt-limit");
+        await crashing.IntakeAsync(prepared, now);
+        await Assert.ThrowsAsync<SimulatedPublicationCrashException>(() =>
+            crashing.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now));
+
+        await using (var connection = await OpenGovernanceConnectionAsync(governanceRoot, readOnly: false))
+        {
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO publication_intent_leases(
+                    operation_id, lease_owner, lease_token, acquired_utc, expires_utc, attempt_count)
+                VALUES($operation, 'worker-fixture', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                       '2000-01-01T00:00:00.0000000+00:00',
+                       '2000-01-01T00:01:00.0000000+00:00', 20);
+                """;
+            command.Parameters.AddWithValue(
+                "$operation", PublicationOperationId("approval", prepared.SubmissionId));
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+
+        var exception = await Assert.ThrowsAsync<ContributionPolicyException>(() =>
+            ContributionGovernanceService.OpenAsync(governanceRoot, registry));
+
+        Assert.Equal("publication_lease_attempt_limit", exception.Code);
+        Assert.Null(await registry.GetLatestAsync());
+        Assert.Equal(ContributionState.Quarantined,
+            (await ReadRecoveryStateAsync(governanceRoot, prepared.SubmissionId)).State);
     }
 
     [Fact]
@@ -560,6 +715,49 @@ public sealed class ContributionGovernanceTests : IDisposable
         return (state, (long)(await command.ExecuteScalarAsync())!);
     }
 
+    private static async Task<(long Attempts, long ActiveLeases)> ReadPublicationLeaseStateAsync(
+        string governanceRoot)
+    {
+        await using var connection = await OpenGovernanceConnectionAsync(governanceRoot);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT SUM(attempt_count), SUM(CASE WHEN lease_token IS NULL THEN 0 ELSE 1 END) FROM publication_intent_leases;";
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        return (reader.GetInt64(0), reader.GetInt64(1));
+    }
+
+    private static Task ExpirePublicationLeasesAsync(string governanceRoot) =>
+        UpdateGovernanceAsync(
+            governanceRoot,
+            """
+            UPDATE publication_intent_leases
+            SET acquired_utc = '2000-01-01T00:00:00.0000000+00:00',
+                expires_utc = '2000-01-01T00:01:00.0000000+00:00'
+            WHERE lease_token IS NOT NULL;
+            """);
+
+    private static async Task UpdateGovernanceAsync(string governanceRoot, string statement)
+    {
+        await using var connection = await OpenGovernanceConnectionAsync(governanceRoot, readOnly: false);
+        var command = connection.CreateCommand();
+        command.CommandText = statement;
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private static async Task<SqliteConnection> OpenGovernanceConnectionAsync(
+        string governanceRoot,
+        bool readOnly = true)
+    {
+        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(governanceRoot, "contribution-governance.sqlite3"),
+            Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWrite,
+            Pooling = false,
+        }.ToString());
+        await connection.OpenAsync();
+        return connection;
+    }
+
     private sealed class ThrowOncePublicationFaultInjector(
         ContributionPublicationCheckpoint target) : IContributionPublicationFaultInjector
     {
@@ -583,6 +781,28 @@ public sealed class ContributionGovernanceTests : IDisposable
     }
 
     private sealed class SimulatedPublicationCrashException : Exception;
+
+    private sealed class BlockingPublicationFaultInjector(
+        ContributionPublicationCheckpoint target) : IContributionPublicationFaultInjector
+    {
+        private readonly TaskCompletionSource reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Reached => reached.Task;
+
+        public void Release() => released.TrySetResult();
+
+        public async Task OnCheckpointAsync(
+            ContributionPublicationCheckpoint checkpoint,
+            string operationId,
+            CancellationToken cancellationToken)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(operationId));
+            if (checkpoint != target) return;
+            reached.TrySetResult();
+            await released.Task.WaitAsync(cancellationToken);
+        }
+    }
 
     private sealed class FixtureSandboxExecutor(bool outputMismatch = false) : ICcbSandboxExecutor
     {
