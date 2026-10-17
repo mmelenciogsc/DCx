@@ -155,11 +155,18 @@
                             AutomationProperties.Name="Open private contribution review"
                             Click="OnContributionsClick" />
                     <Button MinWidth="100"
+                            Margin="0,0,6,0"
                             Content="Recovery"
                             AutomationProperties.AutomationId="RecoveryButton"
                             AutomationProperties.Name="Open backup and recovery"
                             AutomationProperties.HelpText="Opens a separate recovery window. Close the main DCx window before running backup or restore."
                             Click="OnRecoveryClick" />
+                    <Button MinWidth="100"
+                            Content="Readiness"
+                            AutomationProperties.AutomationId="ReadinessButton"
+                            AutomationProperties.Name="Open release readiness dashboard"
+                            AutomationProperties.HelpText="Opens the read-only release blocker and metric dashboard."
+                            Click="OnReadinessClick" />
                 </WrapPanel>
             </Grid>
         </Border>

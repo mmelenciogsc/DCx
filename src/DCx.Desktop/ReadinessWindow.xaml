@@ -1,0 +1,79 @@
+<Window x:Class="DCx.Desktop.ReadinessWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DCx release readiness"
+        Width="900"
+        Height="720"
+        MinWidth="700"
+        MinHeight="560"
+        AutomationProperties.AutomationId="ReadinessWindow"
+        AutomationProperties.Name="DCx release readiness window">
+    <DockPanel Margin="20">
+        <StackPanel DockPanel.Dock="Top">
+            <TextBlock FontSize="26"
+                       FontWeight="SemiBold"
+                       Text="DCx release readiness"
+                       AutomationProperties.AutomationId="ReadinessHeading"
+                       AutomationProperties.Name="DCx release readiness" />
+            <Border Margin="0,12,0,0"
+                    Padding="12"
+                    Background="#FFF4CE"
+                    BorderBrush="#8A6D00"
+                    BorderThickness="1">
+                <TextBlock x:Name="DecisionText"
+                           FontSize="18"
+                           FontWeight="Bold"
+                           Text="Loading readiness decision."
+                           TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="ReadinessDecision"
+                           AutomationProperties.Name="Loading readiness decision."
+                           AutomationProperties.LiveSetting="Assertive" />
+            </Border>
+            <TextBlock Margin="0,10,0,0"
+                       TextWrapping="Wrap"
+                       Text="This dashboard is read-only. It cannot approve production, enroll a pilot, collect events, publish content, or initiate payments." />
+            <TextBlock x:Name="ConsentText"
+                       Margin="0,8,0,0"
+                       FontWeight="SemiBold"
+                       Text="Metric consent status is loading."
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="ReadinessConsentStatus"
+                       AutomationProperties.Name="Metric consent status is loading."
+                       AutomationProperties.LiveSetting="Polite" />
+            <TextBlock x:Name="SummaryText"
+                       Margin="0,8,0,0"
+                       Text="Readiness counts are loading."
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="ReadinessSummary"
+                       AutomationProperties.Name="Readiness counts are loading." />
+            <Button x:Name="RefreshButton"
+                    Width="170"
+                    MinHeight="36"
+                    Margin="0,12,0,12"
+                    HorizontalAlignment="Left"
+                    Content="_Refresh readiness"
+                    AutomationProperties.AutomationId="ReadinessRefresh"
+                    AutomationProperties.Name="Refresh readiness"
+                    Click="OnRefreshClick" />
+        </StackPanel>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*" />
+                <ColumnDefinition Width="2*" />
+            </Grid.ColumnDefinitions>
+            <GroupBox Grid.Column="0" Header="Blocking critical and major issues" Margin="0,0,10,0">
+                <ListBox x:Name="BlockersList"
+                         Margin="8"
+                         AutomationProperties.AutomationId="ReadinessBlockers"
+                         AutomationProperties.Name="Blocking critical and major readiness issues" />
+            </GroupBox>
+            <GroupBox Grid.Column="1" Header="Privacy-reviewed metric definitions" Margin="10,0,0,0">
+                <ListBox x:Name="MetricsList"
+                         Margin="8"
+                         AutomationProperties.AutomationId="ReadinessMetrics"
+                         AutomationProperties.Name="Privacy-reviewed pilot metric definitions" />
+            </GroupBox>
+        </Grid>
+    </DockPanel>
+</Window>

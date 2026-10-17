@@ -948,6 +948,21 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnReadinessClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var executable = Environment.ProcessPath
+                ?? throw new InvalidOperationException("The DCx executable path is unavailable.");
+            Process.Start(new ProcessStartInfo(executable, "--readiness") { UseShellExecute = true });
+            SetStatus("The read-only release readiness dashboard opened separately.");
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"The release readiness dashboard could not open. {exception.Message}");
+        }
+    }
+
     private static string ResolveRepositoryRoot()
     {
         var configured = Environment.GetEnvironmentVariable("DCX_REPO_ROOT");

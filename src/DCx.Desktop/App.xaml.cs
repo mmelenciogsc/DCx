@@ -18,6 +18,13 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 1 && string.Equals(e.Args[0], "--readiness", StringComparison.Ordinal))
+        {
+            MainWindow = new ReadinessWindow();
+            MainWindow.Show();
+            return;
+        }
+
         try
         {
             runtimeLease = ApplicationDataOperationLease.Acquire(

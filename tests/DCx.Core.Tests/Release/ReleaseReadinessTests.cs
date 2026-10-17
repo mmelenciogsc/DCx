@@ -49,6 +49,19 @@ public sealed class ReleaseReadinessTests
         });
     }
 
+    [Fact]
+    public void CurrentReadinessPolicy_IsSharedTriagedAndNoGo()
+    {
+        var result = CurrentReleaseReadiness.EvaluateLocalNoGo();
+
+        Assert.Equal(ReleaseDecision.NoGo, result.Decision);
+        Assert.False(result.ProductionActivationApproved);
+        Assert.Equal(7, result.Issues.Count);
+        Assert.Equal(7, result.CriticalAndMajorIssuesTriaged);
+        Assert.Equal(7, result.BlockingCriticalAndMajorIssues);
+        Assert.Contains(result.Issues, issue => issue.Id == "p10-ccb-sandbox");
+    }
+
     private static ReleaseReadinessIssue Issue(ReadinessDisposition disposition) => new(
         "release-signing",
         "Signed installer lifecycle",
