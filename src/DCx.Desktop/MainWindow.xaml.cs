@@ -16,6 +16,7 @@ using DCx.Core.Profiles;
 using DCx.Core.Reliability;
 using DCx.Core.Storage;
 using DCx.Desktop.Automation;
+using DCx.Desktop.Media;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -32,6 +33,7 @@ public partial class MainWindow : Window
     private readonly DownloadPathPolicy _downloadPathPolicy = new();
     private readonly BrowserControlCoordinator _controlCoordinator = new();
     private readonly BrowserDomAdapter _domAdapter;
+    private readonly WebVideoFrameDescriptionService _webVideoFrameDescriptionService = new();
     private readonly Dictionary<string, Task<CoreWebView2Environment>> _environments = new(StringComparer.Ordinal);
     private readonly ObservableCollection<BrowserHistoryEntry> _historyItems = [];
     private readonly ObservableCollection<BrowserBookmark> _bookmarkItems = [];
@@ -52,6 +54,8 @@ public partial class MainWindow : Window
     private ContributionsWindow? _contributionsWindow;
     private CrashDiagnosticsWindow? _crashDiagnosticsWindow;
     private Task<LocalModelSelectionStore>? _localModelSelectionStore;
+    private BrowserTabState? _pausedWebVideoTab;
+    private Uri? _pausedWebVideoPage;
 
     public MainWindow()
     {
@@ -190,6 +194,12 @@ public partial class MainWindow : Window
 
     private void OnNavigationStarting(BrowserTabState tab, CoreWebView2NavigationStartingEventArgs args)
     {
+        if (ReferenceEquals(tab, _pausedWebVideoTab))
+        {
+            _pausedWebVideoTab = null;
+            _pausedWebVideoPage = null;
+        }
+
         tab.NavigationGeneration++;
         if (_controlCoordinator.Mode == BrowserControlMode.Agent &&
             (_agentDemoStage != AgentDemoStage.Navigating || !ReferenceEquals(tab, _agentTab)))
@@ -380,6 +390,12 @@ public partial class MainWindow : Window
 
     private void CloseTab(BrowserTabState tab)
     {
+        if (ReferenceEquals(tab, _pausedWebVideoTab))
+        {
+            _pausedWebVideoTab = null;
+            _pausedWebVideoPage = null;
+        }
+
         var index = BrowserTabs.Items.IndexOf(tab.TabItem);
         BrowserTabs.Items.Remove(tab.TabItem);
         tab.Browser.Dispose();
@@ -955,8 +971,54 @@ public partial class MainWindow : Window
             await CreateTabAsync(GetSelectedProfile(), uri);
             Activate();
         };
+        _contentViewerWindow.WebVideoFrameQuestionRequested = DescribeActiveWebVideoAsync;
+        _contentViewerWindow.WebVideoResumeRequested = ResumePausedWebVideoAsync;
         _contentViewerWindow.Closed += (_, _) => _contentViewerWindow = null;
         _contentViewerWindow.Show();
+    }
+
+    private async Task<WebVideoFrameDescriptionResult> DescribeActiveWebVideoAsync(
+        string? question,
+        CancellationToken cancellationToken)
+    {
+        var tab = CurrentTab;
+        if (tab?.Browser.CoreWebView2 is null || tab.Browser.Source is null)
+        {
+            throw new WebVideoFrameException("web_video_page_unsupported");
+        }
+
+        var selectionStore = await GetLocalModelSelectionStoreAsync();
+        var binding = (await selectionStore.GetStateAsync(cancellationToken)).Vision;
+        if (binding is null)
+        {
+            throw new WebVideoFrameException("local_vision_model_not_selected");
+        }
+
+        _pausedWebVideoTab = tab;
+        _pausedWebVideoPage = tab.Browser.Source;
+        var result = await _webVideoFrameDescriptionService.DescribeAsync(
+            tab.Browser,
+            binding.Name,
+            binding.Digest,
+            binding.LicenseSha256,
+            question,
+            cancellationToken);
+        _pausedWebVideoPage = result.PageUri;
+        return result;
+    }
+
+    private async Task ResumePausedWebVideoAsync(CancellationToken cancellationToken)
+    {
+        var tab = _pausedWebVideoTab;
+        var page = _pausedWebVideoPage;
+        if (tab is null || page is null || !BrowserTabs.Items.Contains(tab.TabItem))
+        {
+            throw new WebVideoFrameException("web_video_page_changed");
+        }
+
+        await _webVideoFrameDescriptionService.ResumeAsync(tab.Browser, page, cancellationToken);
+        _pausedWebVideoTab = null;
+        _pausedWebVideoPage = null;
     }
 
     private void OnContributionsClick(object sender, RoutedEventArgs e)

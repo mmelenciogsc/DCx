@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Files and media — DCx"
         Width="880"
-        Height="720"
+        Height="820"
         MinWidth="680"
         MinHeight="540"
         AutomationProperties.AutomationId="ContentViewerWindow"
@@ -47,6 +47,40 @@
                          AutomationProperties.Name="YouTube video URL" />
             </DockPanel>
 
+            <GroupBox Margin="0,0,0,12" Header="Paused-frame description and questions">
+                <StackPanel Margin="10,6">
+                    <TextBlock TextWrapping="Wrap"
+                               Text="Leave the question empty for a concise visual description. For the active web tab, DCx pauses the largest accessible HTML5 video and sends only its visible video rectangle to the approved loopback vision model. It does not download the video. The video stays paused for follow-up questions until you resume it." />
+                    <Label Margin="0,8,0,0" Target="{Binding ElementName=FrameQuestionBox}"
+                           Padding="0" Content="Question about the paused frame, optional" />
+                    <TextBox x:Name="FrameQuestionBox"
+                             Height="58"
+                             Margin="0,4,0,8"
+                             Padding="5"
+                             MaxLength="500"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             AutomationProperties.AutomationId="FrameQuestionBox"
+                             AutomationProperties.Name="Optional question about the paused local or web video frame" />
+                    <WrapPanel>
+                        <Button x:Name="AskWebVideoFrameButton"
+                                MinWidth="210"
+                                Margin="0,0,8,0"
+                                Content="Pause and ask active _web video"
+                                AutomationProperties.AutomationId="AskWebVideoFrameButton"
+                                AutomationProperties.Name="Pause and ask about the largest accessible video in the active browser tab"
+                                Click="OnAskWebVideoFrameClick" />
+                        <Button x:Name="ResumeWebVideoButton"
+                                MinWidth="170"
+                                Content="_Resume web video"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="ResumeWebVideoButton"
+                                AutomationProperties.Name="Resume the web video paused by DCx"
+                                Click="OnResumeWebVideoClick" />
+                    </WrapPanel>
+                </StackPanel>
+            </GroupBox>
+
             <TextBlock x:Name="ContentStatusText" Margin="0,0,0,10" FontWeight="SemiBold"
                        Text="No content selected." TextWrapping="Wrap"
                        AutomationProperties.AutomationId="ContentStatusText"
@@ -89,6 +123,7 @@
                                 Content="Describe frame" IsEnabled="False"
                                 AutomationProperties.AutomationId="DescribeFrameButton"
                                 AutomationProperties.Name="Pause and describe current video frame"
+                                AutomationProperties.HelpText="Uses the optional paused-frame question above. The local video remains paused for follow-up questions."
                                 Click="OnDescribeFrameClick" />
                     </WrapPanel>
                     <TextBlock x:Name="FrameDescriptionText" Grid.Row="2" Margin="8,0,8,8" TextWrapping="Wrap"

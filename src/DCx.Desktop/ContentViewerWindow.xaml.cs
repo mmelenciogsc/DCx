@@ -1,4 +1,5 @@
 using System.IO;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using DCx.Core.Content;
@@ -18,15 +19,28 @@ public partial class ContentViewerWindow : Window
     private readonly MediaFrameDescriptionService _frameDescriptionService = new();
     private readonly LocalModelSelectionStore _localModelSelectionStore;
     private CancellationTokenSource? _frameDescriptionCancellation;
+    private CancellationTokenSource? _webVideoCancellation;
 
     public ContentViewerWindow(LocalModelSelectionStore localModelSelectionStore)
     {
         _localModelSelectionStore = localModelSelectionStore
             ?? throw new ArgumentNullException(nameof(localModelSelectionStore));
         InitializeComponent();
+        Closed += (_, _) =>
+        {
+            _frameDescriptionCancellation?.Cancel();
+            _frameDescriptionCancellation?.Dispose();
+            _frameDescriptionCancellation = null;
+            _webVideoCancellation?.Cancel();
+            _webVideoCancellation?.Dispose();
+            _webVideoCancellation = null;
+        };
     }
 
     public event EventHandler<Uri>? YouTubeNavigationRequested;
+    public Func<string?, CancellationToken, Task<WebVideoFrameDescriptionResult>>?
+        WebVideoFrameQuestionRequested { get; set; }
+    public Func<CancellationToken, Task>? WebVideoResumeRequested { get; set; }
 
     private void OnBrowseFileClick(object sender, RoutedEventArgs e)
     {
@@ -206,20 +220,128 @@ public partial class ContentViewerWindow : Window
                 binding.Name,
                 binding.Digest,
                 binding.LicenseSha256,
+                FrameQuestionBox.Text,
                 _frameDescriptionCancellation.Token);
             FrameDescriptionText.Text = result.Text;
-            SetStatus($"Frame description complete. {result.PromptTokens} prompt tokens and {result.OutputTokens} output tokens; video remains paused.");
+            SetStatus(string.IsNullOrWhiteSpace(FrameQuestionBox.Text)
+                ? $"Frame description complete. {result.PromptTokens} prompt tokens and {result.OutputTokens} output tokens; video remains paused."
+                : $"Frame answer complete. {result.PromptTokens} prompt tokens and {result.OutputTokens} output tokens; video remains paused for follow-up questions.");
             FrameDescriptionText.Focus();
         }
-        catch (Exception exception)
+        catch (OperationCanceledException)
         {
-            SetStatus($"Frame description failed safely. {exception.Message}");
+            SetStatus("Frame description canceled. The local video remains paused.");
+        }
+        catch (ArgumentException)
+        {
+            SetStatus("Frame description blocked because the question or selected model binding is invalid. The local video remains paused.");
+        }
+        catch
+        {
+            SetStatus("Frame description failed safely without exposing process or model diagnostics. The local video remains paused.");
         }
         finally
         {
             DescribeFrameButton.IsEnabled = MediaViewer.Source is not null;
         }
     }
+
+    private async void OnAskWebVideoFrameClick(object sender, RoutedEventArgs e)
+    {
+        if (WebVideoFrameQuestionRequested is null)
+        {
+            SetStatus("Web video frame questions are unavailable because no shared browser handler is connected.");
+            return;
+        }
+
+        _webVideoCancellation?.Cancel();
+        _webVideoCancellation?.Dispose();
+        _webVideoCancellation = new CancellationTokenSource();
+        AskWebVideoFrameButton.IsEnabled = false;
+        ResumeWebVideoButton.IsEnabled = false;
+        SetStatus("Pausing the largest accessible video in the active browser tab and capturing only its visible video rectangle for the approved local model.");
+        try
+        {
+            var result = await WebVideoFrameQuestionRequested(
+                FrameQuestionBox.Text,
+                _webVideoCancellation.Token);
+            FrameDescriptionText.Text = result.Vision.Text;
+            ContentTabs.SelectedIndex = 2;
+            ResumeWebVideoButton.IsEnabled = true;
+            SetStatus($"Web video frame answer complete at {result.CurrentTimeSeconds.ToString("0.###", CultureInfo.InvariantCulture)} seconds. " +
+                      $"{result.Vision.PromptTokens} prompt tokens and {result.Vision.OutputTokens} output tokens. " +
+                      "The web video remains paused for follow-up questions.");
+            FrameDescriptionText.Focus();
+        }
+        catch (OperationCanceledException)
+        {
+            ResumeWebVideoButton.IsEnabled = true;
+            SetStatus("Web video frame request canceled. The video may remain paused; use Resume web video or the page's own controls.");
+        }
+        catch (WebVideoFrameException exception)
+        {
+            ResumeWebVideoButton.IsEnabled = exception.Code is not (
+                "local_vision_model_not_selected" or
+                "web_video_missing" or
+                "web_video_question_invalid" or
+                "web_video_page_unsupported" or
+                "web_video_page_changed");
+            SetStatus(WebVideoFailureMessage(exception.Code));
+        }
+        catch
+        {
+            ResumeWebVideoButton.IsEnabled = true;
+            SetStatus("Web video frame request failed safely without exposing page or model diagnostics. The video may remain paused.");
+        }
+        finally
+        {
+            AskWebVideoFrameButton.IsEnabled = true;
+        }
+    }
+
+    private async void OnResumeWebVideoClick(object sender, RoutedEventArgs e)
+    {
+        if (WebVideoResumeRequested is null) return;
+        ResumeWebVideoButton.IsEnabled = false;
+        try
+        {
+            await WebVideoResumeRequested(CancellationToken.None);
+            SetStatus("Web video resumed after explicit user action.");
+        }
+        catch (WebVideoFrameException exception)
+        {
+            SetStatus(WebVideoFailureMessage(exception.Code));
+        }
+        catch
+        {
+            SetStatus("Web video resume failed safely. Use the page's own accessible playback control.");
+        }
+    }
+
+    private static string WebVideoFailureMessage(string code) => code switch
+    {
+        "local_vision_model_not_selected" =>
+            "No local vision model is selected. Open Local models, review an exact digest and license, then approve a vision model.",
+        "web_video_missing" =>
+            "No ready, visible HTML5 video was found in the active browser page. Embedded, live, protected, or provider-controlled players may not support this feature.",
+        "web_video_question_invalid" =>
+            "The frame question is outside the readable 500-character limit.",
+        "web_video_page_changed" =>
+            "The browser page changed, so DCx discarded the frame operation. Start a new request on the current page.",
+        "web_video_capture_unavailable" or "web_video_capture_invalid" =>
+            "The current web video cannot be captured safely. Protected or provider-controlled playback may remain unavailable.",
+        "web_video_capture_storage_failed" =>
+            "The paused web frame could not be held in private temporary storage and was not sent to the model.",
+        "web_video_model_binding_invalid" =>
+            "The approved local vision-model binding changed or is invalid. Review and approve the exact installed model again.",
+        "web_video_model_failed" =>
+            "The approved local vision model could not answer this web-frame question. The video remains paused.",
+        "web_video_processing_failed" =>
+            "The bounded web-frame processing pipeline failed closed. The video may remain paused.",
+        "web_video_resume_blocked" or "web_video_resume_unavailable" =>
+            "The page did not allow programmatic resume. Use the page's own accessible playback control.",
+        _ => "The web video frame operation was blocked safely. The video may remain paused.",
+    };
 
     private void SetStatus(string message) => ContentStatusText.Text = message;
 }

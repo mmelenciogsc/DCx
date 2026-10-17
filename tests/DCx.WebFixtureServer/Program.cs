@@ -9,6 +9,16 @@ var portArgument = args
 var port = portArgument.value is not null && portArgument.index + 1 < args.Length
     ? int.Parse(args[portArgument.index + 1], System.Globalization.CultureInfo.InvariantCulture)
     : 43187;
+var mediaArgument = args
+    .Select((value, index) => (value, index))
+    .FirstOrDefault(item => string.Equals(item.value, "--media", StringComparison.Ordinal));
+var mediaPath = mediaArgument.value is not null && mediaArgument.index + 1 < args.Length
+    ? Path.GetFullPath(args[mediaArgument.index + 1])
+    : null;
+if (mediaPath is not null && !File.Exists(mediaPath))
+{
+    throw new FileNotFoundException("The optional web-video fixture does not exist.", mediaPath);
+}
 builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
 
 var app = builder.Build();
@@ -40,6 +50,27 @@ app.MapGet("/download", () => Results.File(
     Encoding.UTF8.GetBytes("DCx controlled download fixture.\n"),
     "text/plain",
     "dcx-fixture.txt"));
+app.MapGet("/web-video", () => mediaPath is null
+    ? Results.NotFound()
+    : Results.Content(
+        """
+        <!doctype html>
+        <html lang="en">
+        <head><meta charset="utf-8"><title>Accessible web video fixture</title></head>
+        <body style="margin:0;background:#fff">
+          <main>
+            <h1>Accessible web video fixture</h1>
+            <video id="fixture-video" controls autoplay muted loop width="640" height="360"
+                   aria-label="Solid blue deterministic web video" src="/media-fixture.mp4"></video>
+            <p id="video-status" role="status" aria-live="polite">The deterministic web video is ready for a local frame question.</p>
+          </main>
+        </body>
+        </html>
+        """,
+        "text/html; charset=utf-8"));
+app.MapGet("/media-fixture.mp4", () => mediaPath is null
+    ? Results.NotFound()
+    : Results.File(mediaPath, "video/mp4", enableRangeProcessing: true));
 app.MapGet("/social-login", () => Results.Content(
     """
     <!doctype html>

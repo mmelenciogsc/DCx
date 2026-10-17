@@ -8,7 +8,7 @@ $manifestPath = Join-Path $runRoot "fixture-scenarios.json"
 $scenarios = @(
     @{ name = "shared browser login handoff fixture"; script = "validate-p02.ps1" },
     @{ name = "external Windows application handoff fixture"; script = "validate-p03.ps1" },
-    @{ name = "document OCR export local media and YouTube handoff fixture"; script = "validate-p07.ps1" },
+    @{ name = "document OCR export and local or shared-viewport media frame Q&A fixture"; script = "validate-p07.ps1" },
     @{ name = "private CKB CCB search and tested reuse fixture"; script = "validate-p08.ps1" },
     @{ name = "signed global replica process simulation"; script = "validate-p09.ps1" },
     @{ name = "consent quarantine contribution and receipt fixture"; script = "validate-p10.ps1" },
@@ -21,7 +21,7 @@ New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 foreach ($scenario in $scenarios) {
     $started = Get-Date
     $path = Join-Path $PSScriptRoot $scenario.script
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $path
+    & pwsh.exe -NoProfile -ExecutionPolicy Bypass -File $path
     if ($LASTEXITCODE -ne 0) { throw "P12 scenario failed: $($scenario.name)." }
     $results += [ordered]@{
         name = $scenario.name
@@ -37,7 +37,7 @@ $manifest = [ordered]@{
     blocked_scenarios = @(
         "live Facebook authenticated search and human acceptance",
         "real QuickBooks sandbox OAuth and API retrieval",
-        "YouTube frame capture and Q&A beyond safe browser handoff",
+        "live YouTube provider playback/frame-Q&A and human acceptance",
         "approved package installer execution",
         "Docker Compose global-service run",
         "real PayPal sandbox subscription webhook and payout reconciliation"

@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Net.Http;
+using DCx.Core.Content;
 using DCx.Core.LocalModels;
 
 namespace DCx.Desktop.Media;
@@ -14,16 +14,22 @@ public sealed class MediaFrameDescriptionService
         string model,
         string modelDigest,
         string modelLicenseSha256,
+        string? question,
         CancellationToken cancellationToken = default)
     {
         var ffmpeg = FindExecutable("ffmpeg.exe")
             ?? throw new InvalidOperationException("FFmpeg is unavailable on the Windows PATH.");
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
-        var tempRoot = Path.Combine(Path.GetTempPath(), "DCx", "frames");
-        Directory.CreateDirectory(tempRoot);
-        var framePath = Path.Combine(tempRoot, $"frame-{Guid.NewGuid():N}.png");
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"DCx-local-video-frame-{Guid.NewGuid():N}");
+        var framePath = Path.Combine(tempRoot, "paused-frame.png");
         try
         {
+            Directory.CreateDirectory(tempRoot);
+            if ((File.GetAttributes(tempRoot) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException("Private frame storage is unsafe.");
+            }
+
             var startInfo = new ProcessStartInfo
             {
                 FileName = ffmpeg,
@@ -53,23 +59,41 @@ public sealed class MediaFrameDescriptionService
                 if (!process.HasExited) process.Kill(entireProcessTree: true);
                 throw;
             }
+            _ = await errorTask;
             if (process.ExitCode != 0 || !File.Exists(framePath))
-                throw new InvalidOperationException($"Frame extraction failed. {await errorTask}");
+                throw new InvalidOperationException("Frame extraction failed without retaining process diagnostics.");
+
+            var prompt = new MediaFrameQuestionPolicy().Evaluate(question);
+            if (!prompt.IsAllowed) throw new ArgumentException(prompt.Reason, nameof(question));
 
             using var ollama = new OllamaLocalClient(
                 new Uri("http://localhost:11434/"),
                 TimeSpan.FromMinutes(3));
+            await using var readLease = new FileStream(
+                framePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                4096,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
             return await ollama.DescribeImagePinnedAsync(
                 model,
                 modelDigest,
                 modelLicenseSha256,
                 framePath,
-                "Directly describe this paused video frame in one concise sentence. Mention meaningful subjects, action, setting, and text. Do not begin with 'the image' or 'the scene'.",
+                prompt.Prompt,
                 cancellationToken);
         }
         finally
         {
-            if (File.Exists(framePath)) File.Delete(framePath);
+            try
+            {
+                if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, recursive: true);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // The private random frame is best-effort cleanup; no path or process output is surfaced.
+            }
         }
     }
 

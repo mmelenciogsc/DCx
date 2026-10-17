@@ -16,6 +16,11 @@ $audioFixture = Join-Path $runRoot "audio-fixture.wav"
 $scanImage = Join-Path $runRoot "scanned-source.png"
 $pdfFixture = Join-Path $runRoot "scanned-source.pdf"
 $exportRoot = Join-Path $runRoot "exports"
+$webFixtureServer = Join-Path $repoRoot "tests\DCx.WebFixtureServer\bin\Release\net10.0\DCx.WebFixtureServer.dll"
+$webServerProcess = $null
+$webServerOutputTask = $null
+$webServerErrorTask = $null
+$process = $null
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -45,6 +50,15 @@ function Find-ById($root, [string]$automationId) {
     return $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
+function Get-EphemeralPort {
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    try {
+        $listener.Start()
+        return ([Net.IPEndPoint]$listener.LocalEndpoint).Port
+    }
+    finally { $listener.Stop() }
+}
+
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 [IO.File]::WriteAllText($textFixture, "Accessible fixture line one.`r`nSecond line.")
 & $ffmpeg -hide_banner -loglevel error -f lavfi -i "color=c=blue:s=320x180:d=1" -c:v libx264 -pix_fmt yuv420p -y $videoFixture
@@ -67,6 +81,31 @@ finally {
 }
 & $magick $scanImage $pdfFixture
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $pdfFixture)) { throw "ImageMagick could not create the scanned PDF fixture." }
+
+$webPort = Get-EphemeralPort
+$webOrigin = "http://127.0.0.1:$webPort/"
+$serverStart = [Diagnostics.ProcessStartInfo]::new("dotnet")
+$serverStart.UseShellExecute = $false
+$serverStart.CreateNoWindow = $true
+$serverStart.RedirectStandardOutput = $true
+$serverStart.RedirectStandardError = $true
+$null = $serverStart.ArgumentList.Add($webFixtureServer)
+$null = $serverStart.ArgumentList.Add("--port")
+$null = $serverStart.ArgumentList.Add($webPort.ToString([Globalization.CultureInfo]::InvariantCulture))
+$null = $serverStart.ArgumentList.Add("--media")
+$null = $serverStart.ArgumentList.Add($videoFixture)
+$webServerProcess = [Diagnostics.Process]::Start($serverStart)
+if ($null -eq $webServerProcess) { throw "The local web-video fixture server did not start." }
+$webServerOutputTask = $webServerProcess.StandardOutput.ReadToEndAsync()
+$webServerErrorTask = $webServerProcess.StandardError.ReadToEndAsync()
+$null = Wait-For {
+    try {
+        $health = Invoke-WebRequest -UseBasicParsing -Uri ([Uri]::new([Uri]$webOrigin, "health")) `
+            -TimeoutSec 2 -NoProxy -MaximumRedirection 0
+        return $health.StatusCode -eq 200 -and $health.Content -eq "ok"
+    }
+    catch { return $false }
+} "The local web-video fixture server did not become healthy."
 
 $env:DCX_REPO_ROOT = $repoRoot
 $env:DCX_DATA_ROOT = Join-Path $runRoot "data"
@@ -235,6 +274,45 @@ try {
         $tabs.FindAll([System.Windows.Automation.TreeScope]::Children, $tabCondition).Count -ge 2
     } "The YouTube handoff did not create a shared-browser tab."
 
+    $address.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue(
+        ([Uri]::new([Uri]$webOrigin, "web-video")).AbsoluteUri)
+    (Find-ById $mainWindow "GoButton").GetCurrentPattern(
+        [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $address.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq
+            ([Uri]::new([Uri]$webOrigin, "web-video")).AbsoluteUri
+    } "The deterministic web-video fixture did not load in the shared browser."
+    Start-Sleep -Milliseconds 750
+    $frameQuestion = Find-ById $viewer "FrameQuestionBox"
+    $frameQuestion.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue(
+        "What color fills the paused video?")
+    $askWebVideo = Find-ById $viewer "AskWebVideoFrameButton"
+    $resumeWebVideo = Find-ById $viewer "ResumeWebVideoButton"
+    if ($resumeWebVideo.Current.IsEnabled) {
+        throw "Web-video resume was enabled before DCx paused a video."
+    }
+    $askWebVideo.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    try {
+        $null = Wait-For {
+            $status.Current.Name -like "Web video frame answer complete at *video remains paused*"
+        } "The bounded shared-viewport web-video frame question did not complete." 300
+    }
+    catch {
+        throw "The bounded shared-viewport web-video frame question did not complete. Status=$($status.Current.Name)"
+    }
+    $webFrameAnswer = Wait-For {
+        $candidate = Find-ById $viewer "FrameDescriptionText"
+        if ($null -ne $candidate -and [string]$candidate.Current.Name -match "(?i)blue") { $candidate }
+    } "The web-video frame answer did not identify the solid blue fixture." 30
+    $webFrameAnswerValue = [string]$webFrameAnswer.Current.Name
+    if (-not $resumeWebVideo.Current.IsEnabled) {
+        throw "Explicit web-video resume did not enable after the paused-frame answer."
+    }
+    $resumeWebVideo.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $status.Current.Name -eq "Web video resumed after explicit user action."
+    } "The web video did not resume after explicit user action."
+
     $filePath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($pdfFixture)
     (Find-ById $viewer "OpenFileButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $wizard = Wait-For { Find-WindowByProcessAndId $process.Id "ScannedPdfWizardWindow" } "The scanned PDF wizard did not open."
@@ -302,6 +380,9 @@ try {
     "Local PNG viewer=PASS"
     "Lookalike YouTube host blocked=True"
     "Canonical YouTube handoff tab=True"
+    "Shared-viewport web-video visible-rectangle Q&A=$webFrameAnswerValue"
+    "Web video remains paused for follow-up=True"
+    "Explicit web-video resume=PASS"
     "Windows OCR golden text=True"
     "Normalized OCR geometry=True"
     "Accessible semantic repair=PASS"
@@ -311,11 +392,19 @@ try {
     "P07 content viewer UIA validation=PASS"
 }
 finally {
-    if (-not $process.HasExited) {
+    if ($null -ne $process -and -not $process.HasExited) {
         $null = $process.CloseMainWindow()
         if (-not $process.WaitForExit(5000)) { $process.Kill() }
     }
     $env:DCX_REPO_ROOT = $previousRepoRoot
     $env:DCX_DATA_ROOT = $previousDataRoot
     $env:DCX_EXPORT_ROOT = $previousExportRoot
+    if ($null -ne $webServerProcess -and -not $webServerProcess.HasExited) {
+        $webServerProcess.Kill($true)
+        $webServerProcess.WaitForExit()
+    }
+    if ($null -ne $webServerOutputTask -and $null -ne $webServerErrorTask) {
+        $null = $webServerOutputTask.GetAwaiter().GetResult()
+        $null = $webServerErrorTask.GetAwaiter().GetResult()
+    }
 }

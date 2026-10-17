@@ -268,16 +268,25 @@ public sealed class OllamaLocalClient : IDisposable
             await stream.ReadExactlyAsync(imageBytes, cancellationToken).ConfigureAwait(false);
         }
 
-        if (!HasSupportedImageSignature(imageBytes))
+        string image;
+        try
         {
-            throw new ArgumentException("The image must be PNG, JPEG or WebP data.", nameof(imagePath));
+            if (!HasSupportedImageSignature(imageBytes))
+            {
+                throw new ArgumentException("The image must be PNG, JPEG or WebP data.", nameof(imagePath));
+            }
+
+            await RequireBoundModelAsync(
+                model, expectedDigest, expectedLicenseSha256,
+                requireVision: true, requireEmbedding: false, cancellationToken).ConfigureAwait(false);
+
+            image = Convert.ToBase64String(imageBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(imageBytes);
         }
 
-        await RequireBoundModelAsync(
-            model, expectedDigest, expectedLicenseSha256,
-            requireVision: true, requireEmbedding: false, cancellationToken).ConfigureAwait(false);
-
-        var image = Convert.ToBase64String(imageBytes);
         var body = new
         {
             model,
