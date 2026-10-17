@@ -31,7 +31,6 @@ UI and adapters depend on stable contracts. Security policy is evaluated before 
 - `src/DCx.Desktop` — native Windows shell.
 - `src/DCx.Core` — provider-neutral policies and domain contracts.
 - `tests` — deterministic unit/integration/UI/security/accessibility tests.
-- `server` — added in P09 for the local simulated authoritative service.
+- `server/DCx.GlobalService` — P09 SQLite/Kestrel authoritative-service simulation; production deployment remains disabled.
 - `docs/progress` — phase evidence and blockers.
 - `DCx_Codex_Handoff_Kit` — authoritative product and gate definitions.
-

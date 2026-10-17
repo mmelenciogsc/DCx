@@ -15,8 +15,8 @@ DCx is under construction. It is not a validated release, installer, production 
 | P06 Local models | BLOCKED (partial implementation) | Existing Ollama/Qwen3-VL 4B local CUDA vision benchmark passes at `463bfb6`; selection/fallback tests pass. No Whisper backend or embedding model is installed/benchmarked, and download is not authorized. |
 | P07 Files/documents/media | Complete (automated native gate) | 74/74 tests and native UIA pass at `c618254`: local content/media, pause-frame-describe-resume, Office extraction, scanned-PDF OCR/geometry, semantic repair, HTML/DOCX exports, hostile-input denial and safe YouTube handoff. Human AT remains unverified; YouTube frame capture and transcription are not claimed. |
 | P08 Private CKB/CCB | Complete (automated local/native gate) | Embedded SQLite/FTS5 plus bounded vector retrieval, version/dependency schema, isolated profile stores, signed/digested artifacts, hostile ZIP rejection and tested BOSS CCB reuse pass in 79/79 full tests at `685ca5a`. |
-| P09 Global registry/sync | In progress (local simulation) | Local server/client contracts and signed-update simulation are active. Docker daemon access remains unavailable; real Ubuntu deployment is forbidden without approval. |
-| P10 Contributions/governance | Not started | No validated implementation. |
+| P09 Global registry/sync | BLOCKED (partial implementation) | At `1be3f9e`, 7/7 signed-sync tests and an actual loopback Kestrel/SQLite client pass: two clients, wrong-signature denial, resume, atomic activation, rollback, lazy artifacts and private isolation. Required Compose run is blocked by absent native Docker and denied WSL daemon/no Compose plugin. |
+| P10 Contributions/governance | In progress (local quarantine simulation) | Unchecked consent, item preview, scanners, attestations, quarantine and receipt contracts are active work; no upload path is yet claimed. |
 | P11 PayPal/CARE | Not started | Sandbox only when implemented; live payouts disabled and eligibility unverified. |
 | P12 Full vertical E2E | Not started | No validated implementation. |
 | P13 Packaging/security/reliability | Not started | No installer or signing identity. |

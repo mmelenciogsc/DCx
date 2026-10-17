@@ -64,6 +64,16 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - Artifact packages are data, not executable authority. Only a host-registered adapter with matching identity/digest and passing bounded fixtures becomes a BOSS capability; package code is not dynamically loaded.
 - FTS input is tokenized into a bounded parameterized expression. All relational writes and queries use parameters rather than concatenated user content.
 
+## Implemented global-replica controls through partial P09
+
+- Every canonical release is ECDSA-signed and binds its sequence, previous signed-release SHA-256 and resulting canonical-catalog SHA-256.
+- Clients stage bounded chunks, preserve interrupted partials, verify descriptor digest/signature/chain/result, write immutable generation files and atomically replace only the active pointer.
+- Wrong signatures and conflicting sequences fail before activation. Prior signed generations support explicit rollback; hardware-backed anti-rollback is not claimed.
+- Global replicas are keyed by trust-root hash under a separate `global` directory and never receive a private-store handle. Two-client tests preserve a private sentinel.
+- Artifact metadata is signed with the catalog. Bodies remain lazy, content-addressed and size/digest verified; authoritative publication rejects missing artifact records.
+- The HTTP client requires HTTPS except for literal loopback HTTP. The simulation server refuses startup without its explicit simulation flag, data root and external key file.
+- Container context excludes secrets and runtime data; the Compose definition is read-only/non-root/no-new-privileges. It remains unexecuted because Docker access is blocked.
+
 ## Security gate policy
 
 Security tests must cover denial paths as well as successful paths. A mock or sandbox pass proves only that path. Production OpenAI/PayPal eligibility, code signing, legal review, external penetration testing, and the Ubuntu production deployment remain explicit blockers until separately evidenced.

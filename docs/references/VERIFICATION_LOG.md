@@ -26,5 +26,7 @@ Checked 2026-10-17 from the development host.
 | SQLite documentation | https://www.sqlite.org/docs.html | HTTP 200; selected as the embedded transactional metadata/FTS5 engine for the per-profile private store. |
 | Microsoft.Data.Sqlite package | https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlite/index.json | Latest stable observed for the .NET 10 line: 10.0.13; pinned with NuGet content hash. Package metadata identifies Microsoft, the dotnet repository commit `4099f83977f4d29604a9aeb971fb0a7bc1d5f699`, and MIT. |
 | SQLitePCLRaw transitive packages | https://api.nuget.org/v3-flatcontainer/sqlitepclraw.bundle_e_sqlite3/2.1.13/sqlitepclraw.bundle_e_sqlite3.nuspec | Bundled engine/core/provider packages resolve to 2.1.13; official NuGet metadata reports Apache-2.0. Exact package hashes are locked per project. |
+| Docker Compose | https://docs.docker.com/compose/ | HTTP 200. A hardened local simulation file is present, but neither native Windows Docker nor a WSL Compose plugin/authorized daemon is available, so it has not been executed. |
+| ASP.NET Core minimal APIs | https://learn.microsoft.com/en-us/aspnet/core/fundamentals/minimal-apis | HTTP 200; used for the loopback read-only global-registry simulation endpoint. |
 
 The remaining supplied official references are verified immediately before their associated integration phase. An HTTP success alone never proves account entitlement, commercial authorization, licensing suitability, or API availability.
