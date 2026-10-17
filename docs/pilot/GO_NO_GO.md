@@ -15,3 +15,5 @@ All seven current critical/major issues are triaged to owner roles with evidence
 | P14 policies/provider approvals | Critical | Owner, legal and compliance | Approve privacy, terms, CARE and distribution policy |
 
 Passing local fixtures, deterministic staging and 100% triage do not make the product releasable. A future `GO` additionally requires every critical/major disposition to be validated and explicit production-activation approval.
+
+The native readiness dashboard is a read-only local view of this same blocker policy. It has no activation, enrollment, telemetry, publishing or payment control and is not a pilot administration console.

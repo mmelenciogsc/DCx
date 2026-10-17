@@ -1,7 +1,7 @@
 # P14 — Pilot and release readiness
 
 - Status: BLOCKED / NO_GO (local readiness controls pass; pilot and production activation are off)
-- Implementation commits: `01539fd`, `66715b0`
+- Implementation commits: `01539fd`, `66715b0`, `edd516a`
 - Documentation commit: recorded by the commit containing this file
 
 No pilot was started, no telemetry was collected, no user was enrolled, and no production service or payment was activated.
@@ -17,6 +17,8 @@ No pilot was started, no telemetry was collected, no user was enrolled, and no p
 - Consent notice versions cannot roll back. Opt-out atomically disables recording and purges existing local aggregates.
 - Atomic JSON readiness report utility and native validation script.
 - Seven current critical/major blockers are assigned to owner roles with next actions and evidence.
+- Native keyboard- and UIA-accessible read-only readiness dashboard launched from the main window or with `DCx.exe --readiness`.
+- The JSON report and native dashboard consume the same immutable current-readiness policy, preventing blocker-list drift. The dashboard exposes no production-activation action.
 - Pilot and incident-response runbooks describe opt-in, stop conditions, data minimization, escalation and rollback.
 
 ## Reproduction
@@ -29,19 +31,27 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-
 ## Measured result
 
 - Locked Release build: 0 warnings, 0 errors.
-- P14 release/readiness tests: passed 13, failed 0, skipped 0; about 1 second.
-- Current expanded full suite: passed 145, failed 0, skipped 0; about 1 second.
+- P14 release/readiness tests: passed 14, failed 0, skipped 0; about 1 second.
+- Current expanded full suite: passed 146, failed 0, skipped 0; about 1 second.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
 - Production activation approved: false.
 - Decision: `NO_GO`.
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
-- Evidence: `artifacts/test-results/p14-f9bce781497f4034b1797d4ab28889c5/go-no-go.json` (generated and intentionally not committed).
+- Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled consent state, blocker list, metric-definition list and refresh action. The validator confirmed that no control named `Activate production` exists.
+- Evidence: `artifacts/test-results/p14-e72be5b1edb9457789270ce65511b507/go-no-go.json` (generated and intentionally not committed).
+
+## Changed files in the latest milestone
+
+- Shared policy and tests: `src/DCx.Core/Release/ReleaseReadiness.cs`, `tests/DCx.Core.Tests/Release/ReleaseReadinessTests.cs`, `tests/DCx.ReadinessReport/Program.cs`.
+- Native accessible UI: `src/DCx.Desktop/ReadinessWindow.xaml`, `src/DCx.Desktop/ReadinessWindow.xaml.cs`, `src/DCx.Desktop/App.xaml.cs`, `src/DCx.Desktop/MainWindow.xaml`, `src/DCx.Desktop/MainWindow.xaml.cs`.
+- Reproducible UIA gate: `scripts/validate-p14.ps1`.
+- Windows fixture cleanup was separately stabilized in `1c06d97`; three consecutive no-build full-suite runs and the final clean CI run each passed 146/146.
 
 ## Blockers
 
 - P06 transcription/embedding backend gate, P09 Compose gate, P10 hostile CCB sandbox, P11 PayPal sandbox/eligibility, P12 live/human acceptance and P13 signed installer/security/human-AT gates are unresolved.
 - Privacy notice, terms, CARE/commission policy, provider distribution approvals and legal/compliance review are not approved.
-- No pilot admin console, enrollment system, approved accessible consent/withdrawal UI, network metric transport, support staffing or incident exercise exists. The local versioned consent record and aggregate store are not wired to product event collection.
+- The readiness dashboard is local and read-only; it is not a pilot admin console. No enrollment system, approved accessible consent/withdrawal UI, network metric transport, support staffing or incident exercise exists. The local versioned consent record and aggregate store are not wired to product event collection.
 - A staged pilot requires explicit owner approval after blocker closure. Production activation remains off by construction in this report.

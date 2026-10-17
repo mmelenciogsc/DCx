@@ -2,6 +2,8 @@
 
 Status: draft only. The current automated decision is `NO_GO`; no pilot enrollment or telemetry collection is authorized.
 
+The implemented native readiness dashboard is read-only and consumes the same blocker policy as the JSON report. It cannot activate a pilot or production, enroll a participant, collect or transmit an event, publish content or initiate a payment.
+
 ## Entry conditions
 
 - Signed package install/update/uninstall and rollback pass on clean Windows 11 VMs.
