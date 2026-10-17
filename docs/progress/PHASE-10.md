@@ -1,7 +1,7 @@
 # P10 — Contributions, governance and provenance
 
 - Status: BLOCKED (authenticated local-simulation preparation/intake/review and server-side CCB hostile-code policy pass; production publication remains unavailable)
-- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`, `f417f6e`, `0fc2649`, `bbadbca`, `e13246b`, `bdfd922`, `e93cd0d`
+- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`, `f417f6e`, `0fc2649`, `bbadbca`, `e13246b`, `bdfd922`, `e93cd0d`, `068638c`
 - Documentation commit: recorded by the commit containing this file
 
 No contribution was sent externally or published to a production catalog.
@@ -9,6 +9,8 @@ No contribution was sent externally or published to a production catalog.
 ## Implemented
 
 - Accessible Windows contribution-review surface with global preparation opt-in initially unchecked, three unchecked attestations, unchecked digest-bound item approval, disabled preparation action and explicit no-network-by-default status.
+- The native surface supports CKB metadata or one explicitly selected schema-v2 CCB ZIP. CCB admission reads a bounded regular non-reparse file as an exact snapshot without write/delete sharing, validates the closed package, derives manifest identity/version/license and SHA-256, clears the full path, and exposes only its base name plus every admitted textual component/test input for review.
+- The client scan covers the contribution body and complete admitted CCB review text. Candidate metadata and digest must continue to match the snapshot at review, approval, preparation and transport. Confirmed intake/status zeroes the owned byte array and removes the review text; indeterminate results retain the original bytes only for bound-origin reconciliation. Candidate identity is locked for an uncertain or accepted nonterminal lifecycle.
 - Editing the item clears review, approval and its prepared object. Prepared items always begin in local quarantine. Distinct initially unchecked approvals cover exact-item send, minimized status query and approved-item withdrawal on one bound literal-loopback simulation origin; none is a remote upload, reviewer approval or publication action.
 - Canonical item digest covers body digest, resource identity/version, source, license, contributor pseudonym, artifact digest, capabilities and derivative credits.
 - Client and authoritative rescans for common private keys/API credentials, email/phone/government ID, suspicious shell patterns, dummy/empty material, size, license and artifact-policy findings. Finding records contain codes, never matched values.
@@ -56,22 +58,23 @@ No contribution was sent externally or published to a production catalog.
 
 ```bash
 cd /mnt/d/DCx
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p10.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p10.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 ```
 
 ## Measured result
 
-- Locked native Release build: 0 warnings, 0 errors; 4.73 seconds in the recorded dedicated run.
-- P10 exact-namespace tests: passed 49, failed 0, skipped 0; about 8 seconds, with exact counters parsed from retained TRX.
-- Current full suite: passed 220, failed 0, skipped 0; about 8 seconds.
+- Locked native Release build: 0 warnings, 0 errors; 2.32 seconds in the recorded dedicated run.
+- P10 exact-namespace tests: passed 52, failed 0, skipped 0; about 8 seconds, with exact counters parsed from retained TRX.
+- Current full suite: passed 223, failed 0, skipped 0; about 7 seconds.
 - Eligible CKB item: quarantined, absent from catalog before review, approved into a signed release, synchronized by a client, then withdrawn/deprecated.
 - Secret/PII/dummy item: remained quarantined and reviewer publication failed closed.
 - Receipt: one qualified event; replay, contributor self-use and invalid integrity excluded.
 - Native UIA: preparation consent, attestations, item approval, send approval, status approval and withdrawal approval all began unchecked; actions began disabled and the no-network-without-action-approval state was accessible. The exact item entered quarantine, cross-origin reconciliation was denied locally, minimized status reported reviewer-approved release 1 without the body, and a fresh withdrawal approval created local deprecation release 2. Each token/approval reset.
+- Native CCB UIA: type selection exposed the package controls; exact schema-v2 text, manifest identity/version and path-clearing status were accessible; the selected full path was absent after admission. The separately approved send placed the exact bytes in `Quarantined`, cleared local bytes/review text, locked candidate identity and reconciled minimized status without a body. No reviewer approval or publication was attempted.
 - WSL-hosted Ubuntu local simulation: Bubblewrap 0.6.1 SHA-256 `bf6cf3d4456665f5d80c14eb79a76e0ce87b39a0883e614a161658b4ec33492c`; static BusyBox SHA-256 `b3c1009e1b5c927e537487c80639cdf404f69e3eb49371d9be5d841672be3ff9`.
 - Benign transformation passed. Host/repository and `/etc`/`/usr` reads, an external network request, root write, inherited secret environment, outside-quarantine workspace, symlink, workspace-digest substitution, timeout and output overflow were denied.
-- Latest combined P10 evidence: `artifacts/test-results/p10-1f2247005d5d4300a9a84373b2a2ed82/`, including `p10-contributions.trx` and `sandbox-evidence.json` (generated and intentionally not committed).
+- Latest combined P10 evidence: `artifacts/test-results/p10-1196af664b5b4e84aba9260a328831a2/`, including `p10-contributions.trx`, `uia-ccb-package.zip` and `sandbox-evidence.json` (generated and intentionally not committed).
 - Post-run scanning found neither ephemeral bearer token in server diagnostics, application data or retained P10 evidence.
 - Schema-v2 success path executed two declared tests, persisted two passing evidence rows, published the exact artifact into a signed release, synchronized it to a separate global replica and lazily retrieved byte-identical content.
 - Denial coverage includes missing executor, package/digest/metadata mismatch, undeclared files/fields, invalid UTF-8/base64/null input, malicious entrypoint or test-input text, expected-output mismatch and post-intake quarantine tampering.
@@ -91,16 +94,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 ## Changed files in the latest milestone
 
-- Hardened intake/status/withdrawal client and buffer clearing: `src/DCx.Core/Contributions/ContributionSubmissionClient.cs`, `src/DCx.Core/Contributions/ContributionTransportCodec.cs`.
-- Minimized owner API responses and request-buffer clearing: `server/DCx.GlobalService/SimulationContributionApi.cs`.
-- Accessible, separately approved lifecycle UI: `src/DCx.Desktop/ContributionsWindow.xaml`, `src/DCx.Desktop/ContributionsWindow.xaml.cs`.
-- Strict binding, malformed response, cancellation and real Kestrel coverage: `tests/DCx.Core.Tests/Contributions/ContributionSubmissionClientTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionApiE2eTests.cs`.
-- Exact-counter, hostile-sandbox, complete native UIA lifecycle and token non-retention gate: `scripts/validate-p10.ps1`.
+- Path-private exact-snapshot admission and owned-byte clearing: `src/DCx.Core/Contributions/ContributionArtifactSelectionService.cs`.
+- Accessible CKB/CCB selection, complete review and exact-byte lifecycle: `src/DCx.Desktop/ContributionsWindow.xaml`, `src/DCx.Desktop/ContributionsWindow.xaml.cs`.
+- Missing/directory/oversize/reparse/malformed/cancellation and zeroing coverage: `tests/DCx.Core.Tests/Contributions/ContributionArtifactSelectionServiceTests.cs`.
+- Real native CKB plus CCB lifecycle, full-path non-retention and token scan: `scripts/validate-p10.ps1`.
 
 ## Blocker and limits
 
 - The new API is a loopback/container simulation using static hash-configured bearer roles. Its limiter is in-memory, resets on restart, partitions the direct peer rather than trusted-proxy identity, and is neither shared nor coordinated across nodes. It is not a production identity/ingress system: there is no TLS termination, OAuth/OIDC or mTLS identity, credential rotation/revocation lifecycle, distributed ingress throttling, public ingress policy, administrative audit surface or account recovery.
-- The Windows client can submit, reconcile and withdraw only against one bound root HTTP origin on a literal loopback IP. It cannot target a remote/global service, perform reviewer approval or directly publish. Withdrawal can deprecate only an already reviewer-approved item in the same local simulation. The UI sends CKB metadata/body and exposes no artifact picker; production contribution transport still requires an approved deployment, production identity design and accessible human review flow.
+- The Windows client can submit, reconcile and withdraw only against one bound root HTTP origin on a literal loopback IP. It cannot target a remote/global service, perform reviewer approval or directly publish. Withdrawal can deprecate only an already reviewer-approved item in the same local simulation. Its CCB picker admits one exact package into local simulation quarantine; it does not browse the private store, execute the package, authorize authoritative review or make that artifact global. Production contribution transport still requires an approved deployment, production identity design and human accessibility/privacy review.
 - The current runtime profile accepts only exact, bounded BusyBox-shell packages with a two-component closed SBOM. It has no language-specific reproducible builder images or general dependency-lock resolver.
 - This local WSL run is development evidence, not execution on the owner's Ubuntu 24.04 server. WSL is not and will not be an end-user requirement.
 - The prototype has no seccomp syscall profile, cgroup-v2 enforcement, immutable OCI/base-image digest, service-account deployment hardening, kernel/LTS policy, production monitoring or independent penetration test. Bubblewrap itself explicitly requires the caller to define a complete policy; this milestone does not claim production-grade hostile isolation.

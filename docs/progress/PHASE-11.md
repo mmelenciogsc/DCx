@@ -36,7 +36,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - Locked Release build: 0 warnings, 0 errors.
 - P11 exact-namespace tests: passed 18, failed 0, skipped 0; 1,484 ms in the recorded TRX run.
 - P11 evidence: `artifacts/test-results/p11-7c1b71dc47cb433eb90f84daaadb5523/p11-finance.trx` (generated and intentionally not committed).
-- Current full suite: passed 220, failed 0, skipped 0; about 8 seconds.
+- Current full suite: passed 223, failed 0, skipped 0; about 7 seconds.
 - Payment, refund, entitlement, balanced-entry and payout state survive repository reopen.
 - Exact event/transmission/content replay is idempotent after restart; reuse of either identifier with conflicting content fails closed. A rejected invalid event does not consume replay identifiers.
 - A stale or equal-time activation cannot undo a newer/equal-time deactivation across reopen. Stale refund accounting still posts and reconciles independently without regressing newer entitlement state.

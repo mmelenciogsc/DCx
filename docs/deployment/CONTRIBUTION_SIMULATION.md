@@ -30,18 +30,19 @@ This is process-local simulation protection. State resets on restart, is not syn
 
 The native **Contributions** window can connect only to a root `http` origin on a literal loopback IP, such as `http://127.0.0.1:5087/`. Host names such as `localhost`, paths, HTTPS, remote addresses, user information, query strings and fragments are rejected. The client uses only intake, exact-item status and owner-withdrawal routes; redirects, cookies, proxies and decompression are disabled.
 
-1. Keep **Prepare contributions for review** unchecked unless preparing a deliberate fixture.
-2. Enter and review one CKB candidate, complete all three attestations, approve the exact item and prepare it locally.
-3. Confirm **Approve sending this exact prepared contribution to the loopback simulation now** is still unchecked.
-4. Enter the simulation's matching contributor pseudonym, literal-loopback origin and one-attempt contributor token.
-5. Check the separate send approval and invoke **Send to local simulation**.
-6. Treat `Quarantined` only as intake confirmation. It is not reviewer approval or publication. The password control and send approval clear after the attempt.
-7. For an uncertain result or later state, re-enter the token, check the separate status approval and invoke **Query simulation status**. Status contains bounded lifecycle metadata only, never the contribution body.
-8. Do not retry intake unless the original bound origin reports `submission_missing`. Changing the endpoint cannot bypass this origin binding.
-9. Reviewer approval remains a separate server role with no contributor-UI control. After a status query reports `Approved`, withdrawal becomes available but remains unchecked.
-10. To test deprecation, re-enter the token, check the separate withdrawal approval and invoke **Withdraw from simulation**. Confirm the resulting `Withdrawn` state and release sequence.
+1. Keep **Enable local contribution preparation** unchecked unless preparing a deliberate fixture.
+2. Choose CKB and enter one metadata/body candidate, or choose CCB and explicitly browse/load one generated schema-v2 ZIP. For CCB, confirm the full path clears, review every admitted textual component, and verify the manifest identity/version/license shown in the candidate fields.
+3. Review/scan the exact candidate, complete all three attestations, approve the exact item and prepare it locally.
+4. Confirm **Approve sending this exact prepared contribution to the loopback simulation now** is still unchecked.
+5. Enter the simulation's matching contributor pseudonym, literal-loopback origin and one-attempt contributor token.
+6. Check the separate send approval and invoke **Send to local simulation**.
+7. Treat `Quarantined` only as intake confirmation. It is not reviewer approval or publication. The password control and send approval clear after the attempt. Confirm accepted CCB review text clears and candidate identity remains locked.
+8. For an uncertain result or later state, re-enter the token, check the separate status approval and invoke **Query simulation status**. Status contains bounded lifecycle metadata only, never the contribution body.
+9. Do not retry intake unless the original bound origin reports `submission_missing`. Changing the endpoint cannot bypass this origin binding. If confirmed CCB bytes were already cleared, missing status requires complete reselection, review and preparation.
+10. Reviewer approval remains a separate server role with no contributor-UI control. After a status query reports `Approved`, withdrawal becomes available but remains unchecked.
+11. To test deprecation, re-enter the token, check the separate withdrawal approval and invoke **Withdraw from simulation**. Confirm the resulting `Withdrawn` state and release sequence.
 
-The UI has no artifact picker, reviewer-approval action or remote/global endpoint mode. Use only generated fixture credentials. Cancellation may occur after the server accepted a state-changing request; reconcile status before another action. Every password value and action approval clears after the attempt.
+The CCB picker handles one explicit package; it does not enumerate the private store, execute code or authorize reviewer approval. The UI has no reviewer-approval action or remote/global endpoint mode. Use only generated fixture credentials. Cancellation may occur after the server accepted a state-changing request; reconcile status before another action. Every password value and action approval clears after the attempt.
 
 ## Optional publication worker
 

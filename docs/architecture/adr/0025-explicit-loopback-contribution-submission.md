@@ -13,7 +13,7 @@ Permit the Windows UI to send only its in-memory exact prepared object, only aft
 
 Use a hardened client with a fixed intake path, bounded connect/overall/body limits, no redirect, cookie, proxy or decompression behavior, exact response-origin checks and strict JSON with unknown-field rejection. Accept a bounded printable bearer token through a password control for one attempt, clear the control afterward, never persist or log it and zero the encoded envelope bytes after transport. Cancellation reports indeterminate acceptance and requires server reconciliation before retry.
 
-Do not expose remote origins, artifacts, reviewer operations, withdrawal or publication through this intake client. ADR 0026 later adds minimized owner status and separately approved withdrawal on the same literal-loopback simulation boundary; it does not add reviewer or remote/global authority. Production contribution transport requires a new decision covering approved identity, TLS ingress, credential lifecycle, abuse controls, accessible review, privacy/legal policy and authoritative deployment.
+Do not expose remote origins, artifacts, reviewer operations, withdrawal or publication through this intake client. ADR 0026 later adds minimized owner status and separately approved withdrawal on the same literal-loopback simulation boundary. ADR 0027 later adds one path-private, exact-snapshot CCB artifact review/intake flow. Neither later decision adds reviewer or remote/global authority. Production contribution transport requires a new decision covering approved identity, TLS ingress, credential lifecycle, abuse controls, accessible review, privacy/legal policy and authoritative deployment.
 
 ## Consequences
 

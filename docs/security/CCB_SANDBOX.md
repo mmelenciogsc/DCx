@@ -4,7 +4,7 @@ Status: local rootless policy plus in-process authoritative-service orchestratio
 
 ## Trust boundary
 
-The authoritative Linux contribution service owns sandbox validation. The Windows client may prepare an approved item but never executes community code and cannot manufacture authoritative evidence. WSL is used only to reproduce the local hostile gate.
+The authoritative Linux contribution service owns sandbox validation. The Windows client may select one schema-v2 package, review its complete admitted text and submit the exact digest-bound snapshot into loopback quarantine, but it never executes community code or manufactures authoritative evidence. The source path is cleared locally and is not transported. WSL is used only to reproduce the local hostile gate.
 
 Policy `dcx-ccb-bwrap-v1` exposes:
 

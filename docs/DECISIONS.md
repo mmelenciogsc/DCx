@@ -28,5 +28,6 @@
 | [0024](architecture/adr/0024-windows-trust-policy-revision-anchor.md) | Anchor the minimum accepted global trust-policy revision in Windows Credential Manager | Accepted for per-user Windows file-rollback defense | 2026-10-17 |
 | [0025](architecture/adr/0025-explicit-loopback-contribution-submission.md) | Require a separate approval and literal-loopback boundary for native contribution submission | Accepted for local simulation | 2026-10-17 |
 | [0026](architecture/adr/0026-minimized-owner-contribution-lifecycle.md) | Reconcile and withdraw exact owner contributions through minimized, separately approved loopback operations | Accepted for local simulation | 2026-10-17 |
+| [0027](architecture/adr/0027-path-private-ccb-artifact-review.md) | Review and submit exact CCB artifacts without retaining their local path | Accepted for local simulation | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
