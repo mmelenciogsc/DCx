@@ -18,6 +18,8 @@ $reviewerToken = $null
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 function Wait-For([scriptblock]$condition, [string]$failureMessage, [int]$attempts = 60) {
     for ($attempt = 0; $attempt -lt $attempts; $attempt++) {
@@ -66,8 +68,35 @@ function Get-EphemeralPort {
 
 function Get-TextSha256([string]$value) {
     $sha = [Security.Cryptography.SHA256]::Create()
-    try { return [Convert]::ToHexString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($value))).ToLowerInvariant() }
+    try {
+        $hash = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($value))
+        return [BitConverter]::ToString($hash).Replace("-", "").ToLowerInvariant()
+    }
     finally { $sha.Dispose() }
+}
+
+function New-TestCcbPackage([string]$path) {
+    $firstOutput = Get-TextSha256 "ABC"
+    $secondOutput = Get-TextSha256 "DCX"
+    $entries = [ordered]@{
+        "dcx-tool.json" = '{"schemaVersion":2,"id":"tool:uia-ccb","version":"1.0.0","entrypoint":"tool.sh","runtime":"busybox-sh-v1","tests":"dcx-tests.json","sbom":"sbom.cdx.json","licenseFile":"LICENSE"}'
+        "tool.sh" = "/runtime/busybox tr 'abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' < /input/request`n"
+        "dcx-tests.json" = "{`"schemaVersion`":1,`"tests`":[{`"name`":`"ascii`",`"inputBase64`":`"YWJj`",`"expectedOutputSha256`":`"$firstOutput`"},{`"name`":`"dcx`",`"inputBase64`":`"REN4`",`"expectedOutputSha256`":`"$secondOutput`"}]}"
+        "sbom.cdx.json" = '{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"type":"application","name":"tool:uia-ccb","version":"1.0.0","licenses":[{"license":{"id":"MIT"}}]},{"type":"framework","name":"busybox-sh-v1","version":"pinned-by-sandbox"}]}'
+        "LICENSE" = "MIT License`nPermission is hereby granted for this deterministic UIA fixture.`n"
+    }
+
+    $archive = [IO.Compression.ZipFile]::Open($path, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($item in $entries.GetEnumerator()) {
+            $entry = $archive.CreateEntry($item.Key, [IO.Compression.CompressionLevel]::Optimal)
+            $entry.LastWriteTime = [DateTimeOffset]::new(2026, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
+            $writer = [IO.StreamWriter]::new($entry.Open(), [Text.UTF8Encoding]::new($false))
+            try { $writer.Write($item.Value) }
+            finally { $writer.Dispose() }
+        }
+    }
+    finally { $archive.Dispose() }
 }
 
 function Test-TreeContainsText([string]$root, [string]$value) {
@@ -83,6 +112,8 @@ function Test-TreeContainsText([string]$root, [string]$value) {
 }
 
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+$ccbPackagePath = Join-Path $runRoot "uia-ccb-package.zip"
+New-TestCcbPackage $ccbPackagePath
 Push-Location $repoRoot
 try {
     dotnet restore $solution --locked-mode
@@ -187,6 +218,13 @@ try {
         $submissionToken = Find-ById $window "ContributionSimulationTokenBox"
         $endpointInput = Find-ById $window "ContributionSimulationEndpointBox"
         $status = Find-ById $window "ContributionStatusText"
+        $kindInput = Find-ById $window "ContributionKindBox"
+        $resourceInput = Find-ById $window "ContributionResourceIdBox"
+        $versionInput = Find-ById $window "ContributionVersionBox"
+        $artifactPathInput = Find-ById $window "ContributionArtifactPathBox"
+        $loadArtifact = Find-ById $window "LoadContributionArtifactButton"
+        $artifactStatus = Find-ById $window "ContributionArtifactStatusText"
+        $artifactReview = Find-ById $window "ContributionArtifactReviewBox"
         foreach ($checkbox in @(
                 $optIn, $itemApproval, $rights, $license, $sensitive,
                 $submissionApproval, $statusApproval, $withdrawalApproval)) {
@@ -315,6 +353,98 @@ try {
             throw "Withdrawal did not clear its credential/approval or leave the action disabled."
         }
 
+        $null = Wait-For { $kindInput.Current.IsEnabled } `
+            "Candidate controls did not unlock after the terminal Withdrawn state."
+        $kindInput.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+        $ccbOption = Wait-For {
+            $all = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.Condition]::TrueCondition)
+            return @($all | Where-Object {
+                if ($_.Current.ProcessId -ne $process.Id -or $_.Current.Name -ne "CCB tool package") {
+                    return $false
+                }
+                $selectPattern = $null
+                return $_.TryGetCurrentPattern(
+                    [System.Windows.Automation.SelectionItemPattern]::Pattern,
+                    [ref]$selectPattern)
+            }) | Select-Object -First 1
+        } "The selectable CCB contribution type was not exposed through UI Automation."
+        $ccbOption.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+        $kindInput.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
+        $null = Wait-For { $artifactPathInput.Current.IsEnabled } `
+            "The per-artifact CCB review controls did not enable for the selected type."
+
+        $artifactPathValue = $artifactPathInput.GetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern)
+        $artifactPathValue.SetValue($ccbPackagePath)
+        $loadArtifact.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        $null = Wait-For {
+            $artifactStatus.Current.Name -like "Loaded uia-ccb-package.zip.*The path was cleared."
+        } "The valid schema-v2 CCB package did not pass local path-private admission."
+        if (-not [string]::IsNullOrEmpty($artifactPathValue.Current.Value) -or
+            $artifactStatus.Current.Name.Contains($ccbPackagePath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "The CCB picker retained or exposed the selected full path."
+        }
+        $artifactReviewValue = $artifactReview.GetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern)
+        if ($artifactReviewValue.Current.Value -notlike "*/runtime/busybox tr*MIT License*tool:uia-ccb*") {
+            throw "The complete admitted CCB script, license, and manifest were not available for review."
+        }
+        if ($resourceInput.GetCurrentPattern(
+                [System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne "tool:uia-ccb" -or
+            $versionInput.GetCurrentPattern(
+                [System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne "1.0.0") {
+            throw "The reviewed CCB manifest identity was not bound into the candidate fields."
+        }
+
+        (Find-ById $window "ContributionTitleBox").GetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern).SetValue("Accessible reviewed CCB tool")
+        (Find-ById $window "ContributionBodyBox").GetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern).SetValue(
+                "A deterministic uppercase transform reviewed through the complete local package text.")
+        (Find-ById $window "ContributionPseudonymBox").GetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern).SetValue($contributorPseudonym)
+        (Find-ById $window "ReviewContributionButton").GetCurrentPattern(
+            [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        $null = Wait-For { $status.Current.Name -like "Automated scan found no blocking issue.*" } `
+            "The complete CCB candidate did not pass the local scanner review."
+        $itemApproval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+        $null = Wait-For { $prepare.Current.IsEnabled } `
+            "The exactly reviewed CCB item did not enable local preparation."
+        $prepare.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        $null = Wait-For {
+            $status.Current.Name -like "Prepared locally as Quarantined.*separate approval.*"
+        } "The exactly reviewed CCB item was not prepared locally."
+
+        $submissionTokenValue.SetValue($contributorToken)
+        $submissionApproval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+        $null = Wait-For { $submitSimulation.Current.IsEnabled } `
+            "The exact CCB artifact send did not require and accept its separate approval."
+        $submitSimulation.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        $null = Wait-For {
+            $status.Current.Name -like "The local simulation accepted submission:* into Quarantined.*"
+        } "The native client did not send the exact CCB package into loopback quarantine."
+        if (-not [string]::IsNullOrEmpty($artifactReviewValue.Current.Value) -or
+            $artifactStatus.Current.Name -notlike "*accepted into server quarantine*cleared*") {
+            throw "Accepted CCB package bytes and review text were not cleared from client memory/UI state."
+        }
+        if ($kindInput.Current.IsEnabled -or $resourceInput.Current.IsEnabled) {
+            throw "Candidate identity controls remained mutable while the accepted lifecycle was open."
+        }
+
+        $submissionTokenValue.SetValue($contributorToken)
+        $statusApproval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+        $null = Wait-For { $queryStatus.Current.IsEnabled } `
+            "The accepted CCB item did not expose a separately approved status reconciliation action."
+        $queryStatus.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        $null = Wait-For {
+            $status.Current.Name -eq "The exact item is Quarantined. No contribution body was returned. No new approval or publication occurred."
+        } "The native client did not reconcile minimized CCB quarantine status."
+        if (-not [string]::IsNullOrEmpty($submissionTokenValue.Current.Value)) {
+            throw "The CCB status reconciliation token was not cleared."
+        }
+
         "Contribution global opt-in initially unchecked=True"
         "Per-item approval initially unchecked=True"
         "Rights license and sensitive-data attestations initially unchecked=True"
@@ -326,6 +456,10 @@ try {
         "Prepared-item origin binding and cross-origin denial=PASS"
         "Native minimized owner-status reconciliation=PASS"
         "Native separately approved owner withdrawal and deprecation=PASS"
+        "Path-private complete CCB package review through UIA=PASS"
+        "Exact schema-v2 CCB bytes submitted into quarantine=PASS"
+        "Accepted CCB bytes/review cleared and candidate identity locked=PASS"
+        "Native minimized CCB quarantine reconciliation=PASS"
         "One-time contributor token not persisted and approval reset=PASS"
         "Hostile CCB namespace sandbox=PASS"
         "CCB host/system filesystem and network denial=PASS"

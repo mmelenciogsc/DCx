@@ -1,7 +1,9 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using DCx.Core.Contributions;
 using DCx.Core.Knowledge;
+using Microsoft.Win32;
 
 namespace DCx.Desktop;
 
@@ -9,6 +11,8 @@ public partial class ContributionsWindow : Window
 {
     private readonly ContributionScanner scanner = new();
     private readonly ContributionPreparationService preparationService;
+    private readonly ContributionArtifactSelectionService artifactSelectionService = new();
+    private readonly CancellationTokenSource lifetime = new();
     private readonly string candidateId = $"candidate:{Guid.NewGuid():N}";
     private string? reviewedDigest;
     private string? approvedDigest;
@@ -20,20 +24,35 @@ public partial class ContributionsWindow : Window
     private CancellationTokenSource? requestCancellation;
     private bool requestInProgress;
     private bool submissionMayExist;
+    private bool artifactLoadInProgress;
+    private bool windowClosed;
+    private SelectedContributionArtifact? selectedArtifact;
 
     public ContributionsWindow()
     {
         preparationService = new ContributionPreparationService(scanner);
         InitializeComponent();
+        LicenseBox.AddHandler(
+            TextBoxBase.TextChangedEvent,
+            new TextChangedEventHandler(OnCandidateChanged),
+            handledEventsToo: true);
         Closed += (_, _) =>
         {
+            windowClosed = true;
             requestCancellation?.Cancel();
             requestCancellation?.Dispose();
             requestCancellation = null;
+            lifetime.Cancel();
+            lifetime.Dispose();
+            selectedArtifact?.Dispose();
+            selectedArtifact = null;
         };
     }
 
     private void OnCandidateChanged(object sender, RoutedEventArgs e)
+        => InvalidateCandidateState();
+
+    private void InvalidateCandidateState()
     {
         reviewedDigest = null;
         approvedDigest = null;
@@ -57,12 +76,131 @@ public partial class ContributionsWindow : Window
         UpdateGate();
     }
 
+    private void OnKindChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ContributionKindBox is null) return;
+        ReleaseSelectedArtifact(IsCcbSelected()
+            ? "No CCB package is selected."
+            : "CKB knowledge items do not use an artifact package.");
+        InvalidateCandidateState();
+    }
+
+    private async void OnBrowseArtifactClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Choose a DCx CCB contribution package",
+            Filter = "DCx CCB package (*.zip)|*.zip|All files (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        ArtifactPathBox.Text = dialog.FileName;
+        await LoadArtifactAsync();
+    }
+
+    private async void OnLoadArtifactClick(object sender, RoutedEventArgs e) =>
+        await LoadArtifactAsync();
+
+    private void OnClearArtifactClick(object sender, RoutedEventArgs e)
+    {
+        ArtifactPathBox.Clear();
+        ReleaseSelectedArtifact("The selected CCB package was cleared from memory.");
+        InvalidateCandidateState();
+        ContributionStatusText.Text = "CCB package cleared. Select and review a package before approving this item.";
+    }
+
+    private async Task LoadArtifactAsync()
+    {
+        if (!IsCcbSelected())
+        {
+            ArtifactPathBox.Clear();
+            ContributionStatusText.Text = "Artifact loading is available only for a CCB tool package.";
+            return;
+        }
+
+        var path = ArtifactPathBox.Text;
+        ReleaseSelectedArtifact("Loading and validating the selected CCB package locally.");
+        InvalidateCandidateState();
+        artifactLoadInProgress = true;
+        UpdateGate();
+        try
+        {
+            var selection = await artifactSelectionService.LoadCcbAsync(path, lifetime.Token);
+            if (windowClosed)
+            {
+                selection.Dispose();
+                return;
+            }
+            selectedArtifact = selection;
+            ResourceIdBox.Text = selection.Manifest.Id;
+            VersionBox.Text = selection.Manifest.Version;
+            LicenseBox.Text = selection.DeclaredLicenses.FirstOrDefault() ?? string.Empty;
+            ArtifactReviewBox.Text = selection.ReviewText;
+            ArtifactStatusText.Text =
+                $"Loaded {selection.FileName}. {selection.SizeBytes} bytes. SHA-256 {selection.Sha256}. Manifest {selection.Manifest.Id} version {selection.Manifest.Version}. The path was cleared.";
+            ContributionStatusText.Text =
+                "The CCB package passed local structural admission. Review its complete text and scanner findings before approval. No network request occurred.";
+            InvalidateCandidateState();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch (ContributionArtifactException exception)
+        {
+            ArtifactStatusText.Text = $"CCB package blocked: {exception.Code}. The path was cleared.";
+            ContributionStatusText.Text =
+                $"CCB package blocked: {exception.Code}. No package bytes were retained or sent.";
+        }
+        catch
+        {
+            ArtifactStatusText.Text = "CCB package loading failed safely. The path was cleared.";
+            ContributionStatusText.Text = "CCB package loading failed safely. No path or package bytes were logged or sent.";
+        }
+        finally
+        {
+            ArtifactPathBox.Clear();
+            artifactLoadInProgress = false;
+            UpdateGate();
+        }
+    }
+
+    private void ReleaseSelectedArtifact(string status)
+    {
+        selectedArtifact?.Dispose();
+        selectedArtifact = null;
+        if (ArtifactReviewBox is not null) ArtifactReviewBox.Clear();
+        if (ArtifactStatusText is not null) ArtifactStatusText.Text = status;
+    }
+
+    private bool IsCcbSelected() => ContributionKindBox?.SelectedIndex == 1;
+
+    private SelectedContributionArtifact? ValidateArtifactBinding(ContributionCandidate candidate)
+    {
+        if (candidate.Kind == KnowledgeResourceKind.Ckb) return null;
+        var selection = selectedArtifact ??
+            throw new ContributionArtifactException("ccb_artifact_required");
+        if (!string.Equals(selection.Manifest.Id, candidate.ResourceId, StringComparison.Ordinal) ||
+            !string.Equals(selection.Manifest.Version, candidate.Version, StringComparison.Ordinal) ||
+            !string.Equals(selection.Sha256, candidate.ArtifactSha256, StringComparison.OrdinalIgnoreCase) ||
+            !selection.DeclaredLicenses.Contains(candidate.License, StringComparer.OrdinalIgnoreCase) ||
+            !selection.LicenseText.Contains(candidate.License, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ContributionArtifactException("ccb_artifact_metadata_mismatch");
+        }
+
+        return selection;
+    }
+
     private void OnReviewClick(object sender, RoutedEventArgs e)
     {
         try
         {
             var candidate = BuildCandidate();
-            var scan = scanner.Scan(candidate);
+            var artifact = ValidateArtifactBinding(candidate);
+            var scan = scanner.Scan(artifact is null
+                ? candidate
+                : candidate with { Body = $"{candidate.Body}\n{artifact.ReviewText}" });
             reviewedDigest = ContributionCodec.CandidateSha256(candidate);
             FindingsList.ItemsSource = scan.Findings.Count == 0
                 ? ["No automated findings. Human review is still required."]
@@ -70,6 +208,10 @@ public partial class ContributionsWindow : Window
             ContributionStatusText.Text = scan.IsEligible
                 ? "Automated scan found no blocking issue. Review and approve this exact item if appropriate."
                 : "Findings require quarantine review. Values are not echoed into this list.";
+        }
+        catch (ContributionArtifactException exception)
+        {
+            ContributionStatusText.Text = $"The CCB package cannot be reviewed: {exception.Code}. Nothing was sent.";
         }
         catch
         {
@@ -83,7 +225,9 @@ public partial class ContributionsWindow : Window
     {
         try
         {
-            var digest = ContributionCodec.CandidateSha256(BuildCandidate());
+            var candidate = BuildCandidate();
+            _ = ValidateArtifactBinding(candidate);
+            var digest = ContributionCodec.CandidateSha256(candidate);
             if (!string.Equals(digest, reviewedDigest, StringComparison.Ordinal))
             {
                 ItemApprovalBox.IsChecked = false;
@@ -95,6 +239,12 @@ public partial class ContributionsWindow : Window
                 approvalNonce = $"approval-{Guid.NewGuid():N}";
                 approvalTime = DateTimeOffset.UtcNow;
             }
+        }
+        catch (ContributionArtifactException exception)
+        {
+            ItemApprovalBox.IsChecked = false;
+            ContributionStatusText.Text =
+                $"The CCB package cannot be approved: {exception.Code}. Review the exact package again.";
         }
         catch
         {
@@ -112,6 +262,7 @@ public partial class ContributionsWindow : Window
         try
         {
             var candidate = BuildCandidate();
+            _ = ValidateArtifactBinding(candidate);
             preparedContribution = preparationService.Prepare(
                 new ContributionPreferences(PreparationEnabledBox.IsChecked == true),
                 candidate,
@@ -133,6 +284,10 @@ public partial class ContributionsWindow : Window
             PrepareButton.IsEnabled = false;
         }
         catch (ContributionPolicyException exception)
+        {
+            ContributionStatusText.Text = $"Preparation blocked: {exception.Code}. Nothing was uploaded.";
+        }
+        catch (ContributionArtifactException exception)
         {
             ContributionStatusText.Text = $"Preparation blocked: {exception.Code}. Nothing was uploaded.";
         }
@@ -168,6 +323,20 @@ public partial class ContributionsWindow : Window
             return;
         }
 
+        SelectedContributionArtifact? artifact;
+        try
+        {
+            artifact = ValidateArtifactBinding(preparedContribution.Candidate);
+        }
+        catch (ContributionArtifactException exception)
+        {
+            ClearNetworkApprovals();
+            ContributionStatusText.Text =
+                $"Submission blocked: {exception.Code}. Reselect, review, and prepare the exact CCB package.";
+            UpdateGate();
+            return;
+        }
+
         if (!TryStartRequest(out var endpoint))
         {
             return;
@@ -183,7 +352,10 @@ public partial class ContributionsWindow : Window
             var result = await client.SubmitAsync(
                 preparedContribution,
                 ContributorTokenBox.Password,
+                artifact?.Content ?? default,
                 cancellationToken: requestCancellation!.Token);
+            ReleaseSelectedArtifactIfPresent(
+                "The exact CCB package was accepted into server quarantine. Its in-memory bytes and review text were cleared.");
             ContributionStatusText.Text =
                 $"The local simulation accepted {result.SubmissionId} into {result.State}. No approval or publication occurred. Query status before any retry. The token was not saved.";
         }
@@ -241,6 +413,8 @@ public partial class ContributionsWindow : Window
             simulationStatus = status;
             simulationOriginBinding = endpoint;
             submissionMayExist = true;
+            ReleaseSelectedArtifactIfPresent(
+                "The server confirmed the exact CCB package. Its local in-memory bytes and review text were cleared.");
             ContributionStatusText.Text = status.State == ContributionState.Approved
                 ? $"The exact item is {status.State} at release {status.ReleaseSequence}. Withdrawal requires a separate approval. No contribution body was returned."
                 : $"The exact item is {status.State}. No contribution body was returned. No new approval or publication occurred.";
@@ -255,7 +429,20 @@ public partial class ContributionsWindow : Window
             {
                 submissionMayExist = false;
                 simulationOriginBinding = null;
-                ContributionStatusText.Text = "The loopback simulation reports submission_missing. A new send still requires explicit approval.";
+                if (preparedContribution?.Candidate.Kind == KnowledgeResourceKind.Ccb && selectedArtifact is null)
+                {
+                    preparedContribution = null;
+                    reviewedDigest = null;
+                    approvedDigest = null;
+                    approvalNonce = null;
+                    ContributionStatusText.Text =
+                        "The loopback simulation reports submission_missing. The cleared CCB package must be reselected, reviewed, and prepared before a new approved send.";
+                }
+                else
+                {
+                    ContributionStatusText.Text =
+                        "The loopback simulation reports submission_missing. A new send still requires explicit approval.";
+                }
             }
             else
             {
@@ -303,6 +490,8 @@ public partial class ContributionsWindow : Window
                 ReleaseSequence = result.Release.Sequence,
             };
             submissionMayExist = true;
+            ReleaseSelectedArtifactIfPresent(
+                "The exact contribution is withdrawn. No CCB package bytes remain in local review memory.");
             ContributionStatusText.Text =
                 $"The exact item is {result.State}. Local simulation deprecation release {result.Release.Sequence} was created. No remote publication occurred.";
         }
@@ -382,25 +571,35 @@ public partial class ContributionsWindow : Window
 
     private ContributionCandidate BuildCandidate()
     {
-        var license = (LicenseBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? string.Empty;
+        var kind = IsCcbSelected() ? KnowledgeResourceKind.Ccb : KnowledgeResourceKind.Ckb;
+        var license = LicenseBox.Text.Trim();
         return new ContributionCandidate(
             candidateId,
             ResourceIdBox.Text.Trim(),
-            "1.0.0",
-            KnowledgeResourceKind.Ckb,
+            VersionBox.Text.Trim(),
+            kind,
             TitleBox.Text.Trim(),
             BodyBox.Text,
             "urn:dcx:local-contribution-preview",
             license,
             [],
             [],
-            ContributorPseudonymBox.Text.Trim());
+            ContributorPseudonymBox.Text.Trim(),
+            kind == KnowledgeResourceKind.Ccb ? selectedArtifact?.Sha256 : null);
+    }
+
+    private void ReleaseSelectedArtifactIfPresent(string status)
+    {
+        if (selectedArtifact is not null) ReleaseSelectedArtifact(status);
     }
 
     private void UpdateGate()
     {
         if (PrepareButton is null || PreparationEnabledBox is null || ResourceIdBox is null ||
-            TitleBox is null || BodyBox is null || LicenseBox is null || ContributorPseudonymBox is null ||
+            VersionBox is null || ContributionKindBox is null || TitleBox is null || BodyBox is null ||
+            LicenseBox is null || ContributorPseudonymBox is null || ArtifactGroup is null ||
+            ArtifactPathBox is null || BrowseArtifactButton is null || LoadArtifactButton is null ||
+            ClearArtifactButton is null ||
             ReviewButton is null || RightsBox is null || LicenseConfirmedBox is null ||
             SensitiveReviewedBox is null || ItemApprovalBox is null || SimulationEndpointBox is null ||
             ContributorTokenBox is null)
@@ -408,22 +607,34 @@ public partial class ContributionsWindow : Window
             return;
         }
 
-        var inputsEnabled = !requestInProgress;
-        PreparationEnabledBox.IsEnabled = inputsEnabled;
-        ResourceIdBox.IsEnabled = inputsEnabled;
-        TitleBox.IsEnabled = inputsEnabled;
-        BodyBox.IsEnabled = inputsEnabled;
-        LicenseBox.IsEnabled = inputsEnabled;
-        ContributorPseudonymBox.IsEnabled = inputsEnabled;
-        ReviewButton.IsEnabled = inputsEnabled;
-        RightsBox.IsEnabled = inputsEnabled;
-        LicenseConfirmedBox.IsEnabled = inputsEnabled;
-        SensitiveReviewedBox.IsEnabled = inputsEnabled;
-        ItemApprovalBox.IsEnabled = inputsEnabled;
-        SimulationEndpointBox.IsEnabled = inputsEnabled;
-        ContributorTokenBox.IsEnabled = inputsEnabled;
+        var lifecycleOpen = submissionMayExist &&
+                            simulationStatus?.State is not ContributionState.Withdrawn and
+                                not ContributionState.Rejected;
+        var candidateInputsEnabled = !requestInProgress && !artifactLoadInProgress && !lifecycleOpen;
+        var networkInputsEnabled = !requestInProgress && !artifactLoadInProgress;
+        var artifactReady = !IsCcbSelected() || selectedArtifact is not null;
+        PreparationEnabledBox.IsEnabled = candidateInputsEnabled;
+        ContributionKindBox.IsEnabled = candidateInputsEnabled;
+        ResourceIdBox.IsEnabled = candidateInputsEnabled;
+        VersionBox.IsEnabled = candidateInputsEnabled;
+        TitleBox.IsEnabled = candidateInputsEnabled;
+        BodyBox.IsEnabled = candidateInputsEnabled;
+        LicenseBox.IsEnabled = candidateInputsEnabled;
+        ContributorPseudonymBox.IsEnabled = candidateInputsEnabled;
+        ArtifactGroup.IsEnabled = IsCcbSelected() && candidateInputsEnabled;
+        ArtifactPathBox.IsEnabled = candidateInputsEnabled;
+        BrowseArtifactButton.IsEnabled = candidateInputsEnabled;
+        LoadArtifactButton.IsEnabled = candidateInputsEnabled;
+        ClearArtifactButton.IsEnabled = candidateInputsEnabled && selectedArtifact is not null;
+        ReviewButton.IsEnabled = candidateInputsEnabled && artifactReady;
+        RightsBox.IsEnabled = candidateInputsEnabled;
+        LicenseConfirmedBox.IsEnabled = candidateInputsEnabled;
+        SensitiveReviewedBox.IsEnabled = candidateInputsEnabled;
+        ItemApprovalBox.IsEnabled = candidateInputsEnabled && artifactReady;
+        SimulationEndpointBox.IsEnabled = networkInputsEnabled;
+        ContributorTokenBox.IsEnabled = networkInputsEnabled;
         PrepareButton.IsEnabled = PreparationEnabledBox.IsChecked == true &&
-                                  inputsEnabled &&
+                                  candidateInputsEnabled && artifactReady &&
                                   RightsBox.IsChecked == true &&
                                   LicenseConfirmedBox.IsChecked == true &&
                                   SensitiveReviewedBox.IsChecked == true &&
@@ -435,23 +646,31 @@ public partial class ContributionsWindow : Window
             WithdrawSimulationButton is null || CancelSubmissionButton is null) return;
         var hasEndpointAndToken = !string.IsNullOrWhiteSpace(SimulationEndpointBox.Text) &&
                                   !string.IsNullOrWhiteSpace(ContributorTokenBox.Password);
+        var hasSubmissionArtifact = preparedContribution?.Candidate.Kind != KnowledgeResourceKind.Ccb ||
+                                    selectedArtifact is not null;
         SubmissionApprovalBox.IsEnabled = preparedContribution is not null &&
-                                          !requestInProgress && !submissionMayExist;
+                                          hasSubmissionArtifact && !requestInProgress &&
+                                          !artifactLoadInProgress && !submissionMayExist;
         SubmitSimulationButton.IsEnabled = preparedContribution is not null &&
+                                           hasSubmissionArtifact &&
                                            SubmissionApprovalBox.IsChecked == true &&
-                                           !requestInProgress && !submissionMayExist &&
+                                           !requestInProgress && !artifactLoadInProgress &&
+                                           !submissionMayExist &&
                                            hasEndpointAndToken;
-        StatusApprovalBox.IsEnabled = preparedContribution is not null && !requestInProgress;
+        StatusApprovalBox.IsEnabled = preparedContribution is not null && !requestInProgress &&
+                                      !artifactLoadInProgress;
         QuerySimulationStatusButton.IsEnabled = preparedContribution is not null &&
                                                 StatusApprovalBox.IsChecked == true &&
-                                                !requestInProgress && hasEndpointAndToken;
+                                                !requestInProgress && !artifactLoadInProgress &&
+                                                hasEndpointAndToken;
         WithdrawalApprovalBox.IsEnabled = preparedContribution is not null &&
                                           simulationStatus?.State == ContributionState.Approved &&
-                                          !requestInProgress;
+                                          !requestInProgress && !artifactLoadInProgress;
         WithdrawSimulationButton.IsEnabled = preparedContribution is not null &&
                                              simulationStatus?.State == ContributionState.Approved &&
                                              WithdrawalApprovalBox.IsChecked == true &&
-                                             !requestInProgress && hasEndpointAndToken;
+                                             !requestInProgress && !artifactLoadInProgress &&
+                                             hasEndpointAndToken;
         CancelSubmissionButton.IsEnabled = requestInProgress;
     }
 }

@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Contribution review — DCx"
         Width="760"
-        Height="760"
+        Height="820"
         MinWidth="620"
         MinHeight="560"
         AutomationProperties.AutomationId="ContributionsWindow"
@@ -25,12 +25,29 @@
                       Checked="OnGateChanged"
                       Unchecked="OnGateChanged" />
 
+            <Label Target="{Binding ElementName=ContributionKindBox}" Content="Contribution type" Padding="0" />
+            <ComboBox x:Name="ContributionKindBox"
+                      Margin="0,4,0,10"
+                      AutomationProperties.AutomationId="ContributionKindBox"
+                      AutomationProperties.Name="Contribution type"
+                      SelectionChanged="OnKindChanged">
+                <ComboBoxItem Content="CKB knowledge item" IsSelected="True" />
+                <ComboBoxItem Content="CCB tool package" />
+            </ComboBox>
             <Label Target="{Binding ElementName=ResourceIdBox}" Content="Proposed resource identifier" Padding="0" />
             <TextBox x:Name="ResourceIdBox"
                      Margin="0,4,0,10"
                      Padding="5"
                      AutomationProperties.AutomationId="ContributionResourceIdBox"
                      AutomationProperties.Name="Proposed resource identifier"
+                     TextChanged="OnCandidateChanged" />
+            <Label Target="{Binding ElementName=VersionBox}" Content="Version" Padding="0" />
+            <TextBox x:Name="VersionBox"
+                     Margin="0,4,0,10"
+                     Padding="5"
+                     Text="1.0.0"
+                     AutomationProperties.AutomationId="ContributionVersionBox"
+                     AutomationProperties.Name="Contribution version"
                      TextChanged="OnCandidateChanged" />
             <Label Target="{Binding ElementName=TitleBox}" Content="Title" Padding="0" />
             <TextBox x:Name="TitleBox"
@@ -53,6 +70,7 @@
             <Label Target="{Binding ElementName=LicenseBox}" Content="License" Padding="0" />
             <ComboBox x:Name="LicenseBox"
                       Margin="0,4,0,12"
+                      IsEditable="True"
                       AutomationProperties.AutomationId="ContributionLicenseBox"
                       AutomationProperties.Name="Contribution license"
                       SelectionChanged="OnCandidateChanged">
@@ -71,6 +89,66 @@
                      AutomationProperties.AutomationId="ContributionPseudonymBox"
                      AutomationProperties.Name="Contributor pseudonym expected by the local simulation"
                      TextChanged="OnCandidateChanged" />
+
+            <GroupBox x:Name="ArtifactGroup"
+                      Margin="0,0,0,14"
+                      Header="CCB package review"
+                      IsEnabled="False">
+                <StackPanel Margin="12,8">
+                    <TextBlock TextWrapping="Wrap"
+                               Text="Choose a bounded schema-v2 CCB ZIP. DCx validates it locally and clears the entered path. The package bytes remain only in memory until intake or replacement. Review the complete admitted text below before approving the item." />
+                    <Label Margin="0,8,0,0"
+                           Target="{Binding ElementName=ArtifactPathBox}"
+                           Content="CCB package path" Padding="0" />
+                    <TextBox x:Name="ArtifactPathBox"
+                             Margin="0,4,0,8"
+                             Padding="5"
+                             AutomationProperties.AutomationId="ContributionArtifactPathBox"
+                             AutomationProperties.Name="CCB package path, cleared after loading"
+                             AutomationProperties.HelpText="The selected path is not stored, logged, or sent." />
+                    <WrapPanel>
+                        <Button x:Name="BrowseArtifactButton"
+                                MinWidth="150"
+                                Margin="0,0,10,0"
+                                Content="_Browse for package"
+                                AutomationProperties.AutomationId="BrowseContributionArtifactButton"
+                                AutomationProperties.Name="Browse for CCB contribution package"
+                                Click="OnBrowseArtifactClick" />
+                        <Button x:Name="LoadArtifactButton"
+                                MinWidth="140"
+                                Margin="0,0,10,0"
+                                Content="_Load and validate"
+                                AutomationProperties.AutomationId="LoadContributionArtifactButton"
+                                AutomationProperties.Name="Load and validate CCB contribution package"
+                                Click="OnLoadArtifactClick" />
+                        <Button x:Name="ClearArtifactButton"
+                                MinWidth="120"
+                                Content="_Clear package"
+                                AutomationProperties.AutomationId="ClearContributionArtifactButton"
+                                AutomationProperties.Name="Clear selected CCB contribution package"
+                                Click="OnClearArtifactClick" />
+                    </WrapPanel>
+                    <TextBlock x:Name="ArtifactStatusText"
+                               Margin="0,10,0,6"
+                               Text="No CCB package is selected."
+                               TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="ContributionArtifactStatusText"
+                               AutomationProperties.LiveSetting="Assertive" />
+                    <Label Target="{Binding ElementName=ArtifactReviewBox}"
+                           Content="Complete admitted package review text" Padding="0" />
+                    <TextBox x:Name="ArtifactReviewBox"
+                             Height="180"
+                             Margin="0,4,0,0"
+                             Padding="5"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="NoWrap"
+                             HorizontalScrollBarVisibility="Auto"
+                             VerticalScrollBarVisibility="Auto"
+                             AutomationProperties.AutomationId="ContributionArtifactReviewBox"
+                             AutomationProperties.Name="Complete admitted CCB package review text" />
+                </StackPanel>
+            </GroupBox>
 
             <Button x:Name="ReviewButton"
                     Width="180"
