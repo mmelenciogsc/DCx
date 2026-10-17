@@ -45,5 +45,6 @@
 | [0041](architecture/adr/0041-fixture-only-accessible-care-operations.md) | Validate accessible aggregate CARE operations through a default-unavailable, generated-data-only source | Accepted for native generated-data validation; authenticated production operations blocked | 2026-10-18 |
 | [0042](architecture/adr/0042-lock-scoped-durable-care-operations.md) | Bind exact reviewed aggregate state to bounded durable local replay under one repository lock | Accepted for single-repository local validation; authenticated distributed operations blocked | 2026-10-18 |
 | [0043](architecture/adr/0043-immediate-transaction-care-replay.md) | Serialize reviewed CARE replay across shared-SQLite connections and commit the bounded batch atomically | Accepted for shared-SQLite local validation; authenticated distributed operations blocked | 2026-10-18 |
+| [0044](architecture/adr/0044-authenticated-loopback-care-operations-api.md) | Expose aggregate CARE review/replay only through a separately gated, digest-authenticated loopback simulation API | Accepted for default-off local simulation; production identity and deployment blocked | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
