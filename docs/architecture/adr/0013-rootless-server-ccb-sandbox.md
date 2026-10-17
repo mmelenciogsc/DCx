@@ -15,9 +15,12 @@ Use a versioned, hash-pinned Bubblewrap policy as the first authoritative-server
 
 Canonical evidence binds artifact, extracted workspace, test suite, launcher, backend, runtime and output digests. The Windows app never runs contributed code; WSL is only a local validation host. CCB approval remains disabled unless the authoritative service itself produces and persists passing evidence.
 
+The first contribution profile is an exact five-file BusyBox-shell package. The server admits and quarantines a digest-verified ZIP, validates its closed two-component CycloneDX/runtime/license declaration, safely extracts it, rescans every textual component and test input, executes every declared test, persists body-free evidence and allows signed artifact propagation only after all expected output digests match. Existing private schema-v1 packages remain compatible but are not authoritative contribution packages.
+
 ## Consequences
 
 - The prototype demonstrates concrete host-filesystem, system-filesystem, network, environment, privilege, traversal, symlink, timeout and output-flood denials without installation or elevation.
 - A narrow BusyBox-shell runtime keeps the initial attack surface and fixture behavior deterministic; additional language adapters require separately pinned reproducible builder/runtime images.
-- The remaining production gate includes safe package extraction, dependency/lock/SBOM/license validation, durable evidence and reviewer orchestration, seccomp, measured cgroup-v2 enforcement, immutable base-image/toolchain digests, Ubuntu 24.04 deployment hardening and independent penetration testing.
-- Until those gates pass, `ccb_sandbox_review_required` remains the only publication result for CCB submissions.
+- The in-process service fixture validates the orchestration, but the simulation host intentionally exposes no contribution/authentication/reviewer API and no production executor configuration.
+- The remaining production gate includes authenticated APIs, durable outbox/queued reviewer orchestration, general dependency-lock/build profiles, seccomp, measured cgroup-v2 enforcement, immutable base-image/toolchain digests, Ubuntu 24.04 deployment hardening, monitoring and independent penetration testing.
+- A missing executor still fails with `ccb_sandbox_review_required`; production publication remains unavailable until the remaining gates pass.

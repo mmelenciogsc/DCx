@@ -32,7 +32,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 release/readiness tests: passed 14, failed 0, skipped 0; about 1 second.
-- Current expanded full suite: passed 155, failed 0, skipped 0; about 1 second.
+- Current expanded full suite: passed 161, failed 0, skipped 0; about 1 second.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -40,7 +40,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-
 - Decision: `NO_GO`.
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled consent state, blocker list, metric-definition list and refresh action. The validator confirmed that no control named `Activate production` exists.
-- Evidence: `artifacts/test-results/p14-fc7ff6efe40b4d28833725615b7427d9/go-no-go.json` (generated and intentionally not committed).
+- Evidence: `artifacts/test-results/p14-a7df88c5598d4eee94f33f8f0a36fb0a/go-no-go.json` (generated and intentionally not committed).
 
 ## Changed files in the latest milestone
 
@@ -51,7 +51,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-
 
 ## Blockers
 
-- P06 transcription/embedding backend gate, P09 Compose gate, P10 hostile CCB sandbox, P11 PayPal sandbox/eligibility, P12 live/human acceptance and P13 signed installer/security/human-AT gates are unresolved.
+- P06 transcription/embedding backend gate, P09 Compose gate, P10 production CCB isolation/deployment gate, P11 PayPal sandbox/eligibility, P12 live/human acceptance and P13 signed installer/security/human-AT gates are unresolved.
 - Privacy notice, terms, CARE/commission policy, provider distribution approvals and legal/compliance review are not approved.
 - The readiness dashboard is local and read-only; it is not a pilot admin console. No enrollment system, approved accessible consent/withdrawal UI, network metric transport, support staffing or incident exercise exists. The local versioned consent record and aggregate store are not wired to product event collection.
 - A staged pilot requires explicit owner approval after blocker closure. Production activation remains off by construction in this report.

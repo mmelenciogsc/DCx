@@ -32,5 +32,5 @@ The XLSX fixture has a frozen header, filter, numeric currency cells, semantic t
 - No QuickBooks sandbox OAuth or API retrieval. Only a sandbox-shaped client contract and export are validated.
 - YouTube validation proves URL admission/browser handoff, not frame capture/Q&A from YouTube playback.
 - No approved package installer execution/sandbox scenario.
-- P09 Compose, P10 hostile CCB sandbox and P11 real PayPal sandbox remain blocked.
+- P09 Compose, P10 production CCB deployment/isolation and P11 real PayPal sandbox remain blocked.
 - Live services require supported contracts, user authorization and separate human acceptance. Local fixture success is not counted as live acceptance.

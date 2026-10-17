@@ -120,7 +120,7 @@ public static class CurrentReleaseReadiness
             Issue("p09-compose", "Authoritative global-service container simulation", ReadinessSeverity.Major,
                 "Platform engineering", "Provide an approved native Docker/Compose environment and rerun the two-client gate.", "docs/progress/PHASE-09.md"),
             Issue("p10-ccb-sandbox", "Production hostile community-code isolation", ReadinessSeverity.Critical,
-                "Security engineering", "Integrate the rootless sandbox with authoritative package intake, add seccomp/cgroup/base-image controls, and complete external penetration testing before enabling CCB publication.", "docs/progress/PHASE-10.md"),
+                "Security engineering", "Deploy the gated package pipeline only to an approved Ubuntu 24.04 environment with seccomp, cgroup-v2, immutable-image, authenticated-review and external penetration-test evidence before enabling CCB publication.", "docs/progress/PHASE-10.md"),
             Issue("p11-paypal", "PayPal sandbox eligibility and reconciliation", ReadinessSeverity.Critical,
                 "Finance platform and owner", "Provide approved sandbox credentials and eligibility evidence; implement official verification and reconciliation.", "docs/progress/PHASE-11.md"),
             Issue("p12-live-acceptance", "Live provider and human acceptance scenarios", ReadinessSeverity.Major,
