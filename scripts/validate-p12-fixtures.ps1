@@ -13,7 +13,8 @@ $scenarios = @(
     @{ name = "signed global replica process simulation"; script = "validate-p09.ps1" },
     @{ name = "consent quarantine contribution and receipt fixture"; script = "validate-p10.ps1" },
     @{ name = "durable CARE ledger and payout safety mock"; script = "validate-p11.ps1" },
-    @{ name = "local social login post search and QuickBooks XLSX fixtures"; script = "validate-p12-integrations.ps1" }
+    @{ name = "local social login post search and QuickBooks XLSX fixtures"; script = "validate-p12-integrations.ps1" },
+    @{ name = "exact package installation approval without execution fixture"; script = "validate-p12-package-approval.ps1" }
 )
 $results = @()
 
@@ -38,7 +39,7 @@ $manifest = [ordered]@{
         "live Facebook authenticated search and human acceptance",
         "real QuickBooks sandbox OAuth and API retrieval",
         "live YouTube provider playback/frame-Q&A and human acceptance",
-        "approved package installer execution",
+        "real signed package installation and clean-VM acceptance",
         "Docker Compose global-service run",
         "real PayPal sandbox subscription webhook and payout reconciliation"
     )

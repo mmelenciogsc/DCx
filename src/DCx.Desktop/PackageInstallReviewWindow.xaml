@@ -1,0 +1,106 @@
+<Window x:Class="DCx.Desktop.PackageInstallReviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Package installation review"
+        Width="780"
+        Height="690"
+        MinWidth="640"
+        MinHeight="560"
+        AutomationProperties.AutomationId="PackageInstallReviewWindow"
+        AutomationProperties.Name="Package installation review"
+        Closing="OnClosing"
+        PreviewKeyDown="OnPreviewKeyDown">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Margin="0,0,0,12"
+                   FontSize="24"
+                   FontWeight="SemiBold"
+                   Text="Review package installation request"
+                   AutomationProperties.AutomationId="PackageInstallReviewHeading"
+                   AutomationProperties.Name="Review package installation request" />
+
+        <Border Grid.Row="1"
+                Margin="0,0,0,12"
+                Padding="12"
+                BorderBrush="#707070"
+                BorderThickness="1">
+            <TextBlock TextWrapping="Wrap"
+                       Text="Validation mode. This boundary can record approval for an exact request, but it cannot install a package, elevate privileges, invoke PowerShell, or start an installer."
+                       AutomationProperties.AutomationId="PackageInstallValidationDisclosure"
+                       AutomationProperties.Name="Validation mode. No package installation, elevation, PowerShell, or installer process is available." />
+        </Border>
+
+        <GroupBox Grid.Row="2"
+                  Header="Exact typed request"
+                  Padding="8"
+                  AutomationProperties.Name="Exact typed package installation request">
+            <TextBox x:Name="RequestDetailsText"
+                     IsReadOnly="True"
+                     IsReadOnlyCaretVisible="True"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto"
+                     HorizontalScrollBarVisibility="Disabled"
+                     AutomationProperties.AutomationId="PackageInstallRequestDetails"
+                     AutomationProperties.Name="Exact package installation request details" />
+        </GroupBox>
+
+        <CheckBox x:Name="ApprovalCheckBox"
+                  Grid.Row="3"
+                  Margin="0,16,0,12"
+                  IsChecked="False"
+                  Content="I approve this exact, digest-bound current-user package installation request."
+                  AutomationProperties.AutomationId="PackageInstallApproval"
+                  AutomationProperties.Name="Approve this exact digest-bound current-user package installation request"
+                  AutomationProperties.HelpText="Unchecked by default. In validation mode, checking this records an inert approval receipt and does not permit execution." />
+
+        <StackPanel Grid.Row="4"
+                    Margin="0,0,0,14"
+                    Orientation="Horizontal">
+            <Button x:Name="ApproveButton"
+                    MinWidth="150"
+                    MinHeight="36"
+                    Margin="0,0,8,0"
+                    Content="Record approval"
+                    AutomationProperties.AutomationId="PackageInstallApproveButton"
+                    AutomationProperties.Name="Record package installation approval"
+                    Click="OnApproveClick" />
+            <Button x:Name="CancelRequestButton"
+                    MinWidth="150"
+                    MinHeight="36"
+                    Margin="0,0,8,0"
+                    Content="Cancel request"
+                    AutomationProperties.AutomationId="PackageInstallCancelButton"
+                    AutomationProperties.Name="Cancel package installation request"
+                    Click="OnCancelRequestClick" />
+            <Button MinWidth="100"
+                    MinHeight="36"
+                    Content="Close"
+                    AutomationProperties.AutomationId="PackageInstallCloseButton"
+                    AutomationProperties.Name="Close package installation review"
+                    Click="OnCloseClick" />
+        </StackPanel>
+
+        <Border Grid.Row="5"
+                Padding="10"
+                Background="#F3F3F3"
+                BorderBrush="#707070"
+                BorderThickness="1">
+            <TextBlock x:Name="StatusText"
+                       Text="Review the exact request. Approval is unchecked. No installer has started."
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="PackageInstallStatus"
+                       AutomationProperties.Name="Review the exact request. Approval is unchecked. No installer has started."
+                       AutomationProperties.LiveSetting="Assertive" />
+        </Border>
+    </Grid>
+</Window>

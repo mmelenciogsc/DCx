@@ -1,5 +1,7 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Threading;
+using DCx.Core.Deployment;
 using DCx.Core.Reliability;
 using DCx.Core.Storage;
 
@@ -16,6 +18,13 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.Length == 2 &&
+            string.Equals(e.Args[0], "--package-approval-fixture", StringComparison.Ordinal))
+        {
+            StartPackageApprovalFixture(e.Args[1]);
+            return;
+        }
+
         if (e.Args.Length == 1 && string.Equals(e.Args[0], "--recovery", StringComparison.Ordinal))
         {
             MainWindow = new RecoveryWindow();
@@ -143,4 +152,73 @@ public partial class App : Application
 
     private static string GetApplicationVersion() =>
         typeof(App).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+
+    private void StartPackageApprovalFixture(string packagePath)
+    {
+        try
+        {
+            if (!string.Equals(
+                    Environment.GetEnvironmentVariable("DCX_PACKAGE_APPROVAL_FIXTURE"),
+                    "1",
+                    StringComparison.Ordinal) ||
+                !IsWithinFixtureRoot(packagePath))
+            {
+                throw new PackageInstallReviewException("package_review_fixture_disabled");
+            }
+
+            var session = PackageInstallReviewService.BeginAsync(
+                    packagePath,
+                    new SyntheticPackageTrustVerifier(),
+                    DateTimeOffset.UtcNow)
+                .GetAwaiter()
+                .GetResult();
+            MainWindow = new PackageInstallReviewWindow(session);
+            MainWindow.Show();
+        }
+        catch (PackageInstallReviewException)
+        {
+            Shutdown(2);
+        }
+    }
+
+    private static bool IsWithinFixtureRoot(string packagePath)
+    {
+        var configuredRoot = Environment.GetEnvironmentVariable("DCX_PACKAGE_APPROVAL_FIXTURE_ROOT");
+        if (string.IsNullOrWhiteSpace(configuredRoot)) return false;
+        try
+        {
+            var root = Path.GetFullPath(configuredRoot)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var volumeRoot = Path.GetPathRoot(root)?.TrimEnd(
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar);
+            if (string.IsNullOrEmpty(root) || string.Equals(root, volumeRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var candidate = Path.GetFullPath(packagePath);
+            return candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    private sealed class SyntheticPackageTrustVerifier : IPackageInstallTrustVerifier
+    {
+        public Task<PackageInstallTrustEvidence> VerifyAsync(
+            string packagePath,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new PackageInstallTrustEvidence(
+                SignatureValid: true,
+                PackageIdentityName: "DCx.AgenticBrowser.ValidationFixture",
+                PublisherId: "CN=DCx Synthetic Validation Fixture",
+                Version: "1.2.3.4"));
+        }
+    }
 }
