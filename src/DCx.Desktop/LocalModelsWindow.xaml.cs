@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using DCx.Core.LocalModels;
+using Microsoft.Win32;
 
 namespace DCx.Desktop;
 
@@ -11,13 +12,19 @@ public partial class LocalModelsWindow : Window
 {
     private static readonly Uri OllamaOrigin = new("http://localhost:11434/");
     private readonly LocalModelSelectionStore store;
+    private readonly WhisperBackendSelectionStore whisperStore;
+    private readonly WhisperBackendReviewer whisperReviewer = new();
     private readonly CancellationTokenSource lifetime = new();
     private CandidateRow? reviewedCandidate;
     private string? reviewedLicenseSha256;
+    private WhisperBackendReview? reviewedWhisperBackend;
 
-    public LocalModelsWindow(LocalModelSelectionStore store)
+    public LocalModelsWindow(
+        LocalModelSelectionStore store,
+        WhisperBackendSelectionStore whisperStore)
     {
         this.store = store ?? throw new ArgumentNullException(nameof(store));
+        this.whisperStore = whisperStore ?? throw new ArgumentNullException(nameof(whisperStore));
         InitializeComponent();
         Loaded += async (_, _) => await RefreshAsync();
         Closed += (_, _) => lifetime.Cancel();
@@ -118,6 +125,124 @@ public partial class LocalModelsWindow : Window
         }
     }
 
+    private void OnWhisperInputChanged(object sender, TextChangedEventArgs e) =>
+        ResetWhisperReview();
+
+    private void OnBrowseWhisperExecutableClick(object sender, RoutedEventArgs e) =>
+        BrowseInto(WhisperExecutablePath, "Executable files (*.exe)|*.exe", "Select an already-installed Whisper executable");
+
+    private void OnBrowseWhisperModelClick(object sender, RoutedEventArgs e) =>
+        BrowseInto(WhisperModelPath, "Whisper models (*.bin;*.gguf)|*.bin;*.gguf", "Select an already-installed Whisper model");
+
+    private void OnBrowseWhisperRuntimeLicenseClick(object sender, RoutedEventArgs e) =>
+        BrowseInto(WhisperRuntimeLicensePath, "License text (*.txt;*.md)|*.txt;*.md|All files (*.*)|*.*", "Select the Whisper runtime license");
+
+    private void OnBrowseWhisperModelLicenseClick(object sender, RoutedEventArgs e) =>
+        BrowseInto(WhisperModelLicensePath, "License text (*.txt;*.md)|*.txt;*.md|All files (*.*)|*.*", "Select the Whisper model license");
+
+    private async void OnReviewWhisperBackendClick(object sender, RoutedEventArgs e)
+    {
+        ResetWhisperReview();
+        SetWhisperControlsEnabled(false);
+        SetStatus("Reviewing and hashing the four local Whisper files. Nothing is downloaded, installed, or uploaded.");
+        try
+        {
+            var review = await whisperReviewer.ReviewAsync(
+                WhisperExecutablePath.Text,
+                WhisperModelPath.Text,
+                WhisperRuntimeLicensePath.Text,
+                WhisperModelLicensePath.Text,
+                DateTimeOffset.UtcNow,
+                lifetime.Token);
+            reviewedWhisperBackend = review;
+            SetWhisperReview(review);
+            SetStatus("The exact local Whisper files and both complete licenses are ready for review. Registration remains unchanged until explicit approval is checked and saved.");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            SetWhisperDetails("The four local Whisper files could not be reviewed safely. Registration was not changed.");
+            SetWhisperLicense("No approved license review is available.");
+            SetStatus("Whisper review failed closed. Confirm four distinct regular local files, supported extensions, size limits, and UTF-8 license text.");
+        }
+        finally
+        {
+            SetWhisperControlsEnabled(true);
+        }
+    }
+
+    private async void OnSaveWhisperBackendClick(object sender, RoutedEventArgs e)
+    {
+        if (reviewedWhisperBackend is null || WhisperApprovalBox.IsChecked != true)
+        {
+            SetStatus("Whisper registration was not saved. Complete the file review and check the explicit approval box first.");
+            WhisperApprovalBox.Focus();
+            return;
+        }
+
+        SetWhisperControlsEnabled(false);
+        SetStatus("Revalidating the four exact Whisper files before saving. Nothing is downloaded, installed, or uploaded.");
+        try
+        {
+            var rechecked = await whisperReviewer.ReviewAsync(
+                WhisperExecutablePath.Text,
+                WhisperModelPath.Text,
+                WhisperRuntimeLicensePath.Text,
+                WhisperModelLicensePath.Text,
+                DateTimeOffset.UtcNow,
+                lifetime.Token);
+            if (!reviewedWhisperBackend.Binding.HasSameIdentity(rechecked.Binding))
+            {
+                throw new InvalidOperationException("The reviewed Whisper file identity changed.");
+            }
+
+            await whisperStore.SetAsync(rechecked.Binding, explicitlyApproved: true, lifetime.Token);
+            reviewedWhisperBackend = rechecked;
+            WhisperApprovalBox.IsChecked = false;
+            SetWhisperReview(rechecked);
+            await UpdateWhisperSelectionAsync();
+            SetStatus("The exact hash-pinned Whisper backend registration was saved. Nothing was downloaded, installed, or uploaded.");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            ResetWhisperReview();
+            SetStatus("A Whisper file or license could not be revalidated, so registration was not saved. Review all four files again.");
+        }
+        finally
+        {
+            SetWhisperControlsEnabled(true);
+        }
+    }
+
+    private async void OnClearWhisperBackendClick(object sender, RoutedEventArgs e)
+    {
+        SetWhisperControlsEnabled(false);
+        SetStatus("Clearing only the DCx Whisper registration. Source files will be preserved.");
+        try
+        {
+            await whisperStore.ClearAsync(lifetime.Token);
+            ResetWhisperReview();
+            await UpdateWhisperSelectionAsync();
+            SetStatus("The Whisper registration was cleared. No executable, model, license, or other local file was deleted or uninstalled.");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            SetStatus("The Whisper registration could not be cleared. No local file was changed.");
+        }
+        finally
+        {
+            SetWhisperControlsEnabled(true);
+        }
+    }
+
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
     private async Task RefreshAsync()
@@ -131,6 +256,7 @@ public partial class LocalModelsWindow : Window
         SetStatus("Reading installed model identities from the loopback Ollama runtime. Nothing is downloaded or uploaded.");
         try
         {
+            await UpdateWhisperSelectionAsync();
             using var client = new OllamaLocalClient(OllamaOrigin, TimeSpan.FromSeconds(30));
             var models = await client.ListModelsAsync(lifetime.Token);
             var counts = models
@@ -242,6 +368,19 @@ public partial class LocalModelsWindow : Window
         SetCurrent(CurrentEmbeddingText, "Embedding", state.Embedding);
     }
 
+    private async Task UpdateWhisperSelectionAsync()
+    {
+        var state = await whisperStore.GetStateAsync(lifetime.Token);
+        var binding = state.Backend;
+        var value = binding is null
+            ? "Transcription: none selected."
+            : $"Transcription: {System.IO.Path.GetFileName(binding.ExecutablePath)} with {System.IO.Path.GetFileName(binding.ModelPath)}. " +
+              $"Executable digest {binding.ExecutableSha256}. Model digest {binding.ModelSha256}. " +
+              $"Runtime license digest {binding.RuntimeLicenseSha256}. Model license digest {binding.ModelLicenseSha256}. Approved {binding.ApprovedUtc:u}.";
+        CurrentWhisperText.Text = value;
+        AutomationProperties.SetName(CurrentWhisperText, value);
+    }
+
     private void SetControlsEnabled(bool enabled)
     {
         RefreshButton.IsEnabled = enabled;
@@ -250,6 +389,67 @@ public partial class LocalModelsWindow : Window
         UseVisionButton.IsEnabled = enabled && reviewedCandidate?.EligibleVision == true;
         UseEmbeddingButton.IsEnabled = enabled && reviewedCandidate?.EligibleEmbedding == true;
     }
+
+    private void SetWhisperControlsEnabled(bool enabled)
+    {
+        WhisperExecutablePath.IsEnabled = enabled;
+        WhisperModelPath.IsEnabled = enabled;
+        WhisperRuntimeLicensePath.IsEnabled = enabled;
+        WhisperModelLicensePath.IsEnabled = enabled;
+        BrowseWhisperExecutableButton.IsEnabled = enabled;
+        BrowseWhisperModelButton.IsEnabled = enabled;
+        BrowseWhisperRuntimeLicenseButton.IsEnabled = enabled;
+        BrowseWhisperModelLicenseButton.IsEnabled = enabled;
+        ReviewWhisperBackendButton.IsEnabled = enabled;
+        WhisperApprovalBox.IsEnabled = enabled && reviewedWhisperBackend is not null;
+        SaveWhisperBackendButton.IsEnabled = enabled && reviewedWhisperBackend is not null;
+        ClearWhisperBackendButton.IsEnabled = enabled;
+    }
+
+    private void BrowseInto(TextBox target, string filter, string title)
+    {
+        var dialog = new OpenFileDialog
+        {
+            CheckFileExists = true,
+            CheckPathExists = true,
+            Multiselect = false,
+            Filter = filter,
+            Title = title,
+        };
+        if (dialog.ShowDialog(this) == true) target.Text = dialog.FileName;
+    }
+
+    private void ResetWhisperReview()
+    {
+        reviewedWhisperBackend = null;
+        if (WhisperApprovalBox is null) return;
+        WhisperApprovalBox.IsChecked = false;
+        WhisperApprovalBox.IsEnabled = false;
+        SaveWhisperBackendButton.IsEnabled = false;
+        SetWhisperDetails("Enter four existing local file paths, then review them.");
+        SetWhisperLicense("Complete runtime and model license text will appear after review.");
+    }
+
+    private void SetWhisperReview(WhisperBackendReview review)
+    {
+        var binding = review.Binding;
+        SetWhisperDetails(
+            $"Executable: {System.IO.Path.GetFileName(binding.ExecutablePath)}, {review.ExecutableBytes:N0} bytes, SHA-256 {binding.ExecutableSha256}. " +
+            $"Model: {System.IO.Path.GetFileName(binding.ModelPath)}, {review.ModelBytes:N0} bytes, SHA-256 {binding.ModelSha256}. " +
+            $"Runtime license SHA-256 {binding.RuntimeLicenseSha256}. Model license SHA-256 {binding.ModelLicenseSha256}. " +
+            "Publisher authenticity and transcription accuracy are not established by this review.");
+        SetWhisperLicense(
+            "WHISPER RUNTIME LICENSE — COMPLETE TEXT\n\n" + review.RuntimeLicenseText +
+            "\n\nWHISPER MODEL LICENSE — COMPLETE TEXT\n\n" + review.ModelLicenseText);
+    }
+
+    private void SetWhisperDetails(string value)
+    {
+        WhisperBackendDetails.Text = value;
+        AutomationProperties.SetName(WhisperBackendDetails, value);
+    }
+
+    private void SetWhisperLicense(string value) => WhisperLicenseText.Text = value;
 
     private static void SetCurrent(TextBlock target, string capability, ApprovedLocalModelBinding? binding)
     {

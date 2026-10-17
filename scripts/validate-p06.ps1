@@ -2,6 +2,9 @@
 param()
 
 $ErrorActionPreference = "Stop"
+if ($PSVersionTable.PSEdition -ne "Core" -or $PSVersionTable.PSVersion.Major -lt 7) {
+    throw "P06 validation requires PowerShell 7 or later for the .NET production adapters."
+}
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $runRoot = Join-Path $repoRoot "artifacts\test-results\p06-$([Guid]::NewGuid().ToString('N'))"
 $solution = Join-Path $repoRoot "DCx.slnx"
@@ -9,6 +12,8 @@ $tests = Join-Path $repoRoot "tests\DCx.Core.Tests\DCx.Core.Tests.csproj"
 $localModelsTrx = Join-Path $runRoot "p06-local-models.trx"
 $fixtureImage = Join-Path $runRoot "vision-fixture.png"
 $manifestPath = Join-Path $runRoot "hardware-manifest.json"
+$whisperRegistrationRoot = Join-Path $runRoot "whisper-registration"
+$whisperRegistrationEvidencePath = Join-Path $whisperRegistrationRoot "whisper-registration-evidence.json"
 $ollama = "D:\Programs\Ollama\ollama.exe"
 $modelDigest = "ef33995bb2ac37689e49c1a15cd627354d05a3c21d1f4bdcd6a5c83825349c1f"
 $model = "llamacpp:$modelDigest"
@@ -37,6 +42,19 @@ try {
         [int]$localModelsCounters.timeout -ne 0 -or
         [int]$localModelsCounters.aborted -ne 0) {
         throw "P06 TRX counters did not prove that every selected local-model test passed."
+    }
+    & (Join-Path $repoRoot "scripts\validate-p06-whisper-registration.ps1") -RunRoot $whisperRegistrationRoot
+    if (-not (Test-Path -LiteralPath $whisperRegistrationEvidencePath -PathType Leaf)) {
+        throw "The native Whisper registration evidence was not retained."
+    }
+    $whisperRegistrationEvidence = Get-Content -LiteralPath $whisperRegistrationEvidencePath -Raw | ConvertFrom-Json
+    if ($whisperRegistrationEvidence.native_uia -ne "pass" -or
+        $whisperRegistrationEvidence.approval_default_unchecked -ne $true -or
+        $whisperRegistrationEvidence.save_without_approval_denied -ne $true -or
+        $whisperRegistrationEvidence.download_or_install_action_exposed -ne $false -or
+        $whisperRegistrationEvidence.source_files_preserved -ne $true -or
+        $whisperRegistrationEvidence.real_backend_accuracy_validated -ne $false) {
+        throw "The native Whisper registration evidence did not prove the expected safe fixture boundary."
     }
 }
 finally {
@@ -216,6 +234,12 @@ $manifest = [ordered]@{
     ollama_embedding_adapter_fixture_passed = $true
     ollama_redirects_disabled = $true
     whisper_pinned_files_locked_during_execution = $true
+    whisper_registration_native_uia_passed = $true
+    whisper_registration_approval_default_unchecked = $true
+    whisper_registration_complete_licenses_exposed = $true
+    whisper_registration_download_or_install_action_exposed = $false
+    whisper_registration_source_files_preserved_after_clear = $true
+    whisper_registration_evidence = $whisperRegistrationEvidencePath
     local_model_contract_tests = $localModelTestsPassed
     model_unload_verified = $unloaded
 }
@@ -236,6 +260,9 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Installed embedding models=$(@($manifest.installed_embedding_models).Count)"
 "Hash-pinned Whisper adapter fixture=PASS"
 "Pinned Whisper executable/model execution leases=PASS"
+"Accessible already-installed Whisper registration and complete-license review=PASS"
+"Whisper registration defaults unchecked and exposes no download/install action=PASS"
+"Whisper registration clear preserves all source files=PASS"
 "Bounded Ollama embedding adapter fixture=PASS"
 "Ollama redirect/cookie/proxy denial and response-origin validation=PASS"
 "Low-resource and local-first fallback tests=PASS"

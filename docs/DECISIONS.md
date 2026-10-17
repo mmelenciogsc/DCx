@@ -34,5 +34,6 @@
 | [0030](architecture/adr/0030-bounded-windows-msix-trust-inspection.md) | Bind bounded MSIX manifest identity to real Windows signature evidence before approval | Accepted for read-only admission; signed positive blocked | 2026-10-17 |
 | [0031](architecture/adr/0031-no-remediation-release-scanning.md) | Require trusted no-remediation malware scans and official dependency-advisory auditing for release staging | Accepted for local release staging; independent assessment blocked | 2026-10-17 |
 | [0032](architecture/adr/0032-reproducible-unsigned-self-contained-msix.md) | Build a reproducible unsigned self-contained MSIX without creating install authority | Accepted for inert local validation; signing/install blocked | 2026-10-17 |
+| [0033](architecture/adr/0033-explicit-whisper-file-registration.md) | Register an already-installed Whisper backend by exact approved runtime, model and license files | Accepted for fixture-backed registration; real backend blocked | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

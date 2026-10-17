@@ -46,6 +46,12 @@
                                    TextWrapping="Wrap"
                                    AutomationProperties.AutomationId="CurrentEmbeddingModel"
                                    AutomationProperties.Name="Embedding: none selected." />
+                        <TextBlock x:Name="CurrentWhisperText"
+                                   Margin="0,8,0,0"
+                                   Text="Transcription: none selected."
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="CurrentWhisperBackend"
+                                   AutomationProperties.Name="Transcription: none selected." />
                     </StackPanel>
                 </GroupBox>
 
@@ -99,10 +105,165 @@
                 <CheckBox x:Name="ApprovalBox"
                           Margin="0,16,0,0"
                           FontWeight="SemiBold"
-                          Content="_I reviewed this exact model digest and license and approve selecting it"
+                          Content="I reviewed this exact model digest and license and a_pprove selecting it"
                           AutomationProperties.AutomationId="ApproveLocalModelSelectionBox"
                           AutomationProperties.Name="I reviewed this exact model digest and license and approve selecting it"
                           AutomationProperties.HelpText="Unchecked by default and required for each new vision or embedding selection." />
+
+                <GroupBox Margin="0,20,0,0" Header="Already-installed Whisper transcription backend">
+                    <StackPanel Margin="12,8">
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="Register an existing local Whisper command-line executable, model, and their complete license files. DCx does not download or install them. Registration pins all four file identities, but does not prove publisher authenticity, model accuracy, or suitability." />
+
+                        <Label Margin="0,10,0,0"
+                               Padding="0,0,0,4"
+                               Target="{Binding ElementName=WhisperExecutablePath}"
+                               Content="Whisper e_xecutable (.exe)" />
+                        <DockPanel LastChildFill="True">
+                            <Button x:Name="BrowseWhisperExecutableButton"
+                                    DockPanel.Dock="Right"
+                                    MinWidth="100"
+                                    MinHeight="34"
+                                    Margin="8,0,0,0"
+                                    Content="_Browse..."
+                                    AutomationProperties.AutomationId="BrowseWhisperExecutableButton"
+                                    AutomationProperties.Name="Browse for already-installed Whisper executable"
+                                    Click="OnBrowseWhisperExecutableClick" />
+                            <TextBox x:Name="WhisperExecutablePath"
+                                     MinHeight="34"
+                                     Padding="6"
+                                     AutomationProperties.AutomationId="WhisperExecutablePath"
+                                     AutomationProperties.Name="Already-installed Whisper executable path"
+                                     TextChanged="OnWhisperInputChanged" />
+                        </DockPanel>
+
+                        <Label Margin="0,10,0,0"
+                               Padding="0,0,0,4"
+                               Target="{Binding ElementName=WhisperModelPath}"
+                               Content="Whisper _model (.bin or .gguf)" />
+                        <DockPanel LastChildFill="True">
+                            <Button x:Name="BrowseWhisperModelButton"
+                                    DockPanel.Dock="Right"
+                                    MinWidth="100"
+                                    MinHeight="34"
+                                    Margin="8,0,0,0"
+                                    Content="Br_owse..."
+                                    AutomationProperties.AutomationId="BrowseWhisperModelButton"
+                                    AutomationProperties.Name="Browse for already-installed Whisper model"
+                                    Click="OnBrowseWhisperModelClick" />
+                            <TextBox x:Name="WhisperModelPath"
+                                     MinHeight="34"
+                                     Padding="6"
+                                     AutomationProperties.AutomationId="WhisperModelPath"
+                                     AutomationProperties.Name="Already-installed Whisper model path"
+                                     TextChanged="OnWhisperInputChanged" />
+                        </DockPanel>
+
+                        <Label Margin="0,10,0,0"
+                               Padding="0,0,0,4"
+                               Target="{Binding ElementName=WhisperRuntimeLicensePath}"
+                               Content="Runtime _license file" />
+                        <DockPanel LastChildFill="True">
+                            <Button x:Name="BrowseWhisperRuntimeLicenseButton"
+                                    DockPanel.Dock="Right"
+                                    MinWidth="100"
+                                    MinHeight="34"
+                                    Margin="8,0,0,0"
+                                    Content="Browse r_untime..."
+                                    AutomationProperties.AutomationId="BrowseWhisperRuntimeLicenseButton"
+                                    AutomationProperties.Name="Browse for Whisper runtime license file"
+                                    Click="OnBrowseWhisperRuntimeLicenseClick" />
+                            <TextBox x:Name="WhisperRuntimeLicensePath"
+                                     MinHeight="34"
+                                     Padding="6"
+                                     AutomationProperties.AutomationId="WhisperRuntimeLicensePath"
+                                     AutomationProperties.Name="Whisper runtime license path"
+                                     TextChanged="OnWhisperInputChanged" />
+                        </DockPanel>
+
+                        <Label Margin="0,10,0,0"
+                               Padding="0,0,0,4"
+                               Target="{Binding ElementName=WhisperModelLicensePath}"
+                               Content="Model l_icense file" />
+                        <DockPanel LastChildFill="True">
+                            <Button x:Name="BrowseWhisperModelLicenseButton"
+                                    DockPanel.Dock="Right"
+                                    MinWidth="100"
+                                    MinHeight="34"
+                                    Margin="8,0,0,0"
+                                    Content="Browse mo_del..."
+                                    AutomationProperties.AutomationId="BrowseWhisperModelLicenseButton"
+                                    AutomationProperties.Name="Browse for Whisper model license file"
+                                    Click="OnBrowseWhisperModelLicenseClick" />
+                            <TextBox x:Name="WhisperModelLicensePath"
+                                     MinHeight="34"
+                                     Padding="6"
+                                     AutomationProperties.AutomationId="WhisperModelLicensePath"
+                                     AutomationProperties.Name="Whisper model license path"
+                                     TextChanged="OnWhisperInputChanged" />
+                        </DockPanel>
+
+                        <Button x:Name="ReviewWhisperBackendButton"
+                                Width="200"
+                                MinHeight="36"
+                                Margin="0,14,0,0"
+                                HorizontalAlignment="Left"
+                                Content="Review exact _files"
+                                AutomationProperties.AutomationId="ReviewWhisperBackendButton"
+                                AutomationProperties.Name="Review exact Whisper backend files"
+                                AutomationProperties.HelpText="Reads and hashes the four local files. Nothing is downloaded, installed, or uploaded."
+                                Click="OnReviewWhisperBackendClick" />
+
+                        <TextBlock x:Name="WhisperBackendDetails"
+                                   Margin="0,12,0,0"
+                                   Text="Enter four existing local file paths, then review them."
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="WhisperBackendDetails"
+                                   AutomationProperties.Name="Enter four existing local file paths, then review them." />
+
+                        <TextBox x:Name="WhisperLicenseText"
+                                 MinHeight="120"
+                                 MaxHeight="240"
+                                 Margin="0,12,0,0"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="Complete runtime and model license text will appear after review."
+                                 AutomationProperties.AutomationId="WhisperLicenseText"
+                                 AutomationProperties.Name="Complete Whisper runtime and model license text" />
+
+                        <CheckBox x:Name="WhisperApprovalBox"
+                                  Margin="0,14,0,0"
+                                  FontWeight="SemiBold"
+                                  IsEnabled="False"
+                                  Content="I reviewed these exact four file digests and both complete licenses and _approve registration"
+                                  AutomationProperties.AutomationId="ApproveWhisperBackendBox"
+                                  AutomationProperties.Name="I reviewed these exact four file digests and both complete licenses and approve registration"
+                                  AutomationProperties.HelpText="Unchecked by default. Required after every review or file-path change." />
+
+                        <WrapPanel Margin="0,14,0,0">
+                            <Button x:Name="SaveWhisperBackendButton"
+                                    MinWidth="180"
+                                    MinHeight="36"
+                                    Margin="0,0,10,0"
+                                    IsEnabled="False"
+                                    Content="_Save registration"
+                                    AutomationProperties.AutomationId="SaveWhisperBackendButton"
+                                    AutomationProperties.Name="Save approved Whisper backend registration"
+                                    Click="OnSaveWhisperBackendClick" />
+                            <Button x:Name="ClearWhisperBackendButton"
+                                    MinWidth="180"
+                                    MinHeight="36"
+                                    Content="Clear regis_tration"
+                                    AutomationProperties.AutomationId="ClearWhisperBackendButton"
+                                    AutomationProperties.Name="Clear Whisper backend registration"
+                                    AutomationProperties.HelpText="Clears only the DCx registration. It does not delete or uninstall any file."
+                                    Click="OnClearWhisperBackendClick" />
+                        </WrapPanel>
+                    </StackPanel>
+                </GroupBox>
 
                 <WrapPanel Margin="0,16,0,0">
                     <Button x:Name="UseVisionButton"
@@ -126,14 +287,14 @@
                     <Button MinWidth="140"
                             MinHeight="36"
                             Margin="0,0,10,10"
-                            Content="Clear v_ision"
+                            Content="Clear visio_n"
                             AutomationProperties.AutomationId="ClearLocalVisionModelButton"
                             AutomationProperties.Name="Clear selected local vision model"
                             Click="OnClearVisionClick" />
                     <Button MinWidth="160"
                             MinHeight="36"
                             Margin="0,0,10,10"
-                            Content="Clear e_mbeddings"
+                            Content="Clear embeddin_gs"
                             AutomationProperties.AutomationId="ClearLocalEmbeddingModelButton"
                             AutomationProperties.Name="Clear selected local embedding model"
                             Click="OnClearEmbeddingClick" />

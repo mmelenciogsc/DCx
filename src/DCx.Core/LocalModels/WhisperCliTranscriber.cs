@@ -10,7 +10,9 @@ public sealed record WhisperCliConfiguration(
     string ModelSha256,
     TimeSpan Timeout,
     long MaximumAudioBytes = 512L * 1024 * 1024,
-    long MaximumTranscriptBytes = 1024L * 1024);
+    long MaximumTranscriptBytes = 1024L * 1024,
+    long MaximumExecutableBytes = 1024L * 1024 * 1024,
+    long MaximumModelBytes = 16L * 1024 * 1024 * 1024);
 
 public sealed record WhisperTranscriptionResult(
     string Text,
@@ -26,17 +28,23 @@ public sealed class WhisperCliTranscriber
     public WhisperCliTranscriber(WhisperCliConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
-        executablePath = ValidateFile(configuration.ExecutablePath, ".exe", "Whisper executable");
-        modelPath = ValidateModel(configuration.ModelPath);
         ValidateDigest(configuration.ExecutableSha256, nameof(configuration.ExecutableSha256));
         ValidateDigest(configuration.ModelSha256, nameof(configuration.ModelSha256));
         if (configuration.Timeout < TimeSpan.FromMilliseconds(100) || configuration.Timeout > TimeSpan.FromMinutes(30) ||
             configuration.MaximumAudioBytes is <= 0 or > 2L * 1024 * 1024 * 1024 ||
-            configuration.MaximumTranscriptBytes is <= 0 or > 16L * 1024 * 1024)
+            configuration.MaximumTranscriptBytes is <= 0 or > 16L * 1024 * 1024 ||
+            configuration.MaximumExecutableBytes is <= 0 or > 2L * 1024 * 1024 * 1024 ||
+            configuration.MaximumModelBytes is <= 0 or > 32L * 1024 * 1024 * 1024)
         {
             throw new ArgumentOutOfRangeException(nameof(configuration), "Whisper resource limits are invalid.");
         }
 
+        executablePath = ValidateFile(
+            configuration.ExecutablePath,
+            ".exe",
+            "Whisper executable",
+            configuration.MaximumExecutableBytes);
+        modelPath = ValidateModel(configuration.ModelPath, configuration.MaximumModelBytes);
         this.configuration = configuration;
     }
 
@@ -45,7 +53,7 @@ public sealed class WhisperCliTranscriber
         string language = "en",
         CancellationToken cancellationToken = default)
     {
-        var audio = ValidateWave(audioPath, configuration.MaximumAudioBytes);
+        await using var audioLease = OpenValidatedWave(audioPath, configuration.MaximumAudioBytes);
         ArgumentException.ThrowIfNullOrWhiteSpace(language);
         if (language.Length is < 2 or > 16 || !language.All(character => char.IsAsciiLetter(character) || character == '-'))
         {
@@ -55,10 +63,12 @@ public sealed class WhisperCliTranscriber
         await using var executableLease = await OpenVerifiedPinnedFileAsync(
             executablePath,
             configuration.ExecutableSha256,
+            configuration.MaximumExecutableBytes,
             cancellationToken).ConfigureAwait(false);
         await using var modelLease = await OpenVerifiedPinnedFileAsync(
             modelPath,
             configuration.ModelSha256,
+            configuration.MaximumModelBytes,
             cancellationToken).ConfigureAwait(false);
 
         var operationRoot = Path.Combine(Path.GetTempPath(), "DCx", "whisper", Guid.NewGuid().ToString("N"));
@@ -83,7 +93,7 @@ public sealed class WhisperCliTranscriber
             startInfo.Environment["TEMP"] = operationRoot;
             startInfo.Environment["TMP"] = operationRoot;
             AddArgument(startInfo, "-m", modelPath);
-            AddArgument(startInfo, "-f", audio.FullName);
+            AddArgument(startInfo, "-f", audioLease.Name);
             AddArgument(startInfo, "-l", language);
             AddArgument(startInfo, "-of", outputPrefix);
             startInfo.ArgumentList.Add("-otxt");
@@ -159,29 +169,44 @@ public sealed class WhisperCliTranscriber
         return Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false));
     }
 
-    private static FileInfo ValidateWave(string path, long maximumBytes)
+    private static FileStream OpenValidatedWave(string path, long maximumBytes)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        var file = new FileInfo(Path.GetFullPath(path));
+        var canonical = Path.GetFullPath(path);
+        RejectNetworkPath(canonical, "Whisper input");
+        var file = new FileInfo(canonical);
         if (!file.Exists || !string.Equals(file.Extension, ".wav", StringComparison.OrdinalIgnoreCase) ||
             file.Length is < 12 || file.Length > maximumBytes || (file.Attributes & FileAttributes.ReparsePoint) != 0)
         {
             throw new ArgumentException("Whisper input must be a bounded regular WAV file.", nameof(path));
         }
+        RejectReparseChain(canonical, "Whisper input");
 
-        Span<byte> header = stackalloc byte[12];
-        using var stream = file.Open(FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (stream.Read(header) != header.Length || !header.StartsWith("RIFF"u8) || !header[8..].StartsWith("WAVE"u8))
+        var stream = file.Open(FileMode.Open, FileAccess.Read, FileShare.Read);
+        try
         {
-            throw new ArgumentException("Whisper input does not have a WAV signature.", nameof(path));
+            if (stream.Length is < 12 || stream.Length > maximumBytes)
+            {
+                throw new ArgumentException("Whisper input must be a bounded regular WAV file.", nameof(path));
+            }
+            Span<byte> header = stackalloc byte[12];
+            if (stream.Read(header) != header.Length || !header.StartsWith("RIFF"u8) || !header[8..].StartsWith("WAVE"u8))
+            {
+                throw new ArgumentException("Whisper input does not have a WAV signature.", nameof(path));
+            }
+            stream.Position = 0;
+            return stream;
         }
-
-        return file;
+        catch
+        {
+            stream.Dispose();
+            throw;
+        }
     }
 
-    private static string ValidateModel(string path)
+    private static string ValidateModel(string path, long maximumBytes)
     {
-        var canonical = ValidateFile(path, null, "Whisper model");
+        var canonical = ValidateFile(path, null, "Whisper model", maximumBytes);
         var extension = Path.GetExtension(canonical);
         if (!string.Equals(extension, ".bin", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(extension, ".gguf", StringComparison.OrdinalIgnoreCase))
@@ -192,16 +217,19 @@ public sealed class WhisperCliTranscriber
         return canonical;
     }
 
-    private static string ValidateFile(string path, string? extension, string label)
+    private static string ValidateFile(string path, string? extension, string label, long maximumBytes)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var canonical = Path.GetFullPath(path);
+        RejectNetworkPath(canonical, label);
         var file = new FileInfo(canonical);
-        if (!file.Exists || file.Length <= 0 || (file.Attributes & FileAttributes.ReparsePoint) != 0 ||
+        if (!file.Exists || file.Length <= 0 || file.Length > maximumBytes ||
+            (file.Attributes & FileAttributes.ReparsePoint) != 0 ||
             extension is not null && !string.Equals(file.Extension, extension, StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException($"{label} must be an existing regular {extension ?? "file"}.", nameof(path));
         }
+        RejectReparseChain(canonical, label);
 
         return canonical;
     }
@@ -217,16 +245,19 @@ public sealed class WhisperCliTranscriber
     private static async Task<FileStream> OpenVerifiedPinnedFileAsync(
         string path,
         string expectedSha256,
+        long maximumBytes,
         CancellationToken cancellationToken)
     {
         FileStream? lease = null;
         try
         {
             var file = new FileInfo(path);
-            if (!file.Exists || file.Length <= 0 || (file.Attributes & FileAttributes.ReparsePoint) != 0)
+            if (!file.Exists || file.Length <= 0 || file.Length > maximumBytes ||
+                (file.Attributes & FileAttributes.ReparsePoint) != 0)
             {
                 throw new InvalidOperationException("A pinned local Whisper executable or model is unavailable or unsafe.");
             }
+            RejectReparseChain(path, "Pinned local Whisper file");
 
             lease = new FileStream(
                 path,
@@ -235,6 +266,10 @@ public sealed class WhisperCliTranscriber
                 FileShare.Read,
                 128 * 1024,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
+            if (lease.Length <= 0 || lease.Length > maximumBytes)
+            {
+                throw new InvalidOperationException("A pinned local Whisper executable or model is outside its size limit.");
+            }
             var actual = Convert.ToHexStringLower(
                 await SHA256.HashDataAsync(lease, cancellationToken).ConfigureAwait(false));
             if (!string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase))
@@ -250,6 +285,28 @@ public sealed class WhisperCliTranscriber
         finally
         {
             if (lease is not null) await lease.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private static void RejectNetworkPath(string path, string label)
+    {
+        if (path.StartsWith("\\\\", StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"{label} must be on a local drive.", nameof(path));
+        }
+    }
+
+    private static void RejectReparseChain(string path, string label)
+    {
+        var file = new FileInfo(path);
+        DirectoryInfo? parent = file.Directory;
+        while (parent is not null)
+        {
+            if ((parent.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException($"{label} cannot cross a reparse directory.");
+            }
+            parent = parent.Parent;
         }
     }
 

@@ -91,6 +91,7 @@ public sealed class WhisperCliTranscriberTests : IDisposable
         await Task.Delay(200);
 
         await Assert.ThrowsAsync<IOException>(() => File.WriteAllBytesAsync(model, "replacement"u8.ToArray()));
+        await Assert.ThrowsAsync<IOException>(() => File.WriteAllBytesAsync(audio, "replacement"u8.ToArray()));
         await Assert.ThrowsAsync<TimeoutException>(() => transcription);
     }
 
