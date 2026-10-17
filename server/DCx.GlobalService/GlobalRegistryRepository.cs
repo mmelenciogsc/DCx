@@ -138,14 +138,54 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
     public async Task<GlobalReleaseDescriptor> PublishAsync(
         IReadOnlyList<GlobalReleaseChange> changes,
         DateTimeOffset issuedUtc,
+        CancellationToken cancellationToken = default) =>
+        await PublishCoreAsync(null, changes, issuedUtc, cancellationToken).ConfigureAwait(false);
+
+    public async Task<GlobalReleaseDescriptor> PublishIdempotentAsync(
+        string operationId,
+        IReadOnlyList<GlobalReleaseChange> changes,
+        DateTimeOffset issuedUtc,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 256 ||
+            operationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '.' and not '_' and not '-' and not ':'))
+        {
+            throw new GlobalReplicaException("The publication operation identifier is invalid.");
+        }
+
+        return await PublishCoreAsync(operationId, changes, issuedUtc, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<GlobalReleaseDescriptor> PublishCoreAsync(
+        string? operationId,
+        IReadOnlyList<GlobalReleaseChange> changes,
+        DateTimeOffset issuedUtc,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(changes);
+        var requestSha256 = operationId is null
+            ? null
+            : GlobalReleaseCodec.Sha256(GlobalReleaseCodec.CreateCanonicalChangeSet(changes));
         await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            if (operationId is not null)
+            {
+                var existing = await ReadPublicationOperationAsync(
+                    connection, (SqliteTransaction)transaction, operationId, cancellationToken).ConfigureAwait(false);
+                if (existing is not null)
+                {
+                    if (!string.Equals(existing.RequestSha256, requestSha256, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new GlobalReplicaException("The publication operation identifier was reused for different changes.");
+                    }
+
+                    return existing.Descriptor;
+                }
+            }
+
             var previous = await ReadLatestRowAsync(connection, (SqliteTransaction)transaction, cancellationToken)
                 .ConfigureAwait(false);
             var previousResources = previous is null
@@ -189,6 +229,20 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
             command.Parameters.AddWithValue("$catalog", catalogBytes);
             command.Parameters.AddWithValue("$issued", issuedUtc.ToUniversalTime().ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            if (operationId is not null)
+            {
+                command.Parameters.Clear();
+                command.CommandText = """
+                    INSERT INTO publication_operations(operation_id, request_sha256, release_sequence, created_utc)
+                    VALUES($operation, $request, $release, $created);
+                    """;
+                command.Parameters.AddWithValue("$operation", operationId);
+                command.Parameters.AddWithValue("$request", requestSha256!);
+                command.Parameters.AddWithValue("$release", descriptor.Sequence);
+                command.Parameters.AddWithValue("$created", issuedUtc.ToUniversalTime().ToString("O"));
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return descriptor;
         }
@@ -444,6 +498,13 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
                 envelope BLOB NOT NULL,
                 issued_utc TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS publication_operations(
+                operation_id TEXT PRIMARY KEY,
+                request_sha256 TEXT NOT NULL,
+                release_sequence INTEGER NOT NULL,
+                created_utc TEXT NOT NULL,
+                FOREIGN KEY(release_sequence) REFERENCES releases(sequence)
+            );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -475,6 +536,36 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
         return new ReleaseRow(
             new GlobalReleaseDescriptor(reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2)),
             (byte[])reader[3]);
+    }
+
+    private static async Task<PublicationOperationRow?> ReadPublicationOperationAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT operation.request_sha256, release.sequence, release.sha256, release.size_bytes, release.envelope
+            FROM publication_operations AS operation
+            JOIN releases AS release ON release.sequence = operation.release_sequence
+            WHERE operation.operation_id = $operation;
+            """;
+        command.Parameters.AddWithValue("$operation", operationId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) return null;
+        var requestSha256 = reader.GetString(0);
+        var envelope = (byte[])reader[4];
+        var descriptor = new GlobalReleaseDescriptor(reader.GetInt64(1), reader.GetString(2), reader.GetInt64(3));
+        if (requestSha256.Length != 64 || !requestSha256.All(char.IsAsciiHexDigit) ||
+            envelope.LongLength != descriptor.SizeBytes ||
+            !string.Equals(GlobalReleaseCodec.Sha256(envelope), descriptor.Sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new GlobalReplicaException("The publication operation record failed its integrity check.");
+        }
+
+        return new PublicationOperationRow(requestSha256, descriptor);
     }
 
     private static byte[] Slice(byte[] value, long offset, int count)
@@ -522,6 +613,8 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
     }
 
     private sealed record ReleaseRow(GlobalReleaseDescriptor Descriptor, byte[] CatalogBytes);
+
+    private sealed record PublicationOperationRow(string RequestSha256, GlobalReleaseDescriptor Descriptor);
 }
 
 public sealed class RepositoryRegistryTransport(GlobalRegistryRepository repository) : IGlobalRegistryTransport

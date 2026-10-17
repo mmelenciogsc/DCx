@@ -97,6 +97,52 @@ public sealed class ContributionGovernanceTests : IDisposable
     }
 
     [Fact]
+    public async Task ApprovalAndWithdrawal_ReconcileCommittedRegistryOperationsWithoutDuplicateReleases()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "reconciliation-registry"), key.ExportPkcs8PrivateKey());
+        var governance = await ContributionGovernanceService.OpenAsync(
+            Path.Combine(root, "reconciliation-governance"), registry);
+        var candidate = Candidate(
+            "candidate:reconciliation",
+            "resource:reconciliation",
+            "A deterministic fixture for cross-database publication recovery and retry safety.");
+        var prepared = Prepare(candidate, "nonce-reconciliation-1234");
+        await governance.IntakeAsync(prepared, now);
+        var resource = new GlobalResourceRecord(
+            candidate.ResourceId,
+            candidate.Version,
+            candidate.Kind,
+            candidate.Title,
+            candidate.Body,
+            candidate.SourceUri,
+            candidate.License,
+            candidate.Capabilities);
+
+        var committedApproval = await registry.PublishIdempotentAsync(
+            PublicationOperationId("approval", prepared.SubmissionId),
+            [new GlobalReleaseChange(GlobalReleaseChangeKind.Upsert, resource.ResourceId, resource.Version, resource)],
+            now);
+        var recoveredApproval = await governance.ApproveAndPublishAsync(
+            prepared.SubmissionId, "reviewer:fixture", now.AddMinutes(1));
+
+        var committedWithdrawal = await registry.PublishIdempotentAsync(
+            PublicationOperationId("withdrawal", prepared.SubmissionId),
+            [new GlobalReleaseChange(GlobalReleaseChangeKind.Deprecate, candidate.ResourceId, candidate.Version)],
+            now.AddDays(1));
+        var recoveredWithdrawal = await governance.WithdrawAsync(prepared.SubmissionId, now.AddDays(1).AddMinutes(1));
+
+        Assert.Equal(committedApproval, recoveredApproval);
+        Assert.Equal(committedWithdrawal, recoveredWithdrawal);
+        Assert.Equal(2, (await registry.GetLatestAsync())!.Sequence);
+        var client = await GlobalReplicaClient.OpenAsync(
+            Path.Combine(root, "reconciliation-client"), registry.TrustRootSubjectPublicKeyInfo);
+        await client.SynchronizeAsync(new RepositoryRegistryTransport(registry));
+        Assert.True(Assert.Single(await client.SearchAsync("cross database recovery", null)).Deprecated);
+    }
+
+    [Fact]
     public async Task CcbSubmission_RequiresAuthoritativeSandboxAndPropagatesTestedArtifact()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -295,6 +341,9 @@ public sealed class ContributionGovernanceTests : IDisposable
             approval,
             now);
     }
+
+    private static string PublicationOperationId(string action, string submissionId) =>
+        $"contribution-{action}:{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(submissionId)))}";
 
     private sealed class FixtureSandboxExecutor(bool outputMismatch = false) : ICcbSandboxExecutor
     {

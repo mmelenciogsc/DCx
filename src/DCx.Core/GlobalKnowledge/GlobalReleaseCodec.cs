@@ -42,28 +42,33 @@ public static class GlobalReleaseCodec
             writer.WriteString("resultCatalogSha256", manifest.ResultCatalogSha256.ToLowerInvariant());
             writer.WriteString("issuedUtc", manifest.IssuedUtc.ToUniversalTime().ToString("O"));
             writer.WriteStartArray("changes");
-            foreach (var change in manifest.Changes
-                         .OrderBy(item => item.ResourceId, StringComparer.Ordinal)
-                         .ThenBy(item => item.Kind)
-                         .ThenBy(item => item.Version, StringComparer.Ordinal))
-            {
-                writer.WriteStartObject();
-                writer.WriteNumber("kind", (int)change.Kind);
-                writer.WriteString("resourceId", change.ResourceId);
-                writer.WriteString("version", change.Version);
-                if (change.Resource is null)
-                {
-                    writer.WriteNull("resource");
-                }
-                else
-                {
-                    writer.WritePropertyName("resource");
-                    WriteResource(writer, change.Resource);
-                }
+            WriteChanges(writer, manifest.Changes);
 
-                writer.WriteEndObject();
-            }
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
 
+        return stream.ToArray();
+    }
+
+    public static byte[] CreateCanonicalChangeSet(IReadOnlyList<GlobalReleaseChange> changes)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+        Validate(new GlobalReleaseManifest(
+            CurrentSchemaVersion,
+            1,
+            0,
+            null,
+            new string('0', 64),
+            DateTimeOffset.UnixEpoch,
+            changes));
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("schemaVersion", CurrentSchemaVersion);
+            writer.WriteStartArray("changes");
+            WriteChanges(writer, changes);
             writer.WriteEndArray();
             writer.WriteEndObject();
         }
@@ -342,6 +347,31 @@ public static class GlobalReleaseCodec
 
         writer.WriteBoolean("deprecated", resource.Deprecated);
         writer.WriteEndObject();
+    }
+
+    private static void WriteChanges(Utf8JsonWriter writer, IReadOnlyList<GlobalReleaseChange> changes)
+    {
+        foreach (var change in changes
+                     .OrderBy(item => item.ResourceId, StringComparer.Ordinal)
+                     .ThenBy(item => item.Kind)
+                     .ThenBy(item => item.Version, StringComparer.Ordinal))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("kind", (int)change.Kind);
+            writer.WriteString("resourceId", change.ResourceId);
+            writer.WriteString("version", change.Version);
+            if (change.Resource is null)
+            {
+                writer.WriteNull("resource");
+            }
+            else
+            {
+                writer.WritePropertyName("resource");
+                WriteResource(writer, change.Resource);
+            }
+
+            writer.WriteEndObject();
+        }
     }
 
     private const long ContentAddressedArtifactLimit = 256L * 1024 * 1024;

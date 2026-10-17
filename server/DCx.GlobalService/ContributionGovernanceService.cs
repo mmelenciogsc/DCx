@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Security.Cryptography;
+using System.Text;
 using DCx.Core.Contributions;
 using DCx.Core.GlobalKnowledge;
 using DCx.Core.Knowledge;
@@ -223,7 +224,8 @@ public sealed class ContributionGovernanceService
                 candidate.License,
                 candidate.Capabilities,
                 Artifact: artifact);
-            var release = await registry.PublishAsync(
+            var release = await registry.PublishIdempotentAsync(
+                PublicationOperationId("approval", submissionId),
                 [new GlobalReleaseChange(GlobalReleaseChangeKind.Upsert, resource.ResourceId, resource.Version, resource)],
                 issuedUtc,
                 cancellationToken).ConfigureAwait(false);
@@ -270,7 +272,8 @@ public sealed class ContributionGovernanceService
 
             var candidate = JsonSerializer.Deserialize<ContributionCandidate>(row.CandidateJson, JsonOptions)
                 ?? throw new ContributionPolicyException("submission_corrupt");
-            var release = await registry.PublishAsync(
+            var release = await registry.PublishIdempotentAsync(
+                PublicationOperationId("withdrawal", submissionId),
                 [new GlobalReleaseChange(GlobalReleaseChangeKind.Deprecate, candidate.ResourceId, candidate.Version)],
                 issuedUtc,
                 cancellationToken).ConfigureAwait(false);
@@ -622,6 +625,9 @@ public sealed class ContributionGovernanceService
             .OrderByDescending(finding => finding.Severity)
             .ThenBy(finding => finding.Code, StringComparer.Ordinal)
             .ToArray());
+
+    private static string PublicationOperationId(string action, string submissionId) =>
+        $"contribution-{action}:{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(submissionId)))}";
 
     private static async Task<SubmissionRow?> ReadSubmissionAsync(
         SqliteConnection connection,

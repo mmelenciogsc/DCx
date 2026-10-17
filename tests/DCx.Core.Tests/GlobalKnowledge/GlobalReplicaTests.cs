@@ -253,6 +253,39 @@ public sealed class GlobalReplicaTests : IDisposable
         Assert.Equal(1, (await repository.GetLatestAsync())!.Sequence);
     }
 
+    [Fact]
+    public async Task Registry_IdempotentPublicationSurvivesReopenAndRejectsChangedRequest()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var privateKey = key.ExportPkcs8PrivateKey();
+        var serverRoot = Path.Combine(root, "idempotent-server");
+        var firstResource = Resource("global:idempotent-a", "1", "First", "First idempotent resource.", [1f]);
+        var secondResource = Resource("global:idempotent-b", "1", "Second", "Second idempotent resource.", [0f, 1f]);
+        var firstChange = new GlobalReleaseChange(
+            GlobalReleaseChangeKind.Upsert, firstResource.ResourceId, firstResource.Version, firstResource);
+        var secondChange = new GlobalReleaseChange(
+            GlobalReleaseChangeKind.Upsert, secondResource.ResourceId, secondResource.Version, secondResource);
+        GlobalReleaseDescriptor initial;
+        await using (var repository = await GlobalRegistryRepository.OpenAsync(serverRoot, privateKey))
+        {
+            initial = await repository.PublishIdempotentAsync(
+                "fixture:idempotent-publication", [secondChange, firstChange], DateTimeOffset.Parse("2026-10-17T00:00:00Z"));
+        }
+
+        await using var reopened = await GlobalRegistryRepository.OpenAsync(serverRoot, privateKey);
+        var replay = await reopened.PublishIdempotentAsync(
+            "fixture:idempotent-publication", [firstChange, secondChange], DateTimeOffset.Parse("2026-10-18T00:00:00Z"));
+        var changed = firstResource with { Summary = "A conflicting changed request." };
+        var conflict = await Assert.ThrowsAsync<GlobalReplicaException>(() => reopened.PublishIdempotentAsync(
+            "fixture:idempotent-publication",
+            [new GlobalReleaseChange(GlobalReleaseChangeKind.Upsert, changed.ResourceId, changed.Version, changed)],
+            DateTimeOffset.Parse("2026-10-19T00:00:00Z")));
+
+        Assert.Equal(initial, replay);
+        Assert.Equal(1, (await reopened.GetLatestAsync())!.Sequence);
+        Assert.Contains("reused", conflict.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     public void Dispose()
     {
         TestDirectory.DeleteIfExists(root);
