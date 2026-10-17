@@ -65,7 +65,8 @@
                          AutomationProperties.Name="Web address"
                          AutomationProperties.HelpText="Enter an HTTP or HTTPS address. Press Control L from anywhere to focus this field."
                          KeyDown="OnAddressKeyDown" />
-                <Button Grid.Row="0"
+                <Button x:Name="GoButton"
+                        Grid.Row="0"
                         Grid.Column="4"
                         MinWidth="64"
                         Margin="8,0,0,0"
@@ -96,7 +97,8 @@
                               AutomationProperties.AutomationId="ProfilesBox"
                               AutomationProperties.Name="Browser profile for new tabs"
                               SelectionChanged="OnProfileSelectionChanged" />
-                    <Button Margin="0,0,6,0"
+                    <Button x:Name="BookmarkButton"
+                            Margin="0,0,6,0"
                             Content="Bookmark"
                             AutomationProperties.AutomationId="BookmarkButton"
                             AutomationProperties.Name="Bookmark current page"
@@ -243,6 +245,65 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
+
+            <GroupBox x:Name="WebView2PrerequisitePanel"
+                      Grid.ColumnSpan="2"
+                      Panel.ZIndex="10"
+                      Margin="32"
+                      Padding="24"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center"
+                      MaxWidth="760"
+                      Background="White"
+                      BorderBrush="#606060"
+                      BorderThickness="2"
+                      Header="Browser prerequisite"
+                      Visibility="Collapsed"
+                      AutomationProperties.AutomationId="WebView2PrerequisitePanel"
+                      AutomationProperties.Name="WebView2 Runtime required"
+                      AutomationProperties.LiveSetting="Assertive">
+                <StackPanel Margin="8">
+                    <TextBlock x:Name="WebView2PrerequisiteHeading"
+                               Margin="0,0,0,12"
+                               FontSize="24"
+                               FontWeight="SemiBold"
+                               Focusable="True"
+                               Text="WebView2 Runtime required"
+                               AutomationProperties.AutomationId="WebView2PrerequisiteHeading"
+                               AutomationProperties.Name="WebView2 Runtime required" />
+                    <TextBlock x:Name="WebView2PrerequisiteExplanation"
+                               Margin="0,0,0,12"
+                               TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="WebView2PrerequisiteExplanation"
+                               Text="DCx cannot open web pages because Microsoft Edge WebView2 Runtime is unavailable. No download or installation was attempted. Use another browser to visit the official Microsoft page. Install the Evergreen Runtime only after you approve it. Then return here and choose Recheck." />
+                    <Label Padding="0"
+                           Target="{Binding ElementName=WebView2DownloadAddress}"
+                           Content="Official Microsoft WebView2 download address" />
+                    <TextBox x:Name="WebView2DownloadAddress"
+                             Margin="0,4,0,12"
+                             Padding="6"
+                             IsReadOnly="True"
+                             Text="https://developer.microsoft.com/microsoft-edge/webview2/"
+                             AutomationProperties.AutomationId="WebView2DownloadAddress"
+                             AutomationProperties.Name="Official Microsoft WebView2 download address"
+                             AutomationProperties.HelpText="Read-only address. DCx does not open or download anything automatically." />
+                    <WrapPanel>
+                        <Button MinWidth="190"
+                                Margin="0,0,8,0"
+                                Content="Copy official address"
+                                AutomationProperties.AutomationId="CopyWebView2DownloadAddressButton"
+                                AutomationProperties.Name="Copy official Microsoft WebView2 download address"
+                                Click="OnCopyWebView2DownloadAddressClick" />
+                        <Button x:Name="RecheckWebView2RuntimeButton"
+                                MinWidth="100"
+                                Content="Recheck"
+                                AutomationProperties.AutomationId="RecheckWebView2RuntimeButton"
+                                AutomationProperties.Name="Recheck WebView2 Runtime availability"
+                                AutomationProperties.HelpText="Checks only this device. It does not download or install software."
+                                Click="OnRecheckWebView2RuntimeClick" />
+                    </WrapPanel>
+                </StackPanel>
+            </GroupBox>
 
             <TabControl x:Name="BrowserTabs"
                         Grid.Column="0"

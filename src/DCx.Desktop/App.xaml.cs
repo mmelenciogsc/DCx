@@ -39,12 +39,30 @@ public partial class App : Application
             return;
         }
 
+        IWebView2RuntimeProbe? webView2RuntimeProbe = null;
+        if (e.Args.Length == 1 &&
+            string.Equals(e.Args[0], "--webview2-unavailable-fixture", StringComparison.Ordinal))
+        {
+            if (!string.Equals(
+                    Environment.GetEnvironmentVariable("DCX_WEBVIEW2_UNAVAILABLE_FIXTURE"),
+                    "1",
+                    StringComparison.Ordinal))
+            {
+                Shutdown(2);
+                return;
+            }
+
+            webView2RuntimeProbe = new MissingWebView2RuntimeFixtureProbe();
+        }
+
         try
         {
             var applicationDataRoot = ApplicationDataRoot.Resolve();
             runtimeLease = ApplicationDataOperationLease.Acquire(applicationDataRoot, "starting DCx");
             TryInitializeCrashDiagnostics(applicationDataRoot);
-            MainWindow = new MainWindow();
+            MainWindow = webView2RuntimeProbe is null
+                ? new MainWindow()
+                : new MainWindow(webView2RuntimeProbe);
             MainWindow.Show();
         }
         catch (ApplicationDataInUseException exception)

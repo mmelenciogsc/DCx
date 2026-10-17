@@ -25,7 +25,9 @@ namespace DCx.Desktop;
 public partial class MainWindow : Window
 {
     private static readonly Uri StartPage = new("https://example.com/");
+    private const string WebView2DownloadPage = "https://developer.microsoft.com/microsoft-edge/webview2/";
 
+    private readonly IWebView2RuntimeProbe _webView2RuntimeProbe;
     private readonly AddressNavigationPolicy _navigationPolicy = new();
     private readonly BrowserProfilePaths _profilePaths = new();
     private readonly BrowserHistoryStore _historyStore;
@@ -56,9 +58,15 @@ public partial class MainWindow : Window
     private Task<LocalModelSelectionStore>? _localModelSelectionStore;
     private BrowserTabState? _pausedWebVideoTab;
     private Uri? _pausedWebVideoPage;
+    private bool _browserStartupInProgress;
 
-    public MainWindow()
+    public MainWindow() : this(new InstalledWebView2RuntimeProbe())
     {
+    }
+
+    internal MainWindow(IWebView2RuntimeProbe webView2RuntimeProbe)
+    {
+        _webView2RuntimeProbe = webView2RuntimeProbe ?? throw new ArgumentNullException(nameof(webView2RuntimeProbe));
         _domAdapter = new BrowserDomAdapter(_controlCoordinator);
         var metadataPaths = new BrowserMetadataPaths();
         _historyStore = new BrowserHistoryStore(metadataPaths.HistoryFile);
@@ -84,11 +92,112 @@ public partial class MainWindow : Window
         {
             ReplaceItems(_historyItems, await _historyStore.ReadAsync());
             ReplaceItems(_bookmarkItems, await _bookmarkStore.ReadAsync());
-            await CreateTabAsync(GetSelectedProfile(), GetNewTabAddress());
+            await StartBrowserIfAvailableAsync();
         }
-        catch (Exception exception)
+        catch
         {
-            SetStatus($"Browser startup failed. {exception.Message}");
+            ShowWebView2Prerequisite(inspectFailed: true);
+        }
+    }
+
+    private async Task StartBrowserIfAvailableAsync()
+    {
+        if (_browserStartupInProgress || BrowserTabs.Items.Count > 0) return;
+        _browserStartupInProgress = true;
+        try
+        {
+            WebView2RuntimeStatus runtime;
+            try
+            {
+                runtime = _webView2RuntimeProbe.Inspect();
+            }
+            catch
+            {
+                ShowWebView2Prerequisite(inspectFailed: true);
+                return;
+            }
+
+            if (!runtime.IsAvailable)
+            {
+                ShowWebView2Prerequisite(inspectFailed: false);
+                return;
+            }
+
+            HideWebView2Prerequisite();
+            try
+            {
+                await CreateTabAsync(GetSelectedProfile(), GetNewTabAddress());
+            }
+            catch (WebView2RuntimeNotFoundException)
+            {
+                ShowWebView2Prerequisite(inspectFailed: false);
+            }
+        }
+        finally
+        {
+            _browserStartupInProgress = false;
+        }
+    }
+
+    private void ShowWebView2Prerequisite(bool inspectFailed)
+    {
+        BrowserTabs.Visibility = Visibility.Collapsed;
+        WebView2PrerequisitePanel.Visibility = Visibility.Visible;
+        AddressBox.IsEnabled = false;
+        GoButton.IsEnabled = false;
+        NewTabButton.IsEnabled = false;
+        ProfilesBox.IsEnabled = false;
+        BookmarkButton.IsEnabled = false;
+        AgentDrawerButton.IsEnabled = false;
+        WebView2PrerequisiteExplanation.Text = inspectFailed
+            ? "DCx could not verify Microsoft Edge WebView2 Runtime, so it did not open a web page. No download or installation was attempted. Use another browser to visit the official Microsoft page. Install or repair the Evergreen Runtime only after you approve it. Then return here and choose Recheck."
+            : "DCx cannot open web pages because Microsoft Edge WebView2 Runtime is unavailable. No download or installation was attempted. Use another browser to visit the official Microsoft page. Install the Evergreen Runtime only after you approve it. Then return here and choose Recheck.";
+        SetStatus(inspectFailed
+            ? "WebView2 Runtime could not be verified. Browser commands are unavailable. No download or installation was attempted."
+            : "WebView2 Runtime is unavailable. Browser commands are unavailable. No download or installation was attempted.");
+        WebView2PrerequisiteHeading.Focus();
+    }
+
+    private void HideWebView2Prerequisite()
+    {
+        WebView2PrerequisitePanel.Visibility = Visibility.Collapsed;
+        BrowserTabs.Visibility = Visibility.Visible;
+        AddressBox.IsEnabled = true;
+        GoButton.IsEnabled = true;
+        NewTabButton.IsEnabled = true;
+        ProfilesBox.IsEnabled = true;
+        BookmarkButton.IsEnabled = true;
+        AgentDrawerButton.IsEnabled = true;
+    }
+
+    private void OnCopyWebView2DownloadAddressClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Clipboard.SetText(WebView2DownloadPage);
+            SetStatus("The official Microsoft WebView2 address was copied. DCx did not open a page or download software.");
+        }
+        catch
+        {
+            SetStatus("The official address could not be copied. Select the read-only address and press Control C instead.");
+        }
+    }
+
+    private async void OnRecheckWebView2RuntimeClick(object sender, RoutedEventArgs e)
+    {
+        RecheckWebView2RuntimeButton.IsEnabled = false;
+        SetStatus("Checking WebView2 Runtime on this device. No download or installation will occur.");
+        try
+        {
+            await StartBrowserIfAvailableAsync();
+        }
+        catch
+        {
+            ShowWebView2Prerequisite(inspectFailed: true);
+        }
+        finally
+        {
+            RecheckWebView2RuntimeButton.IsEnabled = true;
         }
     }
 
@@ -143,6 +252,7 @@ public partial class MainWindow : Window
         try
         {
             var environment = await GetEnvironmentAsync(profileName);
+            InstalledWebView2RuntimeProbe.RequireStableVersion(environment.BrowserVersionString);
             await browser.EnsureCoreWebView2Async(environment);
             await ConfigureBrowserAsync(state);
             if (address is null && _offlineStartup)
@@ -168,7 +278,10 @@ public partial class MainWindow : Window
         {
             var profileDirectory = _profilePaths.GetProfileDirectory(profileName);
             Directory.CreateDirectory(profileDirectory);
-            environment = CoreWebView2Environment.CreateAsync(userDataFolder: profileDirectory);
+            environment = CoreWebView2Environment.CreateAsync(
+                browserExecutableFolder: null,
+                userDataFolder: profileDirectory,
+                options: InstalledWebView2RuntimeProbe.CreateStableOptions());
             _environments.Add(profileName, environment);
         }
 

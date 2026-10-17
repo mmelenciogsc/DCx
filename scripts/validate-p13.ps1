@@ -7,6 +7,7 @@ $solution = Join-Path $repoRoot "DCx.slnx"
 $desktopProject = Join-Path $repoRoot "src\DCx.Desktop\DCx.Desktop.csproj"
 $tests = Join-Path $repoRoot "tests\DCx.Core.Tests\DCx.Core.Tests.csproj"
 $msixBuilder = Join-Path $repoRoot "scripts\build-unsigned-msix.ps1"
+$webView2Validator = Join-Path $repoRoot "scripts\validate-p13-webview2.ps1"
 $runRoot = Join-Path $repoRoot "artifacts\test-results\p13-$([Guid]::NewGuid().ToString('N'))"
 $publishOne = Join-Path $runRoot "publish-a"
 $publishTwo = Join-Path $runRoot "publish-b"
@@ -663,6 +664,24 @@ try {
         throw "Recovery changed excluded WebView2 cookie data."
     }
 
+    $webView2MissingEvidence = & $webView2Validator `
+        -ExecutablePath $publishedExe `
+        -DataRoot (Join-Path $runRoot "webview2-missing-data") `
+        -EvidencePath (Join-Path $runRoot "webview2-missing-validation.json")
+    if (-not $webView2MissingEvidence.fixture_gate_denied_without_environment -or
+        $webView2MissingEvidence.prerequisite_panel_name -ne "WebView2 Runtime required" -or
+        -not $webView2MissingEvidence.prerequisite_heading_keyboard_focus -or
+        $webView2MissingEvidence.official_address -ne "https://developer.microsoft.com/microsoft-edge/webview2/" -or
+        -not $webView2MissingEvidence.browser_commands_disabled -or
+        -not $webView2MissingEvidence.independent_content_viewer_enabled -or
+        -not $webView2MissingEvidence.recheck_fail_closed -or
+        $webView2MissingEvidence.webview2_profile_created -or
+        $webView2MissingEvidence.download_attempted -or
+        $webView2MissingEvidence.install_attempted -or
+        $webView2MissingEvidence.production_actions -ne 0) {
+        throw "The accessible WebView2 missing-runtime gate was not exact and inert."
+    }
+
     $result = [ordered]@{
         captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
         release_build_warnings = 0
@@ -704,6 +723,13 @@ try {
         msix_install_attempted = $false
         webview2_runtime_bundled = $false
         webview2_evergreen_required = $true
+        webview2_missing_runtime_fixture_gate = [bool]$webView2MissingEvidence.fixture_gate_denied_without_environment
+        webview2_missing_runtime_uia = [string]$webView2MissingEvidence.prerequisite_panel_name
+        webview2_missing_runtime_browser_commands_disabled = [bool]$webView2MissingEvidence.browser_commands_disabled
+        webview2_missing_runtime_independent_tools_enabled = [bool]$webView2MissingEvidence.independent_content_viewer_enabled
+        webview2_missing_runtime_profile_created = [bool]$webView2MissingEvidence.webview2_profile_created
+        webview2_missing_runtime_downloads = 0
+        webview2_missing_runtime_installs = 0
         sbom_components = $components.Count
         license_records = $licenseInventory.Count
         published_secret_scan_files = $publishedSecretScanFiles.Count
@@ -731,7 +757,7 @@ try {
 
     "P13 reliability tests=PASS ($reliabilityTestsPassed/$reliabilityTestsPassed)"
     "P13 bounded MSIX manifest and Windows Authenticode tests=PASS ($packageTrustTestsPassed/$packageTrustTestsPassed)"
-    "P13 unsigned or incomplete synthetic MSIX trust denial=PASS"
+    "P13 complete unsigned local-validation MSIX trust denial=PASS"
     "P13 Microsoft Defender current signatures and trusted scanner=PASS"
     "P13 Microsoft Defender publish, ZIP and MSIX no-remediation scans=PASS"
     "P13 NuGet direct and transitive vulnerabilities=$vulnerabilityCount"
@@ -742,6 +768,7 @@ try {
     "Unsigned MSIX MakeAppx semantic/unpack validation=PASS"
     "Unsigned MSIX real Windows trust denial=PASS ($($actualMsixSignature.Status))"
     "WebView2 Evergreen Runtime required and not bundled=PASS"
+    "Accessible WebView2 missing-runtime detection and fail-closed recheck=PASS"
     "CycloneDX components=$($components.Count)"
     "Third-party license records=$($licenseInventory.Count)"
     "DCx-owned binary and published text secret-scan files=$($publishedSecretScanFiles.Count)"
