@@ -32,6 +32,8 @@ try {
         throw "P11 TRX counters did not prove that every selected finance test passed."
     }
 
+    & (Join-Path $repoRoot "scripts\validate-p11-recipient-ui.ps1") -RunRoot $runRoot
+
     "P11 finance tests=PASS ($financeTestsPassed/$financeTestsPassed)"
     "US`$3 monthly subscription fixture=PASS"
     "Signed webhook replay and idempotency=PASS"
@@ -60,6 +62,7 @@ try {
     "Owner-approved recipient snapshot ID and exact destination digest binding=PASS"
     "Batch SUCCESS requires exact item IDs recipients USD amounts and count=PASS"
     "Mixed payout outcomes post successful items only and hold failed payable amounts=PASS"
+    "Protected recipient snapshot owner-approval UI and restart binding=PASS"
     "Real PayPal network calls=0"
     "P11 evidence=$runRoot"
     "P11 local CARE and PayPal mock validation=PASS"

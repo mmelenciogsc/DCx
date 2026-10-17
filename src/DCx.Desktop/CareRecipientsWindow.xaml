@@ -1,0 +1,147 @@
+<Window x:Class="DCx.Desktop.CareRecipientsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CARE payout recipients — DCx"
+        Width="760"
+        Height="720"
+        MinWidth="620"
+        MinHeight="520"
+        AutomationProperties.AutomationId="CareRecipientsWindow"
+        AutomationProperties.Name="CARE payout recipient snapshot approval">
+    <DockPanel Margin="20">
+        <TextBlock x:Name="StatusText"
+                   DockPanel.Dock="Bottom"
+                   Margin="0,16,0,0"
+                   Padding="10"
+                   Text="Loading local recipient snapshots."
+                   TextWrapping="Wrap"
+                   Background="#F3F3F3"
+                   AutomationProperties.AutomationId="CareRecipientsStatus"
+                   AutomationProperties.Name="Loading local recipient snapshots."
+                   AutomationProperties.LiveSetting="Assertive" />
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Focusable="False">
+            <StackPanel>
+                <TextBlock x:Name="Heading"
+                           FontSize="26"
+                           FontWeight="SemiBold"
+                           Text="CARE payout recipients"
+                           Focusable="True"
+                           AutomationProperties.AutomationId="CareRecipientsHeading"
+                           AutomationProperties.Name="CARE payout recipients" />
+                <TextBlock Margin="0,10,0,0"
+                           TextWrapping="Wrap"
+                           Text="This local workflow creates an immutable owner-approved recipient snapshot. The exact email is protected in Windows Credential Manager and cleared from this window after approval. Metadata stores only a pseudonym and digest. Approval does not verify PayPal eligibility, contact PayPal, or authorize a payout." />
+
+                <GroupBox Margin="0,18,0,0" Header="Prepare one exact recipient snapshot">
+                    <StackPanel Margin="12,8">
+                        <Label Target="{Binding ElementName=ContributorBox}"
+                               Padding="0,0,0,4"
+                               Content="_Contributor pseudonym" />
+                        <TextBox x:Name="ContributorBox"
+                                 MinHeight="34"
+                                 Padding="6"
+                                 AutomationProperties.AutomationId="CareRecipientContributor"
+                                 AutomationProperties.Name="Contributor pseudonym"
+                                 TextChanged="OnCandidateChanged" />
+
+                        <Label Margin="0,10,0,0"
+                               Target="{Binding ElementName=DestinationBox}"
+                               Padding="0,0,0,4"
+                               Content="Recipient _email for PayPal sandbox review" />
+                        <TextBox x:Name="DestinationBox"
+                                 MinHeight="34"
+                                 Padding="6"
+                                 AutomationProperties.AutomationId="CareRecipientDestination"
+                                 AutomationProperties.Name="Exact recipient email for PayPal sandbox review"
+                                 AutomationProperties.HelpText="The exact email is shown for owner review, then cleared from the window after approval."
+                                 TextChanged="OnCandidateChanged" />
+
+                        <Button x:Name="ReviewButton"
+                                Width="190"
+                                MinHeight="36"
+                                Margin="0,14,0,0"
+                                HorizontalAlignment="Left"
+                                Content="_Review exact recipient"
+                                AutomationProperties.AutomationId="ReviewCareRecipientButton"
+                                AutomationProperties.Name="Review exact CARE payout recipient"
+                                AutomationProperties.HelpText="Validates the contributor and exact email locally and displays its digest. No network request occurs."
+                                Click="OnReviewClick" />
+
+                        <TextBox x:Name="ReviewText"
+                                 MinHeight="100"
+                                 Margin="0,12,0,0"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="No recipient candidate has been reviewed."
+                                 AutomationProperties.AutomationId="CareRecipientReview"
+                                 AutomationProperties.Name="No recipient candidate has been reviewed." />
+
+                        <CheckBox x:Name="ApprovalBox"
+                                  Margin="0,14,0,0"
+                                  FontWeight="SemiBold"
+                                  IsChecked="False"
+                                  Content="I reviewed this exact pseudonym, email, and digest and _approve saving the snapshot"
+                                  AutomationProperties.AutomationId="ApproveCareRecipientBox"
+                                  AutomationProperties.Name="I reviewed this exact pseudonym email and digest and approve saving the snapshot"
+                                  AutomationProperties.HelpText="Initially unchecked. Changing either input clears this approval." />
+
+                        <Button x:Name="SaveButton"
+                                Width="210"
+                                MinHeight="36"
+                                Margin="0,14,0,0"
+                                HorizontalAlignment="Left"
+                                Content="_Save approved snapshot"
+                                AutomationProperties.AutomationId="SaveCareRecipientButton"
+                                AutomationProperties.Name="Save approved CARE payout recipient snapshot"
+                                Click="OnSaveClick" />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Margin="0,18,0,0" Header="Stored snapshot metadata">
+                    <StackPanel Margin="12,8">
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="Entries below contain no plaintext email. Active entries are owner-approved but remain provider-unverified and ineligible for payout. Revocation removes the protected email while retaining minimized audit metadata." />
+                        <Button x:Name="RefreshButton"
+                                Width="170"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="Re_fresh snapshots"
+                                AutomationProperties.AutomationId="RefreshCareRecipientsButton"
+                                AutomationProperties.Name="Refresh CARE payout recipient snapshots"
+                                Click="OnRefreshClick" />
+                        <ListBox x:Name="SnapshotsList"
+                                 MinHeight="150"
+                                 Margin="0,10,0,0"
+                                 DisplayMemberPath="Display"
+                                 AutomationProperties.AutomationId="CareRecipientSnapshotsList"
+                                 AutomationProperties.Name="Owner-approved CARE payout recipient snapshot metadata"
+                                 SelectionChanged="OnSnapshotSelectionChanged" />
+
+                        <CheckBox x:Name="RevokeApprovalBox"
+                                  Margin="0,14,0,0"
+                                  IsChecked="False"
+                                  Content="I approve re_voking the selected snapshot and deleting its protected email"
+                                  AutomationProperties.AutomationId="ApproveCareRecipientRevocationBox"
+                                  AutomationProperties.Name="I approve revoking the selected snapshot and deleting its protected email" />
+                        <Button x:Name="RevokeButton"
+                                Width="210"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="Revo_ke selected snapshot"
+                                AutomationProperties.AutomationId="RevokeCareRecipientButton"
+                                AutomationProperties.Name="Revoke selected CARE payout recipient snapshot"
+                                Click="OnRevokeClick" />
+                    </StackPanel>
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

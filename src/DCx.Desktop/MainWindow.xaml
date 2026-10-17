@@ -164,6 +164,14 @@
                             AutomationProperties.AutomationId="ContributionsButton"
                             AutomationProperties.Name="Open private contribution review"
                             Click="OnContributionsClick" />
+                    <Button x:Name="CareRecipientsButton"
+                            MinWidth="120"
+                            Margin="0,0,6,0"
+                            Content="CARE recipients"
+                            AutomationProperties.AutomationId="CareRecipientsButton"
+                            AutomationProperties.Name="Open CARE payout recipient snapshot approval"
+                            AutomationProperties.HelpText="Prepare or revoke protected owner-approved recipient snapshots. This does not contact PayPal or authorize a payout."
+                            Click="OnCareRecipientsClick" />
                     <Button MinWidth="100"
                             Margin="0,0,6,0"
                             Content="Recovery"

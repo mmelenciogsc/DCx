@@ -10,6 +10,7 @@ using DCx.Core;
 using DCx.Core.Browsing;
 using DCx.Core.Control;
 using DCx.Core.Downloads;
+using DCx.Core.Finance;
 using DCx.Core.LocalModels;
 using DCx.Core.Navigation;
 using DCx.Core.Profiles;
@@ -54,10 +55,12 @@ public partial class MainWindow : Window
     private LocalModelsWindow? _localModelsWindow;
     private ContentViewerWindow? _contentViewerWindow;
     private ContributionsWindow? _contributionsWindow;
+    private CareRecipientsWindow? _careRecipientsWindow;
     private CrashDiagnosticsWindow? _crashDiagnosticsWindow;
     private Task<LocalModelSelectionStore>? _localModelSelectionStore;
     private Task<WhisperBackendSelectionStore>? _whisperBackendSelectionStore;
     private Task<FfmpegBackendSelectionStore>? _ffmpegBackendSelectionStore;
+    private Task<PayoutRecipientSnapshotStore>? _payoutRecipientSnapshotStore;
     private BrowserTabState? _pausedWebVideoTab;
     private Uri? _pausedWebVideoPage;
     private bool _browserStartupInProgress;
@@ -1156,6 +1159,31 @@ public partial class MainWindow : Window
         _contributionsWindow.Show();
     }
 
+    private async void OnCareRecipientsClick(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Opening protected CARE payout recipient snapshots. No PayPal request will occur.");
+        if (_careRecipientsWindow is { IsVisible: true })
+        {
+            _careRecipientsWindow.Activate();
+            return;
+        }
+
+        try
+        {
+            _careRecipientsWindow = new CareRecipientsWindow(
+                await GetPayoutRecipientSnapshotStoreAsync())
+            {
+                Owner = this,
+            };
+            _careRecipientsWindow.Closed += (_, _) => _careRecipientsWindow = null;
+            _careRecipientsWindow.Show();
+        }
+        catch
+        {
+            SetStatus("CARE payout recipient snapshots could not open safely. No recipient changed and no PayPal request occurred.");
+        }
+    }
+
     private void OnRecoveryClick(object sender, RoutedEventArgs e)
     {
         try
@@ -1224,6 +1252,10 @@ public partial class MainWindow : Window
 
     private Task<FfmpegBackendSelectionStore> GetFfmpegBackendSelectionStoreAsync() =>
         _ffmpegBackendSelectionStore ??= FfmpegBackendSelectionStore.OpenAsync(ApplicationDataRoot.Resolve());
+
+    private Task<PayoutRecipientSnapshotStore> GetPayoutRecipientSnapshotStoreAsync() =>
+        _payoutRecipientSnapshotStore ??=
+            PayoutRecipientSnapshotStore.OpenAsync(ApplicationDataRoot.Resolve());
 
     private Uri? GetNewTabAddress() => _offlineStartup ? null : StartPage;
 

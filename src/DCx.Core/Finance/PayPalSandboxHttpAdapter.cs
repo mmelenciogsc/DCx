@@ -625,9 +625,9 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
                     recipient.ContributorPseudonym,
                     item.ContributorPseudonym,
                     StringComparison.Ordinal) ||
-                !IsValidEmail(recipient.Email) ||
+                !PayPalRecipientAddress.IsValid(recipient.Email) ||
                 !string.Equals(
-                    DestinationSha256(recipient.Email),
+                    PayPalRecipientAddress.DestinationSha256(recipient.Email),
                     item.RecipientApproval.DestinationSha256,
                     StringComparison.Ordinal) ||
                 !uniqueEmails.Add(recipient.Email))
@@ -803,12 +803,12 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
             var currency = RequireString(amount, "currency", 3, errorCode);
             var amountValue = RequireString(amount, "value", 64, errorCode);
             if (!expectedItems.TryGetValue(senderItemId, out var expected) ||
-                !seenSenderItems.Add(senderItemId) || !IsValidEmail(receiver) ||
+                !seenSenderItems.Add(senderItemId) || !PayPalRecipientAddress.IsValid(receiver) ||
                 !string.Equals(currency, "USD", StringComparison.Ordinal) ||
                 !TryParseUsdCents(amountValue, out var actualCents) ||
                 actualCents != expected.Item.AmountCents ||
                 !string.Equals(
-                    DestinationSha256(receiver),
+                    PayPalRecipientAddress.DestinationSha256(receiver),
                     expected.Item.RecipientApproval.DestinationSha256,
                     StringComparison.Ordinal))
             {
@@ -1276,23 +1276,6 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
         uri.IdnHost is "api.paypal.com" or "api-m.paypal.com" or
             "api.sandbox.paypal.com" or "api-m.sandbox.paypal.com";
 
-    private static bool IsValidEmail(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value) || value.Length > 127 ||
-            value.Any(character => character is <= ' ' or > '~')) return false;
-        var at = value.IndexOf('@');
-        if (at is < 1 || at != value.LastIndexOf('@') || at > 64 || at == value.Length - 1) return false;
-        var local = value.AsSpan(0, at);
-        var domain = value.AsSpan(at + 1);
-        if (local[0] == '.' || local[^1] == '.' || local.Contains("..", StringComparison.Ordinal) ||
-            !local.ToString().All(character => char.IsAsciiLetterOrDigit(character) ||
-                character is '.' or '_' or '%' or '+' or '-')) return false;
-        if (domain[0] == '.' || domain[^1] == '.' || !domain.Contains('.')) return false;
-        return domain.ToString().Split('.').All(label =>
-            label.Length is > 0 and <= 63 && label[0] != '-' && label[^1] != '-' &&
-            label.All(character => char.IsAsciiLetterOrDigit(character) || character == '-'));
-    }
-
     private static string StableRequestId(string batchId)
     {
         var bytes = Encoding.UTF8.GetBytes(batchId);
@@ -1308,19 +1291,6 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
 
     private static string Cents(long value) =>
         string.Create(CultureInfo.InvariantCulture, $"{value / 100}.{value % 100:D2}");
-
-    private static string DestinationSha256(string value)
-    {
-        var bytes = Encoding.UTF8.GetBytes(value);
-        try
-        {
-            return Convert.ToHexStringLower(SHA256.HashData(bytes));
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(bytes);
-        }
-    }
 
     private static async Task<byte[]> ReadJsonBodyAsync(
         HttpResponseMessage response,
