@@ -74,6 +74,15 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - The HTTP client requires HTTPS except for literal loopback HTTP. The simulation server refuses startup without its explicit simulation flag, data root and external key file.
 - Container context excludes secrets and runtime data; the Compose definition is read-only/non-root/no-new-privileges. It remains unexecuted because Docker access is blocked.
 
+## Implemented contribution controls through partial P10
+
+- Contribution preparation defaults off, and each changed item invalidates its prior review/approval digest. Local preparation always yields quarantine and no UI/network upload action exists.
+- Rights/license/sensitive-data attestations, bounded approval age and unique nonces are revalidated at authoritative intake; client-provided scan results are not trusted.
+- Scanner findings store only stable codes, not matched secrets or PII. Risky/dummy content cannot transition to approved.
+- Approved CKB metadata enters the signed release path; withdrawal emits deprecation. CCB transition is denied until an actual hostile-code sandbox passes.
+- Credit lineage rejects cycles, duplicate parents, invalid weights and total parent credit above 100%.
+- Usage receipts contain identifiers, time and verification status only. Integrity, replay, entitlement, approved-resource, self-use, success, time and rate checks fail closed; client honesty is still treated as an untrusted signal.
+
 ## Security gate policy
 
 Security tests must cover denial paths as well as successful paths. A mock or sandbox pass proves only that path. Production OpenAI/PayPal eligibility, code signing, legal review, external penetration testing, and the Ubuntu production deployment remain explicit blockers until separately evidenced.
