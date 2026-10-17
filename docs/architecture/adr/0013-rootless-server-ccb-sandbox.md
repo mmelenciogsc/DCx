@@ -17,7 +17,7 @@ Canonical evidence binds artifact, extracted workspace, test suite, launcher, ba
 
 The first contribution profile is an exact five-file BusyBox-shell package. The server admits and quarantines a digest-verified ZIP, validates its closed two-component CycloneDX/runtime/license declaration, safely extracts it, rescans every textual component and test input, executes every declared test, persists body-free evidence and allows signed artifact propagation only after all expected output digests match. Existing private schema-v1 packages remain compatible but are not authoritative contribution packages.
 
-Registry publication stores a digest-derived operation ID, canonical change-set digest and signed release in one transaction. This lets approval or withdrawal reconcile a commit/state-update crash without appending a duplicate release. Automatic stalled-operation discovery remains future work.
+Registry publication stores a digest-derived operation ID, canonical change-set digest and signed release in one transaction. Reviewer-authorized intent is persisted first; startup validates a bounded batch, rehashes CCB artifacts and atomically completes local state. This covers intent-before-registry and registry-before-state crash windows without appending a duplicate release or rerunning contributed code.
 
 ## Consequences
 

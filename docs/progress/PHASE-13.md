@@ -32,7 +32,7 @@ Recorded evidence directory: `artifacts/test-results/p13-19dc6457cd1c4e6e8e524a5
 
 - Locked Release build: 0 warnings, 0 errors.
 - Reliability tests: passed 14, failed 0, skipped 0; 187 ms.
-- Current full suite after contribution publication-retry hardening: passed 163, failed 0, skipped 0; about 1 second.
+- Current full suite after durable contribution-intent recovery: passed 168, failed 0, skipped 0; about 1 second.
 - Publish trees: 42 files, 62,760,355 bytes each; no path/length/SHA-256 differences.
 - Reproducible staging ZIP SHA-256: `e02ee45103d999030cadad88f5e34946186402a90bf403450b338a4eb781242e`.
 - CycloneDX components: 7; third-party license records: 7.

@@ -27,12 +27,12 @@ The schema-v2 contribution profile admits exactly five declared files: an exact 
 
 Intake stores the exact SHA-256-addressed ZIP in quarantine. Approval rechecks the bytes, scans every textual component and test input, safely extracts to an ephemeral workspace, recomputes the canonical workspace digest, and requires passing bound evidence plus the declared output digest for every test. Evidence storage contains digests and stable failure codes, never test input, output or child diagnostics. Only then can the in-process server fixture add the exact artifact to a signed release; replica tests verify lazy digest-checked retrieval.
 
-Signed publication and its digest-bound operation record commit atomically in the registry. If the process stops before the separate governance row advances, an identical retry returns the original release sequence; a changed request with the same operation ID is rejected. There is not yet an automatic stalled-operation recovery worker.
+Signed publication and its digest-bound operation record commit atomically in the registry. Reviewer-authorized intent is durable first; startup validates and processes at most 100 pending intents, and the local state transition plus intent completion commit together. Recovery rehashes quarantine and authoritative artifacts, reuses the original operation/timestamp/reviewer and does not rerun CCB code. Changed request, candidate or artifact bytes fail closed.
 
 This code is not reachable from the simulation HTTP service: it registers no upload, authentication, review or approval endpoint and has no production executor configuration.
 
 ## Remaining production work
 
-Required work includes authenticated upload/reviewer APIs, a durable outbox and queued execution leases, general language-specific dependency-lock/build profiles, seccomp, measured cgroup-v2 resource enforcement, immutable builder/base-image digests, Ubuntu 24.04 service deployment, monitoring and independent penetration testing.
+Required work includes authenticated upload/reviewer APIs, distributed multi-instance execution leases with backoff/dead-letter operations, general language-specific dependency-lock/build profiles, seccomp, measured cgroup-v2 resource enforcement, immutable builder/base-image digests, Ubuntu 24.04 service deployment, monitoring and independent penetration testing.
 
 Official upstream policy guidance: <https://github.com/containers/bubblewrap/blob/main/README.md>.
