@@ -1,7 +1,7 @@
 # P09 — Global registry and synchronization
 
 - Status: BLOCKED (native process/HTTP simulation passes; required Docker Compose execution unavailable)
-- Partial implementation commits: `1be3f9e`, `b1608cd`, `9123a81`
+- Partial implementation commits: `1be3f9e`, `b1608cd`, `9123a81`, `4278601`
 - Documentation commit: recorded by the commit containing this file
 
 No connection or deployment to the owner's Ubuntu server was attempted.
@@ -21,6 +21,9 @@ No connection or deployment to the owner's Ubuntu server was attempted.
 - Policy replay/conflict and unauthorized old-key releases fail closed. Rollback candidates are fully verified under the current policy before the active pointer changes.
 - Read-only hardened Compose definition, non-root container, loopback host port, no-new-privileges, excluded secrets/build artifacts and externally supplied signing key.
 - Atomic publication-operation records bind a stable operation ID to the canonical ordered change-set digest and signed release sequence. An identical retry after repository reopen returns the original descriptor; reuse with changed content fails closed.
+- The Windows client defaults to a strict per-user Credential Manager anchor containing the trust-root digest, highest accepted trust-policy revision and exact policy digest. A lower, missing or same-revision-conflicting local policy fails closed.
+- Trust-policy updates commit the signed file before advancing the protected anchor. The next open recovers only the exact one-revision crash window whose signed predecessor digest equals the anchor; arbitrary jumps are denied.
+- The protected floor applies to policy revisions rather than release sequences, preserving explicit rollback to a retained release only when that release remains valid under the current anchored policy.
 
 ## Reproduction
 
@@ -33,17 +36,19 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 ## Measured result
 
 - Locked restore and native Release build passed with 0 warnings/errors.
-- P09 filtered tests: passed 9, failed 0, skipped 0; about 1 second in the recorded validation.
-- Current full suite after P06 persisted-selection hardening: passed 208, failed 0, skipped 0; about 7 seconds.
+- P09 exact filtered tests: passed 12, failed 0, skipped 0; about 1 second, with exact counters parsed from retained TRX.
+- Current full suite after protected trust-policy anchoring: passed 211, failed 0, skipped 0; about 9 seconds.
 - A real child Kestrel process served three chained trust-policy revisions and a signed SQLite-backed release over loopback HTTP; a fresh production client transport caught up all revisions, synchronized and searched it.
 - Two distinct client roots synchronized the same chain; the P08 private sentinel remained present and absent from global results.
 - Wrong-key release activation was rejected with no active pointer.
 - A root-signed rotation revoked the old release key from sequence 2. An old-key sequence-2 release, an attacker-signed policy and a policy replay were rejected; the authorized replacement key succeeded.
 - A rollback to a generation invalidated by an emergency revocation was rejected before pointer replacement, leaving the active sequence usable across reopen.
+- A real Windows Credential Manager round trip proved default client wiring and trust-root isolation. Restoring a lower root-signed policy file, deleting a policy behind an anchor, and conflicting at the same revision were rejected.
+- A synthetic Credential Manager write failure after the signed policy file committed left the old anchor intact; reopen accepted exactly the next predecessor-linked revision, advanced the anchor and rejected wider jumps.
 - A transfer interrupted after its first 64 KiB chunk resumed at a nonzero offset and downloaded fewer bytes on retry than the full release.
 - Lazy 150,000-byte artifact retrieval, deprecation, offline search and explicit rollback passed.
 - Publication retry used reordered equivalent changes and a later timestamp after repository reopen, returned the byte-identical original descriptor and kept the chain at sequence 1; a changed request under the same operation ID was rejected.
-- Latest storage evidence: `artifacts/test-results/p09-c083f17df67a44e7868f62c1402542c2/storage-forecast.json` (generated and intentionally not committed).
+- Latest evidence: `artifacts/test-results/p09-40d6c5faff224d30b48b4cb1f2cea16c/` containing `p09-global-knowledge.trx` and `storage-forecast.json` (generated and intentionally not committed).
 
 ## Measured storage/bandwidth fixture
 
@@ -52,17 +57,23 @@ The deterministic benchmark uses 1,000 resources and excludes artifact bodies:
 | Fixture | Bytes |
 |---|---:|
 | Metadata-only canonical catalog | 470,703 |
-| Initial signed release | 722,674 |
+| Initial signed release | 722,679 |
 | Catalog with 384-dimensional vectors | 4,388,562 |
-| Signed delta changing 100 resources | 73,574 |
-| Two retained metadata catalogs plus two releases | 1,738,554 |
+| Signed delta changing 100 resources | 73,559 |
+| Two retained metadata catalogs plus two releases | 1,738,544 |
 
 Artifact storage and transfer must add exact signed artifact sizes. Artifacts are not included in catalog sync and download only on use.
+
+## Changed files in the latest milestone
+
+- Protected store and default wiring: `src/DCx.Core/GlobalKnowledge/GlobalTrustPolicyAnchorStore.cs`, `src/DCx.Core/GlobalKnowledge/GlobalReplicaClient.cs`.
+- File rollback, crash-window, strict-state, real-vault and trust-root-isolation tests: `tests/DCx.Core.Tests/GlobalKnowledge/GlobalReplicaTests.cs`, `tests/DCx.Core.Tests/GlobalKnowledge/GlobalTrustPolicyAnchorStoreTests.cs`, `tests/DCx.Core.Tests/Testing/TestGlobalTrustPolicyAnchorStore.cs`.
+- Explicit test anchor injection and exact-counter gate: contribution/global E2E fixtures, `tests/DCx.Core.Tests/GlobalUsings.cs`, `scripts/validate-p09.ps1`.
 
 ## Blocker and limits
 
 - Native Windows validation has no Docker CLI. WSL reports Docker 29.1.3, but daemon access is permission-denied and no Compose plugin or `docker-compose` command exists. Installing/enabling these is privileged and requires owner approval.
 - Consequently, `server/docker-compose.simulation.yml` is unexecuted and P09 is not complete. After approval/access, validate Compose configuration, build with recorded image digests, run the same two-client gate against the container, then update this phase.
-- Simulation signing keys and the offline root are ephemeral fixture material. The rotation protocol is implemented, but production offline-root custody/ceremony, hardware- or OS-protected minimum-revision anchoring, TLS identity, backup/restore, monitoring and external security review are not implemented.
+- Simulation signing keys and the offline root are ephemeral fixture material. The per-user Windows anchor mitigates replica-file rollback but is deletable by same-user code and is not TPM/hardware monotonic storage. Production offline-root custody/ceremony, anchor loss/recovery, TLS identity, backup/restore, monitoring and external security review are not implemented.
 - The service exposes read-only catalog endpoints by default. P10 adds a separate default-off, loopback/container simulation contribution API; this is not authorization or infrastructure for production exposure.
 - Real Ubuntu deployment remains forbidden without explicit owner approval.

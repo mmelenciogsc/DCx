@@ -20,4 +20,4 @@ Rejected rollback targets are verified before the active pointer changes. Legacy
 - An online release key can rotate or be revoked without replacing the offline client trust anchor.
 - Offline clients can catch up deterministically without skipping policy-chain evidence.
 - Policy history and bounded range transport become part of the authoritative registry contract.
-- Production still requires a documented offline-root custody and ceremony, backup/recovery, TLS identity and an OS- or hardware-protected minimum policy revision. Local files alone do not provide hardware-backed anti-rollback.
+- ADR 0024 adds a per-user Windows Credential Manager minimum-policy anchor against replica-file rollback. Production still requires documented offline-root custody and ceremony, anchor loss/recovery policy, TLS identity and assessment of hardware-backed or service-transparent monotonicity; local files and a same-user deletable credential do not provide hardware-backed anti-rollback.

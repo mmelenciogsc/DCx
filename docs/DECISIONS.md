@@ -25,5 +25,6 @@
 | [0021](architecture/adr/0021-causal-entitlement-ordering.md) | Reduce entitlement events by occurrence time with deactivation-safe ties | Accepted for local sandbox | 2026-10-17 |
 | [0022](architecture/adr/0022-digest-bound-local-model-inference.md) | Bind local inference to a unique model name and SHA-256 digest before and after execution | Accepted for installed local models | 2026-10-17 |
 | [0023](architecture/adr/0023-explicit-persisted-local-model-approval.md) | Require accessible explicit persisted approval for exact installed-model identity and license | Accepted for already-installed local models | 2026-10-17 |
+| [0024](architecture/adr/0024-windows-trust-policy-revision-anchor.md) | Anchor the minimum accepted global trust-policy revision in Windows Credential Manager | Accepted for per-user Windows file-rollback defense | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
