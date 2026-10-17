@@ -33,6 +33,25 @@ builder.Services.AddSingleton(repository);
 
 var app = builder.Build();
 app.MapGet("/health", () => Results.Ok(new { status = "simulation" }));
+app.MapGet("/api/trust-policy/latest", async (GlobalRegistryRepository registry, CancellationToken cancellationToken) =>
+{
+    var descriptor = await registry.GetLatestTrustPolicyAsync(cancellationToken);
+    return descriptor is null ? Results.NotFound() : Results.Ok(descriptor);
+});
+app.MapGet("/api/trust-policy/{revision:long}", async (
+    long revision,
+    GlobalRegistryRepository registry,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await registry.GetTrustPolicyAsync(revision, cancellationToken)));
+app.MapGet("/api/trust-policy/{revision:long}/content", async (
+    long revision,
+    long offset,
+    int count,
+    GlobalRegistryRepository registry,
+    CancellationToken cancellationToken) =>
+    Results.Bytes(
+        await registry.ReadTrustPolicyChunkAsync(revision, offset, count, cancellationToken),
+        "application/octet-stream"));
 app.MapGet("/api/releases/latest", async (GlobalRegistryRepository registry, CancellationToken cancellationToken) =>
 {
     var descriptor = await registry.GetLatestAsync(cancellationToken);

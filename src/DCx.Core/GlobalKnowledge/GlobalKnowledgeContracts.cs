@@ -51,8 +51,43 @@ public sealed record GlobalSyncResult(
     long BytesDownloaded,
     bool WasAlreadyCurrent);
 
+public sealed record GlobalReleaseKeyAuthorization(
+    string KeyId,
+    string SubjectPublicKeyInfoBase64,
+    long ValidFromSequence,
+    long? ValidThroughSequence = null,
+    long? RevokedFromSequence = null);
+
+public sealed record GlobalTrustPolicy(
+    int SchemaVersion,
+    long Revision,
+    string? PreviousPolicySha256,
+    DateTimeOffset IssuedUtc,
+    IReadOnlyList<GlobalReleaseKeyAuthorization> ReleaseKeys);
+
+public sealed record SignedGlobalTrustPolicy(GlobalTrustPolicy Policy, string SignatureBase64);
+
+public sealed record GlobalTrustPolicyStatus(long Revision, string Sha256, int ReleaseKeyCount);
+
+public sealed record GlobalTrustPolicyDescriptor(long Revision, string Sha256, long SizeBytes);
+
 public interface IGlobalRegistryTransport
 {
+    Task<GlobalTrustPolicyDescriptor?> GetLatestTrustPolicyAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<GlobalTrustPolicyDescriptor?>(null);
+
+    Task<GlobalTrustPolicyDescriptor> GetTrustPolicyAsync(
+        long revision,
+        CancellationToken cancellationToken) =>
+        throw new GlobalReplicaException("The registry transport does not provide trust-policy history.");
+
+    Task<byte[]> DownloadTrustPolicyChunkAsync(
+        long revision,
+        long offset,
+        int count,
+        CancellationToken cancellationToken) =>
+        throw new GlobalReplicaException("The registry transport does not provide trust-policy history.");
+
     Task<GlobalReleaseDescriptor?> GetLatestReleaseAsync(CancellationToken cancellationToken);
 
     Task<GlobalReleaseDescriptor> GetReleaseAsync(long sequence, CancellationToken cancellationToken);

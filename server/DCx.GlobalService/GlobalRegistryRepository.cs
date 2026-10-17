@@ -205,6 +205,134 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
         return row?.Descriptor;
     }
 
+    public async Task<GlobalTrustPolicyStatus> StoreTrustPolicyAsync(
+        ReadOnlyMemory<byte> policyEnvelope,
+        byte[] trustRootSubjectPublicKeyInfo,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(trustRootSubjectPublicKeyInfo);
+        var proposed = GlobalTrustPolicyCodec.Decode(policyEnvelope.Span);
+        GlobalTrustPolicyCodec.Verify(proposed, trustRootSubjectPublicKeyInfo);
+        var proposedSha256 = GlobalReleaseCodec.Sha256(policyEnvelope.Span);
+
+        await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var command = connection.CreateCommand();
+            long currentRevision = 0;
+            string? currentSha256 = null;
+            command.CommandText = "SELECT revision, sha256 FROM trust_policies ORDER BY revision DESC LIMIT 1;";
+            await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    currentRevision = reader.GetInt64(0);
+                    currentSha256 = reader.GetString(1);
+                }
+            }
+
+            if (proposed.Policy.Revision == currentRevision &&
+                proposedSha256.Equals(currentSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return new GlobalTrustPolicyStatus(
+                    proposed.Policy.Revision,
+                    proposedSha256,
+                    proposed.Policy.ReleaseKeys.Count);
+            }
+
+            if (proposed.Policy.Revision != currentRevision + 1 ||
+                !string.Equals(
+                    proposed.Policy.PreviousPolicySha256,
+                    currentSha256,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new GlobalReplicaException("The authoritative trust policy does not extend the stored policy chain.");
+            }
+
+            command.Parameters.Clear();
+            command.CommandText = """
+                INSERT INTO trust_policies(revision, sha256, size_bytes, envelope, issued_utc)
+                VALUES($revision, $sha, $size, $envelope, $issued);
+                """;
+            command.Parameters.AddWithValue("$revision", proposed.Policy.Revision);
+            command.Parameters.AddWithValue("$sha", proposedSha256);
+            command.Parameters.AddWithValue("$size", policyEnvelope.Length);
+            command.Parameters.AddWithValue("$envelope", policyEnvelope.ToArray());
+            command.Parameters.AddWithValue("$issued", proposed.Policy.IssuedUtc.ToUniversalTime().ToString("O"));
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            return new GlobalTrustPolicyStatus(
+                proposed.Policy.Revision,
+                proposedSha256,
+                proposed.Policy.ReleaseKeys.Count);
+        }
+        finally
+        {
+            writeLock.Release();
+        }
+    }
+
+    public async Task<GlobalTrustPolicyDescriptor?> GetLatestTrustPolicyAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT revision, sha256, size_bytes FROM trust_policies ORDER BY revision DESC LIMIT 1;";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return new GlobalTrustPolicyDescriptor(reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2));
+    }
+
+    public async Task<GlobalTrustPolicyDescriptor> GetTrustPolicyAsync(
+        long revision,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT sha256, size_bytes FROM trust_policies WHERE revision = $revision;";
+        command.Parameters.AddWithValue("$revision", revision);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new GlobalReplicaException("The requested trust-policy revision does not exist.");
+        }
+
+        return new GlobalTrustPolicyDescriptor(revision, reader.GetString(0), reader.GetInt64(1));
+    }
+
+    public async Task<byte[]> ReadTrustPolicyChunkAsync(
+        long revision,
+        long offset,
+        int count,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateRange(offset, count);
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT sha256, size_bytes, envelope FROM trust_policies WHERE revision = $revision;";
+        command.Parameters.AddWithValue("$revision", revision);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new GlobalReplicaException("The requested trust-policy revision does not exist.");
+        }
+
+        var expectedSha256 = reader.GetString(0);
+        var expectedSize = reader.GetInt64(1);
+        var envelope = (byte[])reader[2];
+        if (envelope.LongLength != expectedSize ||
+            !expectedSha256.Equals(GlobalReleaseCodec.Sha256(envelope), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new GlobalReplicaException("The authoritative trust-policy envelope failed its stored integrity data.");
+        }
+
+        return Slice(envelope, offset, count);
+    }
+
     public async Task<GlobalReleaseDescriptor> GetReleaseAsync(
         long sequence,
         CancellationToken cancellationToken = default)
@@ -309,6 +437,13 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
                 media_type TEXT NOT NULL,
                 relative_path TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS trust_policies(
+                revision INTEGER PRIMARY KEY CHECK(revision > 0),
+                sha256 TEXT NOT NULL UNIQUE,
+                size_bytes INTEGER NOT NULL CHECK(size_bytes > 0),
+                envelope BLOB NOT NULL,
+                issued_utc TEXT NOT NULL
+            );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -391,6 +526,21 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
 
 public sealed class RepositoryRegistryTransport(GlobalRegistryRepository repository) : IGlobalRegistryTransport
 {
+    public Task<GlobalTrustPolicyDescriptor?> GetLatestTrustPolicyAsync(CancellationToken cancellationToken) =>
+        repository.GetLatestTrustPolicyAsync(cancellationToken);
+
+    public Task<GlobalTrustPolicyDescriptor> GetTrustPolicyAsync(
+        long revision,
+        CancellationToken cancellationToken) =>
+        repository.GetTrustPolicyAsync(revision, cancellationToken);
+
+    public Task<byte[]> DownloadTrustPolicyChunkAsync(
+        long revision,
+        long offset,
+        int count,
+        CancellationToken cancellationToken) =>
+        repository.ReadTrustPolicyChunkAsync(revision, offset, count, cancellationToken);
+
     public Task<GlobalReleaseDescriptor?> GetLatestReleaseAsync(CancellationToken cancellationToken) =>
         repository.GetLatestAsync(cancellationToken);
 

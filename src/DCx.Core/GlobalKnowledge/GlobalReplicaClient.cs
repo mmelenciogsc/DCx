@@ -21,6 +21,7 @@ public sealed partial class GlobalReplicaClient
     private readonly string stagingRoot;
     private readonly string artifactsRoot;
     private readonly string activePath;
+    private readonly string trustPolicyPath;
     private readonly SemaphoreSlim syncLock = new(1, 1);
 
     private GlobalReplicaClient(string replicaRoot, byte[] trustRoot)
@@ -32,6 +33,7 @@ public sealed partial class GlobalReplicaClient
         stagingRoot = Path.Combine(replicaRoot, "staging");
         artifactsRoot = Path.Combine(replicaRoot, "artifacts", "sha256");
         activePath = Path.Combine(replicaRoot, "active.json");
+        trustPolicyPath = Path.Combine(replicaRoot, "trust-policy.json");
     }
 
     public string ReplicaRoot { get; }
@@ -52,9 +54,9 @@ public sealed partial class GlobalReplicaClient
         {
             using var verifier = ECDsa.Create();
             verifier.ImportSubjectPublicKeyInfo(trustRootSubjectPublicKeyInfo, out var bytesRead);
-            if (bytesRead != trustRootSubjectPublicKeyInfo.Length)
+            if (bytesRead != trustRootSubjectPublicKeyInfo.Length || verifier.KeySize != 256)
             {
-                throw new GlobalReplicaException("The global trust root has trailing data.");
+                throw new GlobalReplicaException("The global trust root must be an exact P-256 public key.");
             }
         }
         catch (GlobalReplicaException)
@@ -89,6 +91,38 @@ public sealed partial class GlobalReplicaClient
         return new GlobalReplicaStatus(state.Sequence, state.ReleaseSha256, state.Resources.Count);
     }
 
+    public async Task<GlobalTrustPolicyStatus?> GetTrustPolicyStatusAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var state = await LoadTrustPolicyAsync(cancellationToken).ConfigureAwait(false);
+        return state is null
+            ? null
+            : new GlobalTrustPolicyStatus(
+                state.SignedPolicy.Policy.Revision,
+                state.Sha256,
+                state.SignedPolicy.Policy.ReleaseKeys.Count);
+    }
+
+    public async Task<GlobalTrustPolicyStatus> ApplyTrustPolicyAsync(
+        ReadOnlyMemory<byte> policyEnvelope,
+        CancellationToken cancellationToken = default)
+    {
+        if (policyEnvelope.IsEmpty || policyEnvelope.Length > GlobalTrustPolicyCodec.MaximumPolicyBytes)
+        {
+            throw new GlobalReplicaException("The proposed trust-policy envelope is empty or too large.");
+        }
+
+        await syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await ApplyTrustPolicyUnderLockAsync(policyEnvelope, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            syncLock.Release();
+        }
+    }
+
     public async Task<GlobalSyncResult> SynchronizeAsync(
         IGlobalRegistryTransport transport,
         CancellationToken cancellationToken = default)
@@ -97,7 +131,8 @@ public sealed partial class GlobalReplicaClient
         await syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var current = await LoadActiveAsync(cancellationToken).ConfigureAwait(false);
+            var trustPolicy = await SynchronizeTrustPolicyAsync(transport, cancellationToken).ConfigureAwait(false);
+            var current = await LoadActiveAsync(trustPolicy, cancellationToken).ConfigureAwait(false);
             var latest = await transport.GetLatestReleaseAsync(cancellationToken).ConfigureAwait(false);
             if (latest is null)
             {
@@ -143,7 +178,7 @@ public sealed partial class GlobalReplicaClient
                 bytesDownloaded += download.BytesDownloaded;
                 var releaseBytes = await File.ReadAllBytesAsync(download.Path, cancellationToken).ConfigureAwait(false);
                 var release = GlobalReleaseCodec.Decode(releaseBytes);
-                GlobalReleaseCodec.Verify(release, trustRoot);
+                VerifyRelease(release, trustPolicy);
                 if (release.Manifest.Sequence != sequence ||
                     release.Manifest.PreviousSequence != current.Sequence ||
                     !string.Equals(
@@ -198,8 +233,10 @@ public sealed partial class GlobalReplicaClient
 
             var fileName = Path.GetFileName(matches[0]);
             var digest = fileName.Substring(13, 64);
-            await WriteActiveAsync(new ActivePointer(sequence, digest), cancellationToken).ConfigureAwait(false);
-            var state = await LoadActiveAsync(cancellationToken).ConfigureAwait(false);
+            var pointer = new ActivePointer(sequence, digest);
+            var trustPolicy = await LoadTrustPolicyAsync(cancellationToken).ConfigureAwait(false);
+            var state = await LoadStateAsync(pointer, trustPolicy, cancellationToken).ConfigureAwait(false);
+            await WriteActiveAsync(pointer, cancellationToken).ConfigureAwait(false);
             return new GlobalReplicaStatus(state.Sequence, state.ReleaseSha256, state.Resources.Count);
         }
         finally
@@ -283,6 +320,14 @@ public sealed partial class GlobalReplicaClient
 
     private async Task<ActiveState> LoadActiveAsync(CancellationToken cancellationToken)
     {
+        var trustPolicy = await LoadTrustPolicyAsync(cancellationToken).ConfigureAwait(false);
+        return await LoadActiveAsync(trustPolicy, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ActiveState> LoadActiveAsync(
+        TrustPolicyState? trustPolicy,
+        CancellationToken cancellationToken)
+    {
         if (!File.Exists(activePath))
         {
             return new ActiveState(0, null, []);
@@ -298,27 +343,7 @@ public sealed partial class GlobalReplicaClient
                 throw new GlobalReplicaException("The active global pointer is invalid.");
             }
 
-            var releasePath = ReleasePath(pointer.Sequence, pointer.ReleaseSha256);
-            var catalogPath = CatalogPath(pointer.Sequence, pointer.ReleaseSha256);
-            await VerifyFileAsync(releasePath, pointer.ReleaseSha256, null, cancellationToken).ConfigureAwait(false);
-            var releaseBytes = await File.ReadAllBytesAsync(releasePath, cancellationToken).ConfigureAwait(false);
-            var release = GlobalReleaseCodec.Decode(releaseBytes);
-            GlobalReleaseCodec.Verify(release, trustRoot);
-            if (release.Manifest.Sequence != pointer.Sequence)
-            {
-                throw new GlobalReplicaException("The active pointer and signed release sequence differ.");
-            }
-
-            var catalogBytes = await File.ReadAllBytesAsync(catalogPath, cancellationToken).ConfigureAwait(false);
-            if (!GlobalReleaseCodec.Sha256(catalogBytes).Equals(
-                    release.Manifest.ResultCatalogSha256,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                throw new GlobalReplicaException("The active catalog failed its signed digest check.");
-            }
-
-            var resources = GlobalReleaseCodec.DecodeCatalog(catalogBytes);
-            return new ActiveState(pointer.Sequence, pointer.ReleaseSha256.ToLowerInvariant(), resources);
+            return await LoadStateAsync(pointer, trustPolicy, cancellationToken).ConfigureAwait(false);
         }
         catch (GlobalReplicaException)
         {
@@ -328,6 +353,197 @@ public sealed partial class GlobalReplicaClient
         {
             throw new GlobalReplicaException($"The active global replica is unreadable: {exception.GetType().Name}.");
         }
+    }
+
+    private async Task<ActiveState> LoadStateAsync(
+        ActivePointer pointer,
+        TrustPolicyState? trustPolicy,
+        CancellationToken cancellationToken)
+    {
+        var releasePath = ReleasePath(pointer.Sequence, pointer.ReleaseSha256);
+        var catalogPath = CatalogPath(pointer.Sequence, pointer.ReleaseSha256);
+        await VerifyFileAsync(releasePath, pointer.ReleaseSha256, null, cancellationToken).ConfigureAwait(false);
+        var releaseBytes = await File.ReadAllBytesAsync(releasePath, cancellationToken).ConfigureAwait(false);
+        var release = GlobalReleaseCodec.Decode(releaseBytes);
+        VerifyRelease(release, trustPolicy);
+        if (release.Manifest.Sequence != pointer.Sequence)
+        {
+            throw new GlobalReplicaException("The active pointer and signed release sequence differ.");
+        }
+
+        var catalogBytes = await File.ReadAllBytesAsync(catalogPath, cancellationToken).ConfigureAwait(false);
+        if (!GlobalReleaseCodec.Sha256(catalogBytes).Equals(
+                release.Manifest.ResultCatalogSha256,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new GlobalReplicaException("The active catalog failed its signed digest check.");
+        }
+
+        var resources = GlobalReleaseCodec.DecodeCatalog(catalogBytes);
+        return new ActiveState(pointer.Sequence, pointer.ReleaseSha256.ToLowerInvariant(), resources);
+    }
+
+    private async Task<TrustPolicyState?> LoadTrustPolicyAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(trustPolicyPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var information = new FileInfo(trustPolicyPath);
+            if (information.Length is <= 0 or > GlobalTrustPolicyCodec.MaximumPolicyBytes)
+            {
+                throw new GlobalReplicaException("The persisted trust-policy envelope has an invalid size.");
+            }
+
+            var envelope = await File.ReadAllBytesAsync(trustPolicyPath, cancellationToken).ConfigureAwait(false);
+            var signedPolicy = GlobalTrustPolicyCodec.Decode(envelope);
+            GlobalTrustPolicyCodec.Verify(signedPolicy, trustRoot);
+            return new TrustPolicyState(signedPolicy, GlobalReleaseCodec.Sha256(envelope));
+        }
+        catch (GlobalReplicaException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new GlobalReplicaException($"The persisted trust policy is unreadable: {exception.GetType().Name}.");
+        }
+    }
+
+    private async Task<GlobalTrustPolicyStatus> ApplyTrustPolicyUnderLockAsync(
+        ReadOnlyMemory<byte> policyEnvelope,
+        CancellationToken cancellationToken)
+    {
+        var proposed = GlobalTrustPolicyCodec.Decode(policyEnvelope.Span);
+        GlobalTrustPolicyCodec.Verify(proposed, trustRoot);
+        var proposedSha256 = GlobalReleaseCodec.Sha256(policyEnvelope.Span);
+        var current = await LoadTrustPolicyAsync(cancellationToken).ConfigureAwait(false);
+        if (current is not null && proposed.Policy.Revision == current.SignedPolicy.Policy.Revision &&
+            proposedSha256.Equals(current.Sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            return new GlobalTrustPolicyStatus(
+                proposed.Policy.Revision,
+                proposedSha256,
+                proposed.Policy.ReleaseKeys.Count);
+        }
+
+        var expectedRevision = (current?.SignedPolicy.Policy.Revision ?? 0) + 1;
+        var expectedPredecessor = current?.Sha256;
+        if (proposed.Policy.Revision != expectedRevision ||
+            !string.Equals(
+                proposed.Policy.PreviousPolicySha256,
+                expectedPredecessor,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new GlobalReplicaException("The proposed trust policy does not extend the active policy chain.");
+        }
+
+        await WriteAtomicAsync(trustPolicyPath, policyEnvelope, cancellationToken).ConfigureAwait(false);
+        return new GlobalTrustPolicyStatus(
+            proposed.Policy.Revision,
+            proposedSha256,
+            proposed.Policy.ReleaseKeys.Count);
+    }
+
+    private async Task<TrustPolicyState?> SynchronizeTrustPolicyAsync(
+        IGlobalRegistryTransport transport,
+        CancellationToken cancellationToken)
+    {
+        var current = await LoadTrustPolicyAsync(cancellationToken).ConfigureAwait(false);
+        var latest = await transport.GetLatestTrustPolicyAsync(cancellationToken).ConfigureAwait(false);
+        if (latest is null)
+        {
+            return current;
+        }
+
+        ValidateTrustPolicyDescriptor(latest);
+        var currentRevision = current?.SignedPolicy.Policy.Revision ?? 0;
+        if (latest.Revision < currentRevision)
+        {
+            throw new GlobalReplicaException("The registry trust-policy revision is behind the local policy.");
+        }
+
+        if (latest.Revision == currentRevision)
+        {
+            if (!string.Equals(latest.Sha256, current?.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new GlobalReplicaException("The registry conflicts with the active trust-policy revision.");
+            }
+
+            return current;
+        }
+
+        for (var revision = currentRevision + 1; revision <= latest.Revision; revision++)
+        {
+            var descriptor = await transport.GetTrustPolicyAsync(revision, cancellationToken).ConfigureAwait(false);
+            ValidateTrustPolicyDescriptor(descriptor);
+            if (descriptor.Revision != revision)
+            {
+                throw new GlobalReplicaException("The registry returned the wrong trust-policy revision.");
+            }
+
+            var partial = Path.Combine(
+                stagingRoot,
+                $"trust-policy-{revision:D12}-{descriptor.Sha256.ToLowerInvariant()}.part");
+            _ = await DownloadChunksAsync(
+                    partial,
+                    descriptor.SizeBytes,
+                    (offset, count, token) =>
+                        transport.DownloadTrustPolicyChunkAsync(revision, offset, count, token),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            try
+            {
+                await VerifyFileAsync(partial, descriptor.Sha256, descriptor.SizeBytes, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                File.Delete(partial);
+                throw;
+            }
+
+            var envelope = await File.ReadAllBytesAsync(partial, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                _ = await ApplyTrustPolicyUnderLockAsync(envelope, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                File.Delete(partial);
+            }
+        }
+
+        return await LoadTrustPolicyAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private void VerifyRelease(SignedGlobalRelease release, TrustPolicyState? trustPolicy)
+    {
+        if (trustPolicy is null)
+        {
+            GlobalReleaseCodec.Verify(release, trustRoot);
+            return;
+        }
+
+        var authorizedKeys = GlobalTrustPolicyCodec.AuthorizedReleaseKeys(
+            trustPolicy.SignedPolicy.Policy,
+            release.Manifest.Sequence);
+        foreach (var authorizedKey in authorizedKeys)
+        {
+            try
+            {
+                GlobalReleaseCodec.Verify(release, authorizedKey);
+                return;
+            }
+            catch (GlobalReplicaException)
+            {
+            }
+        }
+
+        throw new GlobalReplicaException("The global release was not signed by a key authorized for its sequence.");
     }
 
     private async Task<(string Path, long BytesDownloaded)> DownloadReleaseAsync(
@@ -468,6 +684,15 @@ public sealed partial class GlobalReplicaClient
         }
     }
 
+    private static void ValidateTrustPolicyDescriptor(GlobalTrustPolicyDescriptor descriptor)
+    {
+        if (descriptor.Revision < 1 || !IsSha256(descriptor.Sha256) ||
+            descriptor.SizeBytes is <= 0 or > GlobalTrustPolicyCodec.MaximumPolicyBytes)
+        {
+            throw new GlobalReplicaException("The registry trust-policy descriptor is invalid.");
+        }
+    }
+
     private string ReleasePath(long sequence, string digest) =>
         Path.Combine(releasesRoot, $"{sequence:D12}-{digest.ToLowerInvariant()}.release.json");
 
@@ -515,6 +740,8 @@ public sealed partial class GlobalReplicaClient
     private static partial Regex SearchTermRegex();
 
     private sealed record ActivePointer(long Sequence, string ReleaseSha256);
+
+    private sealed record TrustPolicyState(SignedGlobalTrustPolicy SignedPolicy, string Sha256);
 
     private sealed record ActiveState(
         long Sequence,

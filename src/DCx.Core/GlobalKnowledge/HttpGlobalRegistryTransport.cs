@@ -45,6 +45,49 @@ public sealed class HttpGlobalRegistryTransport : IGlobalRegistryTransport
                ?? throw new GlobalReplicaException("The registry returned an empty latest-release descriptor.");
     }
 
+    public async Task<GlobalTrustPolicyDescriptor?> GetLatestTrustPolicyAsync(CancellationToken cancellationToken)
+    {
+        using var response = await httpClient.GetAsync(
+                new Uri(endpoint, "api/trust-policy/latest"),
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<GlobalTrustPolicyDescriptor>(JsonOptions, cancellationToken)
+                   .ConfigureAwait(false)
+               ?? throw new GlobalReplicaException("The registry returned an empty trust-policy descriptor.");
+    }
+
+    public async Task<GlobalTrustPolicyDescriptor> GetTrustPolicyAsync(
+        long revision,
+        CancellationToken cancellationToken)
+    {
+        using var response = await httpClient.GetAsync(
+                new Uri(endpoint, $"api/trust-policy/{revision}"),
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken)
+            .ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<GlobalTrustPolicyDescriptor>(JsonOptions, cancellationToken)
+                   .ConfigureAwait(false)
+               ?? throw new GlobalReplicaException("The registry returned an empty trust-policy descriptor.");
+    }
+
+    public Task<byte[]> DownloadTrustPolicyChunkAsync(
+        long revision,
+        long offset,
+        int count,
+        CancellationToken cancellationToken) =>
+        DownloadChunkAsync(
+            $"api/trust-policy/{revision}/content?offset={offset}&count={count}",
+            count,
+            cancellationToken);
+
     public async Task<GlobalReleaseDescriptor> GetReleaseAsync(long sequence, CancellationToken cancellationToken)
     {
         using var response = await httpClient.GetAsync(

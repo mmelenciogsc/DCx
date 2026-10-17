@@ -15,12 +15,45 @@ public sealed class GlobalServiceE2eTests : IDisposable
     [Fact]
     public async Task LoopbackService_SynchronizesSignedReleaseOverHttp()
     {
-        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var privateKey = key.ExportPkcs8PrivateKey();
-        var trustRoot = key.ExportSubjectPublicKeyInfo();
+        using var trustRootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var releaseKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var privateKey = releaseKey.ExportPkcs8PrivateKey();
+        var trustRoot = trustRootKey.ExportSubjectPublicKeyInfo();
         var dataRoot = Path.Combine(root, "server");
         await using (var repository = await GlobalRegistryRepository.OpenAsync(dataRoot, privateKey))
         {
+            var releasePublicKey = releaseKey.ExportSubjectPublicKeyInfo();
+            var authorization = new GlobalReleaseKeyAuthorization(
+                GlobalReleaseCodec.Sha256(releasePublicKey),
+                Convert.ToBase64String(releasePublicKey),
+                1);
+            var trustPolicyOne = GlobalTrustPolicyCodec.Encode(GlobalTrustPolicyCodec.Sign(
+                new GlobalTrustPolicy(
+                    1,
+                    1,
+                    null,
+                    DateTimeOffset.Parse("2026-10-17T00:00:00Z"),
+                    [authorization]),
+                trustRootKey));
+            await repository.StoreTrustPolicyAsync(trustPolicyOne, trustRoot);
+            var trustPolicyTwo = GlobalTrustPolicyCodec.Encode(GlobalTrustPolicyCodec.Sign(
+                new GlobalTrustPolicy(
+                    1,
+                    2,
+                    GlobalReleaseCodec.Sha256(trustPolicyOne),
+                    DateTimeOffset.Parse("2026-10-18T00:00:00Z"),
+                    [authorization]),
+                trustRootKey));
+            await repository.StoreTrustPolicyAsync(trustPolicyTwo, trustRoot);
+            var trustPolicyThree = GlobalTrustPolicyCodec.Encode(GlobalTrustPolicyCodec.Sign(
+                new GlobalTrustPolicy(
+                    1,
+                    3,
+                    GlobalReleaseCodec.Sha256(trustPolicyTwo),
+                    DateTimeOffset.Parse("2026-10-19T00:00:00Z"),
+                    [authorization]),
+                trustRootKey));
+            await repository.StoreTrustPolicyAsync(trustPolicyThree, trustRoot);
             var resource = new GlobalResourceRecord(
                 "global:http-fixture",
                 "1",
@@ -65,6 +98,7 @@ public sealed class GlobalServiceE2eTests : IDisposable
             var result = await client.SynchronizeAsync(transport);
 
             Assert.Equal(1, result.Status.Sequence);
+            Assert.Equal(3, (await client.GetTrustPolicyStatusAsync())!.Revision);
             Assert.Equal("global:http-fixture", Assert.Single(await client.SearchAsync("loopback Kestrel", [1f])).ResourceId);
         }
         finally

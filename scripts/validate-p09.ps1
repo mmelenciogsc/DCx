@@ -23,6 +23,10 @@ try {
 
     "Signed two-client process/HTTP simulation=PASS"
     "Corrupt-signature rejection=PASS"
+    "Offline-root-signed release-key rotation policy=PASS"
+    "Revision-chained trust-policy HTTP catch-up=PASS"
+    "Revoked signer and policy rollback rejection=PASS"
+    "Rejected rollback preserves active replica=PASS"
     "Interrupted delta checkpoint recovery=PASS"
     "Private collection isolation=PASS"
     "Offline search and rollback=PASS"
