@@ -28,7 +28,7 @@ This is process-local simulation protection. State resets on restart, is not syn
 
 ## Windows simulation client
 
-The native **Contributions** window can connect only to a root `http` origin on a literal loopback IP, such as `http://127.0.0.1:5087/`. Host names such as `localhost`, paths, HTTPS, remote addresses, user information, query strings and fragments are rejected. The client uses only `POST /api/contributions/intake`; redirects, cookies, proxies and decompression are disabled.
+The native **Contributions** window can connect only to a root `http` origin on a literal loopback IP, such as `http://127.0.0.1:5087/`. Host names such as `localhost`, paths, HTTPS, remote addresses, user information, query strings and fragments are rejected. The client uses only intake, exact-item status and owner-withdrawal routes; redirects, cookies, proxies and decompression are disabled.
 
 1. Keep **Prepare contributions for review** unchecked unless preparing a deliberate fixture.
 2. Enter and review one CKB candidate, complete all three attestations, approve the exact item and prepare it locally.
@@ -36,8 +36,12 @@ The native **Contributions** window can connect only to a root `http` origin on 
 4. Enter the simulation's matching contributor pseudonym, literal-loopback origin and one-attempt contributor token.
 5. Check the separate send approval and invoke **Send to local simulation**.
 6. Treat `Quarantined` only as intake confirmation. It is not reviewer approval or publication. The password control and send approval clear after the attempt.
+7. For an uncertain result or later state, re-enter the token, check the separate status approval and invoke **Query simulation status**. Status contains bounded lifecycle metadata only, never the contribution body.
+8. Do not retry intake unless the original bound origin reports `submission_missing`. Changing the endpoint cannot bypass this origin binding.
+9. Reviewer approval remains a separate server role with no contributor-UI control. After a status query reports `Approved`, withdrawal becomes available but remains unchecked.
+10. To test deprecation, re-enter the token, check the separate withdrawal approval and invoke **Withdraw from simulation**. Confirm the resulting `Withdrawn` state and release sequence.
 
-The UI currently sends metadata/body only and has no artifact picker, status/withdrawal/reviewer action or remote/global endpoint mode. Use only generated fixture credentials. Cancellation may occur after the server accepted the request; reconcile server state before retrying.
+The UI has no artifact picker, reviewer-approval action or remote/global endpoint mode. Use only generated fixture credentials. Cancellation may occur after the server accepted a state-changing request; reconcile status before another action. Every password value and action approval clears after the attempt.
 
 ## Optional publication worker
 
@@ -73,6 +77,8 @@ When both sandbox and worker are enabled, API CCB approval returns `202 Accepted
 - Reviewer: `GET /api/contributions/pending?limit=`, `GET /api/contributions/{submissionId}`, `POST /api/contributions/{submissionId}/approve`.
 - Reviewer worker operations: `GET /api/contributions/publication-queue?limit=`, `POST /api/contributions/publication-queue/{operationId}/retry`.
 - Reviewer CCB-review operations: `GET /api/contributions/ccb-review-queue?limit=`, `POST /api/contributions/ccb-review-queue/{jobId}/retry`.
+
+Contributor `GET` returns only submission ID, candidate SHA-256, state, created/reviewed UTC and release sequence. Contributor withdrawal returns that exact submission/candidate binding, `Withdrawn` state and the signed-release descriptor. Reviewer status remains the full review object required for authorized review. These role-dependent response shapes are provisional simulation contracts.
 
 Use the automated child-process test rather than handling credentials manually:
 
