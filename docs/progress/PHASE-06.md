@@ -39,7 +39,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 - Locked Release build: 0 warnings, 0 errors; 5.74 seconds in the recorded P06 run.
 - P06 local-model tests: passed 22, failed 0, skipped 0; about 1 second.
-- Current full suite after P10 authenticated simulation-API hardening: passed 179, failed 0, skipped 0; about 3 seconds.
+- Current full suite after P10 durable simulation-worker hardening: passed 182, failed 0, skipped 0; about 7 seconds.
 - Vision response: `A blue square and a red circle are displayed above the text "DCX 42".`
 - Prompt tokens: 1,100; output tokens: 20.
 - Ollama-reported duration: 15,395,872,900 ns; wall duration: 15,414 ms.

@@ -19,5 +19,6 @@ The registry's digest-bound idempotent operation ID remains the final duplicate-
 
 - Concurrent processes sharing one local SQLite governance database can recover the same intent without duplicate completion.
 - Time jumps can cause early or late takeover, but fencing plus idempotent registry operations preserve correctness.
-- There is still no continuous worker, wakeup/backoff scheduler, operator dead-letter UI or supported multi-node/network-filesystem coordination.
+- A separately gated simulation worker now polls, backs off and exposes body-free dead-letter/remediation status; the lease remains the execution fence and the intent remains the authority.
+- There is still no production scheduler, alerting/operator UI, supported multi-node/network-filesystem coordination or high-availability evidence.
 - CCB sandbox review occurs before the publication intent exists and remains protected only by a process-local approval lock; a durable pre-sandbox workload queue is still required for production.

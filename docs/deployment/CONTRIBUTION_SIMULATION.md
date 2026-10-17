@@ -4,7 +4,7 @@ This configuration is for controlled local/process testing only. It is not a pro
 
 ## Default state
 
-The global service requires its existing `DCX_GLOBAL_SIMULATION=1` gate. Contribution routes are additionally absent unless `DCX_GLOBAL_CONTRIBUTION_API=1`. With the contribution gate off, `/health` reports `contributionApi: false` and `/api/contributions/*` returns `404`.
+The global service requires its existing `DCX_GLOBAL_SIMULATION=1` gate. Contribution routes are additionally absent unless `DCX_GLOBAL_CONTRIBUTION_API=1`. With the contribution gate off, `/health` reports `contributionApi: false` and `contributionWorker: false`, while `/api/contributions/*` returns `404`.
 
 ## Required simulation settings
 
@@ -19,6 +19,17 @@ Supply secrets through an ephemeral process environment or an approved secret ma
 | `DCX_GLOBAL_REVIEWER_ID` | 1–128 character server-bound reviewer identifier using the same alphabet |
 
 The raw bearer tokens are sent only in the HTTP `Authorization: Bearer` header. Contributor and reviewer digest values must differ. Requests use media type `application/vnd.dcx.contribution.v1+binary`; the repository codec is the canonical encoder. Do not manually serialize a production client from this provisional contract.
+
+## Optional publication worker
+
+The worker is independently default-off. It cannot start unless the contribution API is enabled.
+
+| Setting | Requirement |
+|---|---|
+| `DCX_GLOBAL_CONTRIBUTION_WORKER` | Exact value `1` to enable the simulation polling loop |
+| `DCX_GLOBAL_CONTRIBUTION_WORKER_INTERVAL_MS` | Optional integer from 100 through 60,000; default 1,000 |
+
+With the worker enabled, `/health` reports `contributionWorker: true`. Each cycle processes at most 100 ready immutable intents. Transient failures back off exponentially up to five minutes and dead-letter after five; permanent policy failures dead-letter immediately. The reviewer queue contains identifiers, stable codes, counts and timestamps only. It is not a production queue or monitoring system.
 
 ## Optional Linux CCB sandbox
 
@@ -39,6 +50,7 @@ The executor rehashes every executable before every run. A mismatch fails closed
 
 - Contributor: `POST /api/contributions/intake`, `GET /api/contributions/{submissionId}`, `POST /api/contributions/{submissionId}/withdraw`.
 - Reviewer: `GET /api/contributions/pending?limit=`, `GET /api/contributions/{submissionId}`, `POST /api/contributions/{submissionId}/approve`.
+- Reviewer worker operations: `GET /api/contributions/publication-queue?limit=`, `POST /api/contributions/publication-queue/{operationId}/retry`.
 
 Use the automated child-process test rather than handling credentials manually:
 

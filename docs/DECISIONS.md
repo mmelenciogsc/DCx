@@ -18,5 +18,6 @@
 | [0014](architecture/adr/0014-private-local-crash-diagnostics.md) | Keep crash diagnostics default-off, content-free, bounded and local with accessible consent/purge | Accepted for local controls | 2026-10-17 |
 | [0015](architecture/adr/0015-publication-intent-fencing-leases.md) | Coordinate authorized publication intents with expiring ownership-fenced leases | Accepted for same-SQLite local orchestration | 2026-10-17 |
 | [0016](architecture/adr/0016-default-off-contribution-simulation-api.md) | Expose contribution governance only through a default-off, role-separated simulation API | Accepted for local simulation | 2026-10-17 |
+| [0017](architecture/adr/0017-minimized-publication-retry-dead-letter.md) | Retry immutable publication intents with bounded, body-free failure state | Accepted for local simulation | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

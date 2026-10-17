@@ -33,17 +33,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 ## Measured result
 
-Recorded evidence directory: `artifacts/test-results/p13-3de4945ba3b44f13b93d12e07abea10f/` (generated and intentionally not committed).
+Recorded evidence directory: `artifacts/test-results/p13-30814f47d72b46979509289674dfb9b0/` (generated and intentionally not committed).
 
 - Locked Release build: 0 warnings, 0 errors.
 - Reliability tests: passed 18, failed 0, skipped 0.
-- Current full suite after P10 authenticated simulation-API hardening: passed 179, failed 0, skipped 0; about 3 seconds.
+- Current full suite after P10 durable simulation-worker hardening: passed 182, failed 0, skipped 0; about 7 seconds.
 - Publish trees: 42 files, 62,882,211 bytes each; no path/length/SHA-256 differences.
-- Reproducible staging ZIP SHA-256: `c9821d4431af057e037571961f6707d085d65015d318a861ee10b5e2ce008f90`.
+- Reproducible staging ZIP SHA-256: `70cc45fbb4bee0ef29bf5604413200e31cea2ef7b54811267b854e112eca4bf3`.
 - CycloneDX components: 7; third-party license records: 7.
 - Unexpected secret matches: 0; exact synthetic scanner-fixture matches: 2.
 - Authenticode: `NotSigned`.
-- Offline UIA heading: `DCx is ready offline`; startup 2,399 ms; working set 462 MiB under the provisional 1 GiB ceiling.
+- Offline UIA heading: `DCx is ready offline`; startup 2,262 ms; working set 463.9 MiB under the provisional 1 GiB ceiling.
 - Crash-diagnostics UIA heading: `Privacy and crash diagnostics`; consent defaulted unchecked, explicit opt-in persisted notice version 1, purge preserved enabled consent, opt-out disabled and purged, and network transfers remained zero.
 - Recovery UIA heading: `DCx backup and recovery`; main-app launcher, path input, create, default-unchecked approval, restore and assertive status are exposed.
 - Backup while main DCx held the lease was denied and wrote no archive. After main exit, backup and approved restore passed; restore without approval was denied; excluded synthetic WebView2 cookie data remained unchanged.
