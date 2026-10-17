@@ -84,11 +84,11 @@
                         AutomationProperties.HelpText="Opens a tab in the selected browser profile. Shortcut Control T."
                         Click="OnNewTabClick" />
 
-                <StackPanel Grid.Row="1"
-                            Grid.Column="0"
-                            Grid.ColumnSpan="6"
-                            Margin="0,8,0,0"
-                            Orientation="Horizontal">
+                <WrapPanel Grid.Row="1"
+                           Grid.Column="0"
+                           Grid.ColumnSpan="6"
+                           Margin="0,8,0,0"
+                           Orientation="Horizontal">
                     <TextBlock Margin="0,0,6,0" VerticalAlignment="Center" Text="New-tab profile:" />
                     <ComboBox x:Name="ProfilesBox"
                               MinWidth="110"
@@ -149,11 +149,18 @@
                             Click="OnContentViewerClick" />
                     <Button x:Name="ContributionsButton"
                             MinWidth="120"
+                            Margin="0,0,6,0"
                             Content="Contributions"
                             AutomationProperties.AutomationId="ContributionsButton"
                             AutomationProperties.Name="Open private contribution review"
                             Click="OnContributionsClick" />
-                </StackPanel>
+                    <Button MinWidth="100"
+                            Content="Recovery"
+                            AutomationProperties.AutomationId="RecoveryButton"
+                            AutomationProperties.Name="Open backup and recovery"
+                            AutomationProperties.HelpText="Opens a separate recovery window. Close the main DCx window before running backup or restore."
+                            Click="OnRecoveryClick" />
+                </WrapPanel>
             </Grid>
         </Border>
 

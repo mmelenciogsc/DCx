@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Automation;
@@ -930,6 +931,21 @@ public partial class MainWindow : Window
         _contributionsWindow = new ContributionsWindow { Owner = this };
         _contributionsWindow.Closed += (_, _) => _contributionsWindow = null;
         _contributionsWindow.Show();
+    }
+
+    private void OnRecoveryClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var executable = Environment.ProcessPath
+                ?? throw new InvalidOperationException("The DCx executable path is unavailable.");
+            Process.Start(new ProcessStartInfo(executable, "--recovery") { UseShellExecute = true });
+            SetStatus("Backup and recovery opened separately. Close the main DCx window before starting an operation.");
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"Backup and recovery could not open. {exception.Message}");
+        }
     }
 
     private static string ResolveRepositoryRoot()

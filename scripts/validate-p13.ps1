@@ -12,6 +12,7 @@ $publishTwo = Join-Path $runRoot "publish-b"
 $previousDataRoot = $env:DCX_DATA_ROOT
 $previousOfflineStartup = $env:DCX_OFFLINE_STARTUP
 $process = $null
+$recoveryProcess = $null
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -240,6 +241,12 @@ try {
     $signature = Get-AuthenticodeSignature -FilePath $publishedExe
     $env:DCX_DATA_ROOT = Join-Path $runRoot "offline-data"
     $env:DCX_OFFLINE_STARTUP = "1"
+    New-Item -ItemType Directory -Path (Join-Path $env:DCX_DATA_ROOT "Browser") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $env:DCX_DATA_ROOT "private\owner") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $env:DCX_DATA_ROOT "WebView2\Profiles\Default") -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "Browser\recovery-fixture.txt") -Value "original browser metadata" -NoNewline
+    Set-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "private\owner\knowledge.db") -Value "original private knowledge" -NoNewline
+    Set-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "WebView2\Profiles\Default\Cookies") -Value "original cookie" -NoNewline
     $started = Get-Date
     $process = Start-Process $publishedExe -PassThru
     $window = Wait-For { Get-MainWindow $process.Id } "The published DCx window did not start offline."
@@ -249,18 +256,78 @@ try {
         $value.Current.Value -eq "about:blank"
     } "The embedded offline document did not become the current page."
     $heading = Wait-For { Find-ByName $window "DCx is ready offline" } "The embedded offline heading was not exposed through UIA."
+    $offlineHeadingName = $heading.Current.Name
     $status = Find-ById $window "StatusText"
+    $recoveryLauncher = Wait-For { Find-ById $window "RecoveryButton" } "The main window recovery launcher was not exposed through UIA."
+    $recoveryLauncherName = $recoveryLauncher.Current.Name
     $null = Wait-For { $status.Current.Name -eq "DCx is ready offline. No website was contacted during startup." } "Offline startup status was not exposed."
     $startupMilliseconds = [long]((Get-Date) - $started).TotalMilliseconds
     $process.Refresh()
     $workingSetMiB = [math]::Round($process.WorkingSet64 / 1MB, 1)
     if ($workingSetMiB -gt 1024) { throw "Offline startup exceeded the provisional 1 GiB working-set ceiling." }
 
+    $recoveryProcess = Start-Process $publishedExe -ArgumentList "--recovery" -PassThru
+    $recoveryWindow = Wait-For { Get-MainWindow $recoveryProcess.Id } "The recovery window did not start."
+    $recoveryHeading = Wait-For { Find-ById $recoveryWindow "RecoveryHeading" } "The recovery heading was not exposed through UIA."
+    $recoveryPath = Wait-For { Find-ById $recoveryWindow "RecoveryBackupPath" } "The recovery backup path was not exposed through UIA."
+    $recoveryCreate = Wait-For { Find-ById $recoveryWindow "RecoveryCreateBackup" } "The create-backup action was not exposed through UIA."
+    $recoveryApproval = Wait-For { Find-ById $recoveryWindow "RecoveryRestoreApproval" } "The restore approval was not exposed through UIA."
+    $recoveryRestore = Wait-For { Find-ById $recoveryWindow "RecoveryRestoreBackup" } "The restore action was not exposed through UIA."
+    $recoveryStatus = Wait-For { Find-ById $recoveryWindow "RecoveryStatus" } "The recovery live status was not exposed through UIA."
+    $backupPath = Join-Path $runRoot "recovery-ui.dcxbackup"
+    $pathValue = $recoveryPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+    $pathValue.SetValue($backupPath)
+    $createInvoke = $recoveryCreate.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    $createInvoke.Invoke()
+    $null = Wait-For {
+        $recoveryStatus.Current.Name.StartsWith("Backup was not created. DCx data is in use.", [StringComparison]::Ordinal)
+    } "Recovery did not deny backup while the main DCx process held the data lease."
+    if (Test-Path -LiteralPath $backupPath) { throw "A backup was created while DCx data was in use." }
+
+    $null = $process.CloseMainWindow()
+    if (-not $process.WaitForExit(5000)) { throw "The main DCx process did not close for recovery validation." }
+    $process = $null
+    $createInvoke.Invoke()
+    $null = Wait-For {
+        (Test-Path -LiteralPath $backupPath) -and
+        $recoveryStatus.Current.Name.StartsWith("Backup complete.", [StringComparison]::Ordinal)
+    } "Recovery did not create a backup after DCx released the data lease."
+
+    Set-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "Browser\recovery-fixture.txt") -Value "changed browser metadata" -NoNewline
+    Set-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "private\owner\knowledge.db") -Value "changed private knowledge" -NoNewline
+    Set-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "WebView2\Profiles\Default\Cookies") -Value "current cookie remains" -NoNewline
+    $approvalToggle = $recoveryApproval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+    if ($approvalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "Restore replacement approval did not default to unchecked."
+    }
+    $restoreInvoke = $recoveryRestore.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    $restoreInvoke.Invoke()
+    $null = Wait-For {
+        $recoveryStatus.Current.Name -eq "Restore was not started. Check the replacement approval box first."
+    } "Recovery did not deny restore without explicit replacement approval."
+    if ((Get-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "Browser\recovery-fixture.txt") -Raw) -ne "changed browser metadata") {
+        throw "An unapproved restore changed browser metadata."
+    }
+    $approvalToggle.Toggle()
+    $restoreInvoke.Invoke()
+    $null = Wait-For {
+        $recoveryStatus.Current.Name.StartsWith("Restore complete.", [StringComparison]::Ordinal)
+    } "Recovery did not complete the approved restore."
+    if ((Get-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "Browser\recovery-fixture.txt") -Raw) -ne "original browser metadata") {
+        throw "Recovery did not restore browser metadata."
+    }
+    if ((Get-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "private\owner\knowledge.db") -Raw) -ne "original private knowledge") {
+        throw "Recovery did not restore private knowledge."
+    }
+    if ((Get-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "WebView2\Profiles\Default\Cookies") -Raw) -ne "current cookie remains") {
+        throw "Recovery changed excluded WebView2 cookie data."
+    }
+
     $result = [ordered]@{
         captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
         release_build_warnings = 0
         release_build_errors = 0
-        reliability_tests_passed = 12
+        reliability_tests_passed = 14
         publish_file_count = $manifestOne.Count
         publish_bytes = [long](($manifestOne | Measure-Object length -Sum).Sum)
         reproducible_publish = $true
@@ -271,9 +338,16 @@ try {
         allowed_fake_secret_fixture_matches = $fixtureMatches
         unexpected_secret_matches = 0
         authenticode_status = [string]$signature.Status
-        offline_heading = $heading.Current.Name
+        offline_heading = $offlineHeadingName
         offline_startup_ms = $startupMilliseconds
         offline_working_set_mib = $workingSetMiB
+        recovery_uia_heading = $recoveryHeading.Current.Name
+        recovery_launcher_uia_name = $recoveryLauncherName
+        recovery_denied_while_running = $true
+        recovery_backup_and_restore = $true
+        recovery_restore_approval_default_unchecked = $true
+        recovery_unapproved_restore_denied = $true
+        recovery_excluded_cookie_unchanged = $true
         production_actions = 0
         installer_claimed = $false
     }
@@ -287,13 +361,22 @@ try {
     "Unexpected secret matches=0"
     "Known synthetic scanner-fixture matches=$fixtureMatches"
     "Authenticode status=$($signature.Status)"
-    "Offline startup UIA=$($heading.Current.Name)"
+    "Offline startup UIA=$offlineHeadingName"
     "Offline startup milliseconds=$startupMilliseconds"
     "Offline working set MiB=$workingSetMiB"
+    "Accessible recovery UIA=$($recoveryHeading.Current.Name)"
+    "Closed-app backup and approved restore=PASS"
+    "Backup while DCx running denied=PASS"
+    "Restore without explicit approval denied=PASS"
+    "Excluded WebView2 cookie unchanged=PASS"
     "P13 evidence=$runRoot"
     "P13 installer signing vulnerability scan clean-VM and human-AT gate=BLOCKED"
 }
 finally {
+    if ($null -ne $recoveryProcess -and -not $recoveryProcess.HasExited) {
+        $null = $recoveryProcess.CloseMainWindow()
+        if (-not $recoveryProcess.WaitForExit(5000)) { $recoveryProcess.Kill() }
+    }
     if ($null -ne $process -and -not $process.HasExited) {
         $null = $process.CloseMainWindow()
         if (-not $process.WaitForExit(5000)) { $process.Kill() }

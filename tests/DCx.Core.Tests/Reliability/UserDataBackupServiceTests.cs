@@ -86,6 +86,29 @@ public sealed class UserDataBackupServiceTests : IDisposable
         Assert.Equal("current", await File.ReadAllTextAsync(Path.Combine(data, "Browser", "history.json")));
     }
 
+    [Fact]
+    public void OperationLease_DeniesConcurrentUseAndReleasesAfterDispose()
+    {
+        var data = Path.Combine(root, "lease-data");
+        using (ApplicationDataOperationLease.Acquire(data, "running DCx"))
+        {
+            var exception = Assert.Throws<ApplicationDataInUseException>(() =>
+                ApplicationDataOperationLease.Acquire(data, "creating a backup"));
+            Assert.Contains("Close DCx", exception.Message, StringComparison.Ordinal);
+        }
+
+        using var reopened = ApplicationDataOperationLease.Acquire(data, "creating a backup");
+        Assert.Equal(Path.GetFullPath(data), reopened.DataRoot);
+    }
+
+    [Fact]
+    public void OperationLease_RejectsFilesystemRoot()
+    {
+        var filesystemRoot = Path.GetPathRoot(Path.GetFullPath(root))!;
+        Assert.Throws<InvalidOperationException>(() =>
+            ApplicationDataOperationLease.Acquire(filesystemRoot, "creating a backup"));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);

@@ -1,0 +1,107 @@
+<Window x:Class="DCx.Desktop.RecoveryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DCx backup and recovery"
+        Width="760"
+        Height="560"
+        MinWidth="640"
+        MinHeight="480"
+        AutomationProperties.AutomationId="RecoveryWindow"
+        AutomationProperties.Name="DCx backup and recovery window">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="24">
+            <TextBlock FontSize="26"
+                       FontWeight="SemiBold"
+                       Text="DCx backup and recovery"
+                       AutomationProperties.AutomationId="RecoveryHeading"
+                       AutomationProperties.Name="DCx backup and recovery" />
+            <TextBlock Margin="0,12,0,0"
+                       TextWrapping="Wrap"
+                       Text="Backups include browser history, bookmarks, and private CKB and CCB data. Browser sessions, cookies, caches, protected credentials, and the global replica are excluded." />
+            <TextBlock Margin="0,8,0,0"
+                       FontWeight="SemiBold"
+                       TextWrapping="Wrap"
+                       Text="Close the main DCx window before creating or restoring a backup. Recovery refuses to run while the data is in use." />
+
+            <GroupBox Margin="0,20,0,0" Header="Backup file">
+                <Grid Margin="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="BackupPathBox"
+                             Grid.Column="0"
+                             MinHeight="32"
+                             Padding="6,4"
+                             VerticalContentAlignment="Center"
+                             AutomationProperties.AutomationId="RecoveryBackupPath"
+                             AutomationProperties.Name="Backup file path"
+                             AutomationProperties.HelpText="Enter a .dcxbackup file outside the DCx data folder." />
+                    <Button x:Name="ChooseDestinationButton"
+                            Grid.Column="1"
+                            MinWidth="150"
+                            Margin="8,0,0,0"
+                            Content="Choose _destination"
+                            AutomationProperties.AutomationId="RecoveryChooseDestination"
+                            AutomationProperties.Name="Choose backup destination"
+                            Click="OnChooseDestinationClick" />
+                    <Button x:Name="ChooseExistingButton"
+                            Grid.Column="2"
+                            MinWidth="140"
+                            Margin="8,0,0,0"
+                            Content="Choose _existing"
+                            AutomationProperties.AutomationId="RecoveryChooseExisting"
+                            AutomationProperties.Name="Choose existing backup"
+                            Click="OnChooseExistingClick" />
+                </Grid>
+            </GroupBox>
+
+            <Button x:Name="CreateBackupButton"
+                    Width="180"
+                    MinHeight="36"
+                    Margin="0,16,0,0"
+                    HorizontalAlignment="Left"
+                    Content="_Create backup"
+                    AutomationProperties.AutomationId="RecoveryCreateBackup"
+                    AutomationProperties.Name="Create backup"
+                    AutomationProperties.HelpText="Creates a verified backup after confirming DCx data is not in use."
+                    Click="OnCreateBackupClick" />
+
+            <Separator Margin="0,20,0,16" />
+
+            <TextBlock FontSize="20" FontWeight="SemiBold" Text="Restore" />
+            <TextBlock Margin="0,8,0,0"
+                       TextWrapping="Wrap"
+                       Text="Restore verifies and stages every file first. It then replaces only current browser metadata and private knowledge. Current cookies and protected credentials remain unchanged." />
+            <CheckBox x:Name="RestoreApprovalBox"
+                      Margin="0,12,0,0"
+                      Content="I understand that restore replaces current browser metadata and private knowledge."
+                      AutomationProperties.AutomationId="RecoveryRestoreApproval"
+                      AutomationProperties.Name="Approve replacement of current browser metadata and private knowledge" />
+            <Button x:Name="RestoreBackupButton"
+                    Width="210"
+                    MinHeight="36"
+                    Margin="0,12,0,0"
+                    HorizontalAlignment="Left"
+                    Content="_Restore selected backup"
+                    AutomationProperties.AutomationId="RecoveryRestoreBackup"
+                    AutomationProperties.Name="Restore selected backup"
+                    AutomationProperties.HelpText="Requires the replacement approval checkbox and exclusive access to DCx data."
+                    Click="OnRestoreBackupClick" />
+
+            <Border Margin="0,20,0,0"
+                    Padding="12"
+                    Background="#F3F3F3"
+                    BorderBrush="#808080"
+                    BorderThickness="1">
+                <TextBlock x:Name="RecoveryStatusText"
+                           Text="Ready. Close the main DCx window before starting an operation."
+                           TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="RecoveryStatus"
+                           AutomationProperties.Name="Ready. Close the main DCx window before starting an operation."
+                           AutomationProperties.LiveSetting="Assertive" />
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Window>
