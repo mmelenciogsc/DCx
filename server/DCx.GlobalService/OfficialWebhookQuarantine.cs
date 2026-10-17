@@ -33,8 +33,75 @@ public sealed record WebhookQuarantineReprocessSummary(
     int StillPending,
     int Blocked);
 
+public sealed record WebhookQuarantineHealthSnapshot(
+    string StatusCode,
+    int Pending,
+    int Due,
+    int Blocked,
+    int Completed,
+    int MaximumAttemptCount,
+    DateTimeOffset? OldestPendingUtc,
+    DateTimeOffset? NextAttemptUtc);
+
 public sealed partial class DurableCareRepository
 {
+    public async Task<WebhookQuarantineHealthSnapshot>
+        GetOfficialWebhookQuarantineHealthAsync(
+            DateTimeOffset now,
+            CancellationToken cancellationToken = default)
+    {
+        var nowUtc = now.ToUniversalTime();
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                COALESCE(SUM(CASE WHEN state = 'pending' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN state = 'pending' AND next_attempt_utc <= $now
+                    THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN state = 'blocked' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END), 0),
+                COALESCE(MAX(attempt_count), 0),
+                MIN(CASE WHEN state = 'pending' THEN first_received_utc END),
+                MIN(CASE WHEN state = 'pending' THEN next_attempt_utc END)
+            FROM webhook_event_quarantine;
+            """;
+        command.Parameters.AddWithValue("$now", nowUtc.ToString("O"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException(
+                "The verified-event quarantine health query returned no aggregate row.");
+        }
+
+        var pending = checked((int)reader.GetInt64(0));
+        var due = checked((int)reader.GetInt64(1));
+        var blocked = checked((int)reader.GetInt64(2));
+        var completed = checked((int)reader.GetInt64(3));
+        var maximumAttempts = checked((int)reader.GetInt64(4));
+        var oldestPendingUtc = reader.IsDBNull(5)
+            ? (DateTimeOffset?)null
+            : DateTimeOffset.Parse(reader.GetString(5)).ToUniversalTime();
+        var nextAttemptUtc = reader.IsDBNull(6)
+            ? (DateTimeOffset?)null
+            : DateTimeOffset.Parse(reader.GetString(6)).ToUniversalTime();
+        var statusCode = blocked > 0
+            ? "operator_action_required"
+            : due > 0
+                ? "retry_due"
+                : pending > 0
+                    ? "retry_scheduled"
+                    : "clear";
+        return new WebhookQuarantineHealthSnapshot(
+            statusCode,
+            pending,
+            due,
+            blocked,
+            completed,
+            maximumAttempts,
+            oldestPendingUtc,
+            nextAttemptUtc);
+    }
+
     public async Task<DurableWebhookQuarantineRecord?> GetOfficialWebhookQuarantineAsync(
         string eventId,
         CancellationToken cancellationToken = default)

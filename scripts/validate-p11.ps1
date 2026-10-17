@@ -57,6 +57,7 @@ try {
     "Sale-bound refund/reversal and cumulative correction cap=PASS"
     "Durable verified-event dependency quarantine and causal local replay=PASS"
     "Quarantine replay conflict tamper bounded-backoff and nonremediable-block gates=PASS"
+    "Privacy-minimized aggregate quarantine health and operator-action state=PASS"
     "Quarantine reprocessing provider calls=0"
     "Malformed/unverified event denial before ledger mutation=PASS"
     "Stable PayPal request ID and sender batch retry fixture=PASS"

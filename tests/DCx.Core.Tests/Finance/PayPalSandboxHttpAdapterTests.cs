@@ -18,6 +18,26 @@ public sealed class PayPalSandboxHttpAdapterTests
     private const string AccessToken = "sandbox-access-token-never-log";
 
     [Fact]
+    public void QuarantineHealthContract_IsAggregateAndIdentifierFree()
+    {
+        Assert.Equal(
+            [
+                "StatusCode",
+                "Pending",
+                "Due",
+                "Blocked",
+                "Completed",
+                "MaximumAttemptCount",
+                "OldestPendingUtc",
+                "NextAttemptUtc",
+            ],
+            typeof(WebhookQuarantineHealthSnapshot)
+                .GetProperties()
+                .Select(property => property.Name)
+                .ToArray());
+    }
+
+    [Fact]
     public async Task VerifyWebhook_UsesOfficialSandboxContractAndExactEventObject()
     {
         var calls = 0;
@@ -192,6 +212,10 @@ public sealed class PayPalSandboxHttpAdapterTests
                 "WH-OUT-OF-ORDER-PAYMENT"))!.State);
             Assert.Equal("pending", (await repository.GetOfficialWebhookQuarantineAsync(
                 "WH-OUT-OF-ORDER-REFUND"))!.State);
+            Assert.Equal(
+                new WebhookQuarantineHealthSnapshot(
+                    "retry_due", 2, 2, 0, 0, 0, received, received),
+                await repository.GetOfficialWebhookQuarantineHealthAsync(received));
             Assert.Null(await repository.GetWebhookAuditAsync("WH-OUT-OF-ORDER-PAYMENT"));
             Assert.Null(await repository.GetWebhookAuditAsync("WH-OUT-OF-ORDER-REFUND"));
             repository = await DurableCareRepository.OpenAsync(root);
@@ -208,6 +232,10 @@ public sealed class PayPalSandboxHttpAdapterTests
                 "WH-OUT-OF-ORDER-PAYMENT"))!.State);
             Assert.Equal("completed", (await repository.GetOfficialWebhookQuarantineAsync(
                 "WH-OUT-OF-ORDER-REFUND"))!.State);
+            Assert.Equal(
+                new WebhookQuarantineHealthSnapshot(
+                    "clear", 0, 0, 0, 2, 1, null, null),
+                await repository.GetOfficialWebhookQuarantineHealthAsync(received));
             Assert.Equal(200, await repository.BalanceAsync(LedgerAccount.Cash));
             Assert.False((await repository.GetEntitlementAsync("I-OUT-OF-ORDER"))!.Active);
             Assert.True(await repository.ReconcilesAsync());
@@ -253,6 +281,10 @@ public sealed class PayPalSandboxHttpAdapterTests
                 "WH-BACKOFF-PAYMENT"))!;
             Assert.Equal(1, pending.AttemptCount);
             Assert.Equal(received.AddSeconds(2), pending.NextAttemptUtc);
+            Assert.Equal(
+                new WebhookQuarantineHealthSnapshot(
+                    "retry_scheduled", 1, 0, 0, 0, 1, received, received.AddSeconds(2)),
+                await repository.GetOfficialWebhookQuarantineHealthAsync(received.AddSeconds(1)));
             Assert.Equal(
                 new WebhookQuarantineReprocessSummary(0, 0, 0, 0),
                 await repository.ReprocessQuarantinedOfficialWebhooksAsync(received.AddSeconds(1)));
@@ -334,6 +366,10 @@ public sealed class PayPalSandboxHttpAdapterTests
             Assert.Equal("paypal_sandbox_quarantine_reprocess_blocked", blocked.ReasonCode);
             Assert.Equal(1, blocked.AttemptCount);
             Assert.Null(blocked.NextAttemptUtc);
+            Assert.Equal(
+                new WebhookQuarantineHealthSnapshot(
+                    "operator_action_required", 0, 0, 1, 0, 1, null, null),
+                await repository.GetOfficialWebhookQuarantineHealthAsync(received));
             Assert.Null(await repository.GetWebhookAuditAsync("WH-BLOCKED-REFUND"));
             Assert.Equal(200, await repository.BalanceAsync(LedgerAccount.Cash));
             Assert.Equal(
