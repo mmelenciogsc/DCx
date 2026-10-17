@@ -179,15 +179,12 @@ function Invoke-DefenderNoRemediationScan(
     $trustedSystemDrive = [IO.Path]::GetPathRoot($trustedSystemRoot).TrimEnd('\')
     $trustedProgramFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
     $trustedProgramData = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)
-    $trustedTemp = [IO.Path]::GetTempPath().TrimEnd('\')
     $start.Environment.Clear()
     $start.Environment["SystemDrive"] = $trustedSystemDrive
     $start.Environment["SystemRoot"] = $trustedSystemRoot
     $start.Environment["WINDIR"] = $trustedSystemRoot
     $start.Environment["ProgramData"] = $trustedProgramData
     $start.Environment["ProgramFiles"] = $trustedProgramFiles
-    $start.Environment["TEMP"] = $trustedTemp
-    $start.Environment["TMP"] = $trustedTemp
 
     $scan = [Diagnostics.Process]::new()
     $scan.StartInfo = $start
