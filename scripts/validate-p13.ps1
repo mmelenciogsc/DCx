@@ -157,6 +157,95 @@ function Invoke-PublishedBinarySecretScan([string[]]$paths) {
     }
 }
 
+function Invoke-DefenderNoRemediationScan(
+    [string]$defenderPath,
+    [string]$targetPath,
+    [int]$timeoutMilliseconds = 300000) {
+    if (-not (Test-Path -LiteralPath $defenderPath -PathType Leaf) -or
+        (-not (Test-Path -LiteralPath $targetPath -PathType Leaf) -and
+         -not (Test-Path -LiteralPath $targetPath -PathType Container))) {
+        throw "Defender scan inputs are unavailable."
+    }
+
+    $start = [Diagnostics.ProcessStartInfo]::new($defenderPath)
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    foreach ($argument in @("-Scan", "-ScanType", "3", "-File", $targetPath, "-DisableRemediation")) {
+        $null = $start.ArgumentList.Add($argument)
+    }
+    $trustedSystemRoot = [IO.Directory]::GetParent([Environment]::SystemDirectory).FullName
+    $trustedSystemDrive = [IO.Path]::GetPathRoot($trustedSystemRoot).TrimEnd('\')
+    $trustedProgramFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+    $trustedProgramData = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)
+    $trustedTemp = [IO.Path]::GetTempPath().TrimEnd('\')
+    $start.Environment.Clear()
+    $start.Environment["SystemDrive"] = $trustedSystemDrive
+    $start.Environment["SystemRoot"] = $trustedSystemRoot
+    $start.Environment["WINDIR"] = $trustedSystemRoot
+    $start.Environment["ProgramData"] = $trustedProgramData
+    $start.Environment["ProgramFiles"] = $trustedProgramFiles
+    $start.Environment["TEMP"] = $trustedTemp
+    $start.Environment["TMP"] = $trustedTemp
+
+    $scan = [Diagnostics.Process]::new()
+    $scan.StartInfo = $start
+    try {
+        if (-not $scan.Start()) { throw "Defender scan did not start." }
+        $standardOutput = $scan.StandardOutput.ReadToEndAsync()
+        $standardError = $scan.StandardError.ReadToEndAsync()
+        if (-not $scan.WaitForExit($timeoutMilliseconds)) {
+            try { $scan.Kill($true) } catch {}
+            throw "Defender scan exceeded its time limit."
+        }
+        $output = $standardOutput.GetAwaiter().GetResult()
+        $errors = $standardError.GetAwaiter().GetResult()
+        if ($output.Length -gt 65536 -or $errors.Length -gt 65536) {
+            throw "Defender scan output exceeded its limit."
+        }
+        if ($scan.ExitCode -ne 0) {
+            throw "Defender no-remediation scan did not return a clean result."
+        }
+    }
+    finally {
+        $scan.Dispose()
+    }
+}
+
+function Get-NuGetVulnerabilityCount([object]$audit) {
+    $count = 0
+    foreach ($project in $audit.projects) {
+        foreach ($framework in $project.frameworks) {
+            foreach ($collectionName in @("topLevelPackages", "transitivePackages")) {
+                $packagesProperty = $framework.PSObject.Properties[$collectionName]
+                if ($null -eq $packagesProperty -or $null -eq $packagesProperty.Value) { continue }
+                foreach ($package in $packagesProperty.Value) {
+                    if ($null -eq $package) {
+                        throw "NuGet vulnerability audit returned invalid package data."
+                    }
+                    $vulnerabilitiesProperty = $package.PSObject.Properties["vulnerabilities"]
+                    if ($null -eq $vulnerabilitiesProperty -or $null -eq $vulnerabilitiesProperty.Value) {
+                        throw "NuGet vulnerability audit returned an affected package without vulnerability data."
+                    }
+                    $packageVulnerabilityCount = 0
+                    foreach ($vulnerability in $vulnerabilitiesProperty.Value) {
+                        if ($null -eq $vulnerability) {
+                            throw "NuGet vulnerability audit returned invalid vulnerability data."
+                        }
+                        $packageVulnerabilityCount++
+                    }
+                    if ($packageVulnerabilityCount -eq 0) {
+                        throw "NuGet vulnerability audit returned an affected package without vulnerability entries."
+                    }
+                    $count += $packageVulnerabilityCount
+                }
+            }
+        }
+    }
+    return $count
+}
+
 New-Item -ItemType Directory -Path $publishOne, $publishTwo -Force | Out-Null
 Push-Location $repoRoot
 try {
@@ -214,6 +303,61 @@ try {
     $zipHashOne = (Get-FileHash -LiteralPath $zipOne -Algorithm SHA256).Hash.ToLowerInvariant()
     $zipHashTwo = (Get-FileHash -LiteralPath $zipTwo -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($zipHashOne -ne $zipHashTwo) { throw "The portable staging bundles are not byte reproducible." }
+
+    $defenderStatus = Get-MpComputerStatus
+    if (-not $defenderStatus.AMServiceEnabled -or
+        -not $defenderStatus.AntivirusEnabled -or
+        -not $defenderStatus.AntispywareEnabled -or
+        -not $defenderStatus.RealTimeProtectionEnabled -or
+        $defenderStatus.DefenderSignaturesOutOfDate -or
+        [string]::IsNullOrWhiteSpace([string]$defenderStatus.AntivirusSignatureVersion)) {
+        throw "Microsoft Defender protection or current signature evidence is unavailable."
+    }
+    $programFilesRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+    if ([string]::IsNullOrWhiteSpace($programFilesRoot)) {
+        throw "The trusted Windows Program Files location is unavailable."
+    }
+    $defenderPath = Join-Path $programFilesRoot "Windows Defender\MpCmdRun.exe"
+    if (-not (Test-Path -LiteralPath $defenderPath -PathType Leaf) -or
+        ([IO.File]::GetAttributes($defenderPath) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The expected Microsoft Defender command is unavailable or unsafe."
+    }
+    $defenderSignature = Get-AuthenticodeSignature -LiteralPath $defenderPath
+    if ([string]$defenderSignature.Status -ne "Valid" -or
+        $null -eq $defenderSignature.SignerCertificate -or
+        $defenderSignature.SignerCertificate.Subject -notlike "CN=Microsoft Windows,*") {
+        throw "The Microsoft Defender command did not pass publisher trust validation."
+    }
+    $defenderSignerSha = [Security.Cryptography.SHA256]::HashData(
+        $defenderSignature.SignerCertificate.RawData)
+    $defenderSignerSha256 = [Convert]::ToHexString($defenderSignerSha).ToLowerInvariant()
+    $defenderExecutableSha256 = (Get-FileHash -LiteralPath $defenderPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Invoke-DefenderNoRemediationScan $defenderPath $publishOne
+    Invoke-DefenderNoRemediationScan $defenderPath $zipOne
+
+    $nugetAuditRaw = dotnet list $desktopProject package --vulnerable --include-transitive --format json | Out-String
+    if ($LASTEXITCODE -ne 0 -or [Text.Encoding]::UTF8.GetByteCount($nugetAuditRaw) -gt 1048576) {
+        throw "NuGet vulnerability audit failed or exceeded its output bound."
+    }
+    $nugetAudit = $nugetAuditRaw | ConvertFrom-Json -Depth 16
+    if ([int]$nugetAudit.version -ne 1 -or
+        [string]$nugetAudit.parameters -ne "--vulnerable --include-transitive" -or
+        @($nugetAudit.projects).Count -ne 1 -or
+        @($nugetAudit.sources).Count -ne 1 -or
+        [string]$nugetAudit.sources[0] -ne "https://api.nuget.org/v3/index.json") {
+        throw "NuGet vulnerability audit returned an unexpected schema, project count or source."
+    }
+    $emptyAuditFixture = '{"projects":[{"path":"fixture.csproj"}]}' | ConvertFrom-Json
+    $affectedAuditFixture = '{"projects":[{"frameworks":[{"topLevelPackages":[{"vulnerabilities":[{}]}],"transitivePackages":[{"vulnerabilities":[{},{}]}]}]}]}' | ConvertFrom-Json
+    if ((Get-NuGetVulnerabilityCount $emptyAuditFixture) -ne 0 -or
+        (Get-NuGetVulnerabilityCount $affectedAuditFixture) -ne 3) {
+        throw "NuGet vulnerability audit parser regression check failed."
+    }
+    $vulnerabilityCount = Get-NuGetVulnerabilityCount $nugetAudit
+    if ($vulnerabilityCount -ne 0) {
+        throw "NuGet vulnerability audit found one or more affected packages. Details were not logged."
+    }
+    $nugetAuditRaw | Set-Content -LiteralPath (Join-Path $runRoot "nuget-vulnerability-audit.json") -Encoding utf8
 
     $inventoryRaw = dotnet list $desktopProject package --include-transitive --format json | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Package inventory failed with exit code $LASTEXITCODE." }
@@ -420,6 +564,17 @@ try {
         release_build_errors = 0
         reliability_tests_passed = $reliabilityTestsPassed
         package_trust_tests_passed = $packageTrustTestsPassed
+        defender_antivirus_enabled = [bool]$defenderStatus.AntivirusEnabled
+        defender_realtime_enabled = [bool]$defenderStatus.RealTimeProtectionEnabled
+        defender_signature_version = [string]$defenderStatus.AntivirusSignatureVersion
+        defender_signature_updated_utc = ([DateTimeOffset]$defenderStatus.AntivirusSignatureLastUpdated).ToUniversalTime().ToString("O")
+        defender_signatures_out_of_date = [bool]$defenderStatus.DefenderSignaturesOutOfDate
+        defender_executable_sha256 = $defenderExecutableSha256
+        defender_signer_certificate_sha256 = $defenderSignerSha256
+        defender_publish_scan_no_remediation = $true
+        defender_zip_scan_no_remediation = $true
+        nuget_vulnerability_audit_source = [string]$nugetAudit.sources[0]
+        nuget_vulnerabilities = $vulnerabilityCount
         publish_file_count = $manifestOne.Count
         publish_bytes = [long](($manifestOne | Measure-Object length -Sum).Sum)
         reproducible_publish = $true
@@ -452,6 +607,9 @@ try {
     "P13 reliability tests=PASS ($reliabilityTestsPassed/$reliabilityTestsPassed)"
     "P13 bounded MSIX manifest and Windows Authenticode tests=PASS ($packageTrustTestsPassed/$packageTrustTestsPassed)"
     "P13 unsigned or incomplete synthetic MSIX trust denial=PASS"
+    "P13 Microsoft Defender current signatures and trusted scanner=PASS"
+    "P13 Microsoft Defender publish and ZIP no-remediation scans=PASS"
+    "P13 NuGet direct and transitive vulnerabilities=$vulnerabilityCount"
     "Reproducible framework-dependent publish files=$($manifestOne.Count)"
     "Reproducible portable staging ZIP SHA-256=$zipHashOne"
     "CycloneDX components=$($components.Count)"
