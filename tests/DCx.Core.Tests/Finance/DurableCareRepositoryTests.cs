@@ -152,6 +152,59 @@ public sealed class DurableCareRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task FutureSchema_FailsClosedWithoutDowngrade()
+    {
+        Directory.CreateDirectory(root);
+        var databasePath = Path.Combine(root, "care-ledger.sqlite3");
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Pooling = false,
+        }.ToString();
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = "PRAGMA user_version = 3;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => DurableCareRepository.OpenAsync(root));
+        Assert.Contains("newer than this application", exception.Message, StringComparison.Ordinal);
+
+        await using var reopened = new SqliteConnection(connectionString);
+        await reopened.OpenAsync();
+        var versionCommand = reopened.CreateCommand();
+        versionCommand.CommandText = "PRAGMA user_version;";
+        Assert.Equal(3L, (long)(await versionCommand.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task WebhookIdentifiers_RejectConflictsWithoutPoisoningRejectedInput()
+    {
+        var key = Enumerable.Repeat((byte)43, 32).ToArray();
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var original = Event(
+            "event:identifier", "transmission:identifier", "PAYMENT.SALE.COMPLETED", 300);
+        Assert.True(await ProcessAsync(repository, original, key));
+
+        var reusedEvent = original with { TransmissionId = "transmission:different" };
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ProcessAsync(repository, reusedEvent, key));
+        var reusedTransmission = original with { EventId = "event:different" };
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ProcessAsync(repository, reusedTransmission, key));
+
+        var invalid = Event("event:correctable", "transmission:correctable",
+            "PAYMENT.SALE.COMPLETED", 301);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessAsync(repository, invalid, key));
+        Assert.True(await ProcessAsync(repository, invalid with { AmountCents = 300 }, key));
+        Assert.Equal(600, await repository.BalanceAsync(LedgerAccount.Cash));
+        Assert.True(await repository.ReconcilesAsync());
+    }
+
+    [Fact]
     public async Task Ledger_RejectsConflictingEventAcrossReopen()
     {
         var repository = await DurableCareRepository.OpenAsync(root);
