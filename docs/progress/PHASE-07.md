@@ -39,7 +39,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 - Windows OCR recognized the golden `DCX`/`42` content and returned normalized geometry.
 - Semantic repair, HTML export, real OPC DOCX export and DOCX viewer round-trip passed.
 - Native UIA script result: `P07 content viewer UIA validation=PASS`.
-- Latest evidence directory: `artifacts/test-results/p07-ee447f4bbdd84aed8fee91999ccc091b/` (generated and intentionally not committed). The composed P06 evidence at `artifacts/test-results/p06-fec5e76f92cb4c49be4cb75bee3aa5c9/` contains the native WAV transcription UIA fixture.
+- Latest evidence directory: `artifacts/test-results/p07-27794477b0c44a369bd7134298ad9cfc/` (generated and intentionally not committed). The composed P06 evidence at `artifacts/test-results/p06-69ce389a91ea4d36b06745851d05f5a0/` contains native WAV transcription and FFmpeg-registration UIA fixtures.
 
 ## Security, accessibility and limitations
 
@@ -49,3 +49,4 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 - Human JAWS, NVDA and Narrator results remain `UNVERIFIED`; see `docs/accessibility/P07_CONTENT_CHECKLIST.md`.
 - YouTube playback/provider limitations are reported in `docs/media/YOUTUBE_LIMITATIONS.md`. The gate proves safe URL admission/handoff and provider-neutral Q&A against a deterministic loopback HTML5 video. It does not prove live, authenticated, embedded, protected or universal YouTube frame Q&A.
 - The fake-CLI native WAV flow proves accessible broker integration, cancellation and text presentation, not speech accuracy. A real approved Whisper backend, accuracy/resource evidence and MP3/MP4 extraction remain blocked by P06.
+- Exact FFmpeg registration now exists, but frame extraction still uses the legacy `PATH` lookup and the real unsigned candidate remains unapproved. P07 does not claim that registration is wired to media processing.
