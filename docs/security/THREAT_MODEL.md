@@ -110,7 +110,8 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - Offline startup uses an embedded semantic document, permits its data navigation only as the first app-controlled navigation, and performs no website request.
 - Backup scope is allowlisted to browser metadata and private knowledge. WebView2 profiles/cookies and Windows protected secrets are excluded.
 - Backup and restore reject filesystem roots, reparse points, archives inside protected data, traversal/absolute/ADS paths, duplicates and size/count excess. SHA-256 and length are checked before any current data is replaced.
-- Restore stages content and retains/moves prior roots for rollback. Production orchestration must close DCx first because live SQLite/WAL snapshots are not implemented.
+- Normal DCx holds an exclusive file lease scoped to its canonical data root. The separate recovery mode must acquire that lease for the whole backup or restore, preventing live SQLite/WAL copying and concurrent recovery operations.
+- Restore requires a default-unchecked UI acknowledgment, stages content, and retains/moves prior roots for rollback. A denied operation does not create an archive or replace current data.
 - Two publish trees and ZIPs are compared by path/length/digest. Published files receive binary secret-pattern scanning. Synthetic hostile-input fixtures are allowlisted only in their two source test files.
 - These controls do not replace code signing, AV/vulnerability scans, clean-VM lifecycle testing or human assistive-technology acceptance.
 

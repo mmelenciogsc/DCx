@@ -27,7 +27,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 tests: passed 4, failed 0, skipped 0; 21 ms.
-- Current expanded full suite after P09 trust-policy hardening: passed 138, failed 0, skipped 0; about 1 second.
+- Current expanded full suite after P13 recovery hardening: passed 140, failed 0, skipped 0; about 2 seconds.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.

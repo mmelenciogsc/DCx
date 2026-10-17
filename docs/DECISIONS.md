@@ -11,5 +11,6 @@
 | [0007](architecture/adr/0007-care-integer-ledger-and-live-disable.md) | Use integer-cent CARE accounting and structurally disable live payouts | Accepted for sandbox | 2026-10-17 |
 | [0008](architecture/adr/0008-msix-target.md) | Target signed per-user MSIX packaging; retain MSI only as an evidence-driven fallback | Accepted provisionally | 2026-10-17 |
 | [0009](architecture/adr/0009-offline-root-trust-policy.md) | Rotate and revoke global release keys through an offline-root-signed policy chain | Accepted | 2026-10-17 |
+| [0010](architecture/adr/0010-closed-app-recovery-lease.md) | Run accessible recovery separately under an exclusive per-data-root lease | Accepted | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
