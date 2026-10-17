@@ -34,7 +34,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 - Locked restore and native Release build passed with 0 warnings/errors.
 - P09 filtered tests: passed 9, failed 0, skipped 0; about 1 second in the recorded validation.
-- Current full suite after publication-lease hardening: passed 176, failed 0, skipped 0; about 3 seconds.
+- Current full suite after P10 authenticated simulation-API hardening: passed 179, failed 0, skipped 0; about 3 seconds.
 - A real child Kestrel process served three chained trust-policy revisions and a signed SQLite-backed release over loopback HTTP; a fresh production client transport caught up all revisions, synchronized and searched it.
 - Two distinct client roots synchronized the same chain; the P08 private sentinel remained present and absent from global results.
 - Wrong-key release activation was rejected with no active pointer.
@@ -43,7 +43,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - A transfer interrupted after its first 64 KiB chunk resumed at a nonzero offset and downloaded fewer bytes on retry than the full release.
 - Lazy 150,000-byte artifact retrieval, deprecation, offline search and explicit rollback passed.
 - Publication retry used reordered equivalent changes and a later timestamp after repository reopen, returned the byte-identical original descriptor and kept the chain at sequence 1; a changed request under the same operation ID was rejected.
-- Latest storage evidence: `artifacts/test-results/p09-956f3d52abc541a290911bce2453eb7b/storage-forecast.json` (generated and intentionally not committed).
+- Latest storage evidence: `artifacts/test-results/p09-a5a3924de3b342ebba75bf4ca32820ff/storage-forecast.json` (generated and intentionally not committed).
 
 ## Measured storage/bandwidth fixture
 
@@ -64,5 +64,5 @@ Artifact storage and transfer must add exact signed artifact sizes. Artifacts ar
 - Native Windows validation has no Docker CLI. WSL reports Docker 29.1.3, but daemon access is permission-denied and no Compose plugin or `docker-compose` command exists. Installing/enabling these is privileged and requires owner approval.
 - Consequently, `server/docker-compose.simulation.yml` is unexecuted and P09 is not complete. After approval/access, validate Compose configuration, build with recorded image digests, run the same two-client gate against the container, then update this phase.
 - Simulation signing keys and the offline root are ephemeral fixture material. The rotation protocol is implemented, but production offline-root custody/ceremony, hardware- or OS-protected minimum-revision anchoring, TLS identity, backup/restore, monitoring and external security review are not implemented.
-- The service currently exposes read-only public catalog endpoints. Contribution intake/authentication begins in P10; production exposure is forbidden.
+- The service exposes read-only catalog endpoints by default. P10 adds a separate default-off, loopback/container simulation contribution API; this is not authorization or infrastructure for production exposure.
 - Real Ubuntu deployment remains forbidden without explicit owner approval.

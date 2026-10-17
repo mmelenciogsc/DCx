@@ -23,6 +23,6 @@ Registry publication stores a digest-derived operation ID, canonical change-set 
 
 - The prototype demonstrates concrete host-filesystem, system-filesystem, network, environment, privilege, traversal, symlink, timeout and output-flood denials without installation or elevation.
 - A narrow BusyBox-shell runtime keeps the initial attack surface and fixture behavior deterministic; additional language adapters require separately pinned reproducible builder/runtime images.
-- The in-process service fixture validates the orchestration, but the simulation host intentionally exposes no contribution/authentication/reviewer API and no production executor configuration.
-- The remaining production gate includes authenticated APIs, durable outbox/queued reviewer orchestration, general dependency-lock/build profiles, seccomp, measured cgroup-v2 enforcement, immutable base-image/toolchain digests, Ubuntu 24.04 deployment hardening, monitoring and independent penetration testing.
+- The in-process service fixture validates orchestration. A separately gated simulation API can now inject the same executor from hash-pinned Linux settings, but the complete HTTP-to-sandbox path remains unrun until a Linux .NET service runtime or approved Compose environment is available.
+- The remaining production gate includes production identity and TLS ingress, durable outbox/queued reviewer orchestration, general dependency-lock/build profiles, seccomp, measured cgroup-v2 enforcement, immutable base-image/toolchain digests, Ubuntu 24.04 deployment hardening, monitoring and independent penetration testing.
 - A missing executor still fails with `ccb_sandbox_review_required`; production publication remains unavailable until the remaining gates pass.

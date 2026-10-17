@@ -1,7 +1,7 @@
 # P10 — Contributions, governance and provenance
 
-- Status: BLOCKED (local server-side CCB orchestration and hostile-code policy pass; production publication remains unavailable)
-- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`
+- Status: BLOCKED (authenticated local-simulation intake/review and server-side CCB hostile-code policy pass; production publication remains unavailable)
+- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`, `f417f6e`
 - Documentation commit: recorded by the commit containing this file
 
 No contribution was sent externally or published to a production catalog.
@@ -34,6 +34,11 @@ No contribution was sent externally or published to a production catalog.
 - A separate SQLite row atomically claims each pending intent with a random per-process owner, random fencing token, acquisition/expiry times and bounded attempt count. The lease coordinates execution only; the immutable reviewer intent remains the sole publication authority.
 - Five-minute leases are renewed before and after registry work. Completion rechecks owner, token and unexpired time inside the same transaction as the contribution/intent transition; an expired worker cannot complete after another process reclaims the intent.
 - Successful completion clears the active lease but retains its attempt count. Crashes leave it to expire, ordinary failures release it, malformed rows fail closed, and the twentieth failed claim produces a stable attempt-limit error rather than an unbounded loop.
+- A versioned binary contribution envelope carries strict JSON metadata plus an optional raw artifact. Unknown metadata fields fail admission; metadata is capped at 1 MiB, artifacts at 32 MiB, and Kestrel and endpoint readers enforce the same total bound and exact declared length.
+- A default-off simulation API exposes authenticated intake, owner-scoped status and withdrawal, reviewer-scoped pending/status and approval endpoints only when `DCX_GLOBAL_CONTRIBUTION_API=1` and all role settings pass startup validation.
+- Contributor and reviewer bearer credentials are configured only as distinct SHA-256 digests. Role and pseudonymous identity come from server configuration, comparisons are constant-time, transient token buffers are zeroed, and errors contain stable policy codes rather than credentials or request bodies.
+- A CKB can propagate only after authoritative rescan and reviewer approval. Raw CCB packages can enter quarantine, but approval fails closed unless the explicit Linux sandbox configuration and every hash-pinned executable are present.
+- The service admits only a bounded regular non-reparse signing-key file, reads it without write sharing and zeroes the private-key byte buffer immediately after repository initialization.
 
 ## Reproduction
 
@@ -46,35 +51,41 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 ## Measured result
 
 - Locked native Release build: 0 warnings, 0 errors; 1.12 seconds in the recorded dedicated run.
-- P10 tests: passed 28, failed 0, skipped 0; about 2 seconds in the recorded native gate.
-- Current full suite after publication-lease hardening: passed 176, failed 0, skipped 0; about 3 seconds.
+- P10 tests: passed 31, failed 0, skipped 0; about 3 seconds in the recorded native gate.
+- Current full suite after authenticated simulation-API hardening: passed 179, failed 0, skipped 0; about 3 seconds.
 - Eligible CKB item: quarantined, absent from catalog before review, approved into a signed release, synchronized by a client, then withdrawn/deprecated.
 - Secret/PII/dummy item: remained quarantined and reviewer publication failed closed.
 - Receipt: one qualified event; replay, contributor self-use and invalid integrity excluded.
 - Native UIA: all five consent/attestation controls initially unchecked, preparation disabled, and no-upload state accessible.
 - WSL-hosted Ubuntu local simulation: Bubblewrap 0.6.1 SHA-256 `bf6cf3d4456665f5d80c14eb79a76e0ce87b39a0883e614a161658b4ec33492c`; static BusyBox SHA-256 `b3c1009e1b5c927e537487c80639cdf404f69e3eb49371d9be5d841672be3ff9`.
 - Benign transformation passed. Host/repository and `/etc`/`/usr` reads, an external network request, root write, inherited secret environment, outside-quarantine workspace, symlink, workspace-digest substitution, timeout and output overflow were denied.
-- Evidence: `artifacts/test-results/p10-dd1f4845e5854d1bb060280d6a66ffa0/sandbox-evidence.json` (generated and intentionally not committed).
-- Latest orchestration-era hostile evidence: `artifacts/test-results/p10-e00d104c84be478e9a7b3652d161ee55/sandbox-evidence.json` (generated and intentionally not committed).
+- Latest hostile-sandbox evidence: `artifacts/test-results/p10-c1c481e3b1234859bd0849d6c5e481cf/sandbox-evidence.json` (generated and intentionally not committed).
 - Schema-v2 success path executed two declared tests, persisted two passing evidence rows, published the exact artifact into a signed release, synchronized it to a separate global replica and lazily retrieved byte-identical content.
 - Denial coverage includes missing executor, package/digest/metadata mismatch, undeclared files/fields, invalid UTF-8/base64/null input, malicious entrypoint or test-input text, expected-output mismatch and post-intake quarantine tampering.
 - Cross-database crash simulations pre-commit approval and withdrawal releases, then verify governance retries reuse sequences 1 and 2 and synchronize one correctly deprecated resource rather than producing duplicate releases.
 - Deliberate crash checkpoints now cover intent-before-registry and registry-before-local-completion windows. Reopen automatically completes approval and withdrawal, while CCB recovery executes zero additional sandbox tests. Changed intent digests, changed post-review candidate JSON and same-length authoritative artifact substitution all fail closed.
 - Two concurrent governance/repository instances claimed one pending approval exactly once. An unexpired lease blocked takeover; after forced expiry a second worker reused the idempotent sequence-1 registry operation and completed once, while the original worker was fenced with `publication_lease_lost`.
 - Expired malformed lease data failed closed before overwrite. Attempt 20 stopped with `publication_lease_attempt_limit`. Successful completion retained attempt audit count and cleared every active lease token.
+- A real child Kestrel process denied missing, invalid and wrong-role credentials; denied a contributor-identity mismatch; admitted an exact approved CKB idempotently; published it once; synchronized it to a fresh replica; and rejected approval replay.
+- The same process kept a credential/PII-bearing candidate quarantined, admitted a raw CCB but denied approval without the configured sandbox, denied reviewer withdrawal, accepted owner withdrawal and propagated the signed deprecation.
+- Captured child-process diagnostics contained neither bearer credentials nor the private or malicious contribution bodies. The API remained absent (`404`) under the default configuration.
 
 ## Changed files in the latest milestone
 
-- Durable atomic claim, renewal, bounded attempts and ownership-fenced completion: `server/DCx.GlobalService/ContributionGovernanceService.cs`.
-- Concurrent-instance, expiry/takeover, stale-worker, malformed-state and attempt-limit coverage: `tests/DCx.Core.Tests/Contributions/ContributionGovernanceTests.cs`.
+- Bounded transport codec: `src/DCx.Core/Contributions/ContributionTransportCodec.cs`.
+- Default-off authenticated endpoints and optional hash-pinned sandbox configuration: `server/DCx.GlobalService/SimulationContributionApi.cs`.
+- Governance status/pending queries and owner-bound withdrawal: `server/DCx.GlobalService/ContributionGovernanceService.cs`.
+- Service wiring, request bound and private-key admission/zeroing: `server/DCx.GlobalService/Program.cs`.
+- Child-process and codec/governance coverage: `tests/DCx.Core.Tests/Contributions/ContributionApiE2eTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionPolicyTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionGovernanceTests.cs`, `tests/DCx.Core.Tests/GlobalKnowledge/GlobalServiceE2eTests.cs`.
 
 ## Blocker and limits
 
-- The local server fixture now exercises package intake through signed propagation, but `Program.cs` exposes only read-only registry endpoints: no contribution upload, authentication, reviewer or approval API is registered. No external caller can activate this path.
+- The new API is a loopback/container simulation using static hash-configured bearer roles. It is not a production identity system: there is no TLS termination, OAuth/OIDC or mTLS identity, credential rotation/revocation lifecycle, rate limiting, public ingress policy, administrative audit surface or account recovery.
+- There is intentionally still no Windows-client upload action. Local preparation remains no-upload until an approved deployment, production identity design and accessible human review flow exist.
 - The current runtime profile accepts only exact, bounded BusyBox-shell packages with a two-component closed SBOM. It has no language-specific reproducible builder images or general dependency-lock resolver.
 - This local WSL run is development evidence, not execution on the owner's Ubuntu 24.04 server. WSL is not and will not be an end-user requirement.
 - The prototype has no seccomp syscall profile, cgroup-v2 enforcement, immutable OCI/base-image digest, service-account deployment hardening, kernel/LTS policy, production monitoring or independent penetration test. Bubblewrap itself explicitly requires the caller to define a complete policy; this milestone does not claim production-grade hostile isolation.
-- Docker/Compose remains unavailable as recorded in P09. Production CCB publication must remain unavailable until approved Ubuntu 24.04 deployment, authenticated intake/reviewer APIs, the remaining isolation controls and external security gates pass.
+- Docker/Compose remains unavailable as recorded in P09. The API wiring and real Bubblewrap executor have each passed independently, but no Linux child-service run has exercised the HTTP-to-CCB-sandbox path because a Linux .NET service runtime/approved Compose environment is unavailable. Production publication must remain unavailable until approved Ubuntu 24.04 deployment, production-grade identity and the remaining isolation/external security gates pass.
 - Regex scanners are defense-in-depth, not a guarantee that content lacks secrets/PII or that the contributor owns it. Human/policy review remains mandatory.
 - An HMAC proves receipt integrity/installation association, not that an untrusted customer device reported honest usage. Server anomaly analysis, audit sampling and entitlement/account correlation remain required.
 - Startup processes at most 100 pending intents per bounded synchronous pass; an explicit method can process subsequent batches. Same-SQLite local processes now coordinate each intent, but there is no continuous worker, wakeup, retry backoff, operator-visible dead-letter/remediation workflow or supported multi-node/network-filesystem lease.
