@@ -36,6 +36,20 @@ public sealed class LocalContentAdmissionPolicyTests : IDisposable
         Assert.Contains("signature", result.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("sample.png", new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a })]
+    [InlineData("sample.jpg", new byte[] { 0xff, 0xd8, 0xff, 0xe0 })]
+    public void Evaluate_AllowsBinaryImageSignatures(string name, byte[] signature)
+    {
+        var path = Path.Combine(_root, name);
+        File.WriteAllBytes(path, signature);
+
+        var result = new LocalContentAdmissionPolicy().Evaluate(path);
+
+        Assert.True(result.IsAllowed);
+        Assert.Equal(ContentKind.Image, result.Kind);
+    }
+
     public void Dispose()
     {
         Directory.Delete(_root, recursive: true);

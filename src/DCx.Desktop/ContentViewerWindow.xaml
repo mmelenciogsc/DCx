@@ -72,6 +72,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <MediaElement x:Name="MediaViewer" LoadedBehavior="Manual" UnloadedBehavior="Stop"
                                   Stretch="Uniform" ScrubbingEnabled="True"
@@ -84,7 +85,16 @@
                                 AutomationProperties.AutomationId="MediaPauseButton" Click="OnMediaPauseClick" />
                         <Button MinWidth="80" Content="Stop"
                                 AutomationProperties.AutomationId="MediaStopButton" Click="OnMediaStopClick" />
+                        <Button x:Name="DescribeFrameButton" MinWidth="150" Margin="8,0,0,0"
+                                Content="Describe frame" IsEnabled="False"
+                                AutomationProperties.AutomationId="DescribeFrameButton"
+                                AutomationProperties.Name="Pause and describe current video frame"
+                                Click="OnDescribeFrameClick" />
                     </WrapPanel>
+                    <TextBlock x:Name="FrameDescriptionText" Grid.Row="2" Margin="8,0,8,8" TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="FrameDescriptionText"
+                               AutomationProperties.Name="{Binding Text, RelativeSource={RelativeSource Self}}"
+                               AutomationProperties.LiveSetting="Assertive" />
                 </Grid>
             </TabItem>
             <TabItem Header="Folder" AutomationProperties.Name="Folder contents">

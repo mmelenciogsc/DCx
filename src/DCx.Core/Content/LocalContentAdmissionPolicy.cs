@@ -73,8 +73,8 @@ public sealed class LocalContentAdmissionPolicy
         ContentKind.Text or ContentKind.Csv => !header.Contains((byte)0),
         ContentKind.Pdf => header.StartsWith("%PDF-"u8),
         ContentKind.Word or ContentKind.Spreadsheet or ContentKind.Presentation => header.StartsWith("PK\x03\x04"u8),
-        ContentKind.Image => header.StartsWith("\x89PNG\r\n\x1a\n"u8) ||
-                             header.StartsWith("\xff\xd8\xff"u8),
+        ContentKind.Image => (header.Length >= 8 && header[0] == 0x89 && header[1..].StartsWith("PNG\r\n\x1a\n"u8)) ||
+                             (header.Length >= 3 && header[0] == 0xff && header[1] == 0xd8 && header[2] == 0xff),
         ContentKind.Audio => header.StartsWith("ID3"u8) ||
                              (header.StartsWith("RIFF"u8) && header.Length >= 12 && header[8..].StartsWith("WAVE"u8)) ||
                              (header.Length >= 2 && header[0] == 0xff && (header[1] & 0xe0) == 0xe0),

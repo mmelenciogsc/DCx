@@ -2,6 +2,8 @@ using System.IO;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using DCx.Core.Content;
+using DCx.Core.Documents;
+using DCx.Desktop.Media;
 using Microsoft.Win32;
 
 namespace DCx.Desktop;
@@ -11,6 +13,9 @@ public partial class ContentViewerWindow : Window
     private const int MaximumDisplayedTextCharacters = 2_000_000;
     private readonly LocalContentAdmissionPolicy _contentPolicy = new();
     private readonly YouTubeUrlPolicy _youTubePolicy = new();
+    private readonly OfficeTextExtractor _officeTextExtractor = new();
+    private readonly MediaFrameDescriptionService _frameDescriptionService = new();
+    private CancellationTokenSource? _frameDescriptionCancellation;
 
     public ContentViewerWindow()
     {
@@ -40,6 +45,8 @@ public partial class ContentViewerWindow : Window
     {
         MediaViewer.Stop();
         MediaViewer.Source = null;
+        DescribeFrameButton.IsEnabled = false;
+        FrameDescriptionText.Text = string.Empty;
         ImageViewer.Source = null;
         DocumentText.Clear();
         var admission = _contentPolicy.Evaluate(path);
@@ -81,9 +88,22 @@ public partial class ContentViewerWindow : Window
             case ContentKind.Audio:
             case ContentKind.Video:
                 MediaViewer.Source = new Uri(admission.CanonicalPath);
+                DescribeFrameButton.IsEnabled = admission.Kind == ContentKind.Video;
                 ContentTabs.SelectedIndex = 2;
                 MediaViewer.Focus();
                 break;
+            case ContentKind.Word:
+            case ContentKind.Spreadsheet:
+            case ContentKind.Presentation:
+                DocumentText.Text = string.Join(Environment.NewLine, _officeTextExtractor.Extract(admission.CanonicalPath, admission.Kind.Value));
+                ContentTabs.SelectedIndex = 0;
+                DocumentText.Focus();
+                break;
+            case ContentKind.Pdf:
+                var wizard = new ScannedPdfWizardWindow(admission.CanonicalPath) { Owner = this };
+                wizard.Show();
+                SetStatus("PDF admitted. The accessibility wizard opened; no editable export exists until OCR and geometry validation pass.");
+                return;
             default:
                 SetStatus($"{admission.Kind} passed admission. Its structured viewer/export remains under P07 implementation.");
                 return;
@@ -154,6 +174,43 @@ public partial class ContentViewerWindow : Window
         if (MediaViewer.Source is null) return;
         MediaViewer.Stop();
         SetStatus("Media stopped.");
+    }
+
+    private async void OnDescribeFrameClick(object sender, RoutedEventArgs e)
+    {
+        if (MediaViewer.Source is null) return;
+        var model = Environment.GetEnvironmentVariable("DCX_VISION_MODEL");
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            SetStatus("No validated local vision model is configured. Complete P06 model selection first.");
+            return;
+        }
+
+        MediaViewer.Pause();
+        DescribeFrameButton.IsEnabled = false;
+        _frameDescriptionCancellation?.Cancel();
+        _frameDescriptionCancellation?.Dispose();
+        _frameDescriptionCancellation = new CancellationTokenSource();
+        SetStatus("Media paused. Local vision model is describing the current frame.");
+        try
+        {
+            var result = await _frameDescriptionService.DescribeAsync(
+                MediaViewer.Source.LocalPath,
+                MediaViewer.Position,
+                model,
+                _frameDescriptionCancellation.Token);
+            FrameDescriptionText.Text = result.Text;
+            SetStatus($"Frame description complete. {result.PromptTokens} prompt tokens and {result.OutputTokens} output tokens; video remains paused.");
+            FrameDescriptionText.Focus();
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"Frame description failed safely. {exception.Message}");
+        }
+        finally
+        {
+            DescribeFrameButton.IsEnabled = MediaViewer.Source is not null;
+        }
     }
 
     private void SetStatus(string message) => ContentStatusText.Text = message;
