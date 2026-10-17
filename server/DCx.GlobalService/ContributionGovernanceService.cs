@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using DCx.Core.Contributions;
 using DCx.Core.GlobalKnowledge;
 using DCx.Core.Knowledge;
@@ -21,13 +22,25 @@ public sealed class ContributionGovernanceService
     };
 
     private readonly string connectionString;
+    private readonly string quarantineRoot;
+    private readonly string quarantineArtifactsRoot;
     private readonly GlobalRegistryRepository registry;
+    private readonly ICcbSandboxExecutor? ccbSandboxExecutor;
     private readonly ContributionScanner scanner = new();
+    private readonly CcbPackageValidator ccbPackageValidator = new();
     private readonly SemaphoreSlim mutationLock = new(1, 1);
 
-    private ContributionGovernanceService(string root, GlobalRegistryRepository registry)
+    private ContributionGovernanceService(
+        string root,
+        GlobalRegistryRepository registry,
+        ICcbSandboxExecutor? ccbSandboxExecutor)
     {
         this.registry = registry;
+        this.ccbSandboxExecutor = ccbSandboxExecutor;
+        quarantineRoot = Path.Combine(root, "quarantine");
+        quarantineArtifactsRoot = Path.Combine(quarantineRoot, "artifacts", "sha256");
+        Directory.CreateDirectory(quarantineArtifactsRoot);
+        Directory.CreateDirectory(Path.Combine(quarantineRoot, "workspaces"));
         connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = Path.Combine(root, "contribution-governance.sqlite3"),
@@ -40,18 +53,32 @@ public sealed class ContributionGovernanceService
     public static async Task<ContributionGovernanceService> OpenAsync(
         string root,
         GlobalRegistryRepository registry,
+        ICcbSandboxExecutor? ccbSandboxExecutor = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(registry);
-        Directory.CreateDirectory(Path.GetFullPath(root));
-        var service = new ContributionGovernanceService(Path.GetFullPath(root), registry);
+        var canonical = Path.GetFullPath(root);
+        Directory.CreateDirectory(canonical);
+        if ((File.GetAttributes(canonical) & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new ContributionPolicyException("governance_root_link_denied");
+        }
+
+        var service = new ContributionGovernanceService(canonical, registry, ccbSandboxExecutor);
         await service.InitializeAsync(cancellationToken).ConfigureAwait(false);
         return service;
     }
 
     public async Task<ContributionState> IntakeAsync(
         PreparedContribution submission,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default) =>
+        await IntakeAsync(submission, ReadOnlyMemory<byte>.Empty, now, cancellationToken).ConfigureAwait(false);
+
+    public async Task<ContributionState> IntakeAsync(
+        PreparedContribution submission,
+        ReadOnlyMemory<byte> artifact,
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
@@ -73,6 +100,22 @@ public sealed class ContributionGovernanceService
             [submission.Candidate.ResourceId] = submission.Candidate.DerivedFrom,
         });
         var serverScan = scanner.Scan(submission.Candidate);
+        if (submission.Candidate.Kind == KnowledgeResourceKind.Ccb)
+        {
+            var package = await ValidateAndStageCcbArtifactAsync(submission.Candidate, artifact, cancellationToken)
+                .ConfigureAwait(false);
+            serverScan = MergeScans(
+                serverScan,
+                scanner.Scan(submission.Candidate with
+                {
+                    Body = $"{submission.Candidate.Body}\n{package.ReviewText}",
+                }));
+        }
+        else if (!artifact.IsEmpty)
+        {
+            throw new ContributionPolicyException("ckb_artifact_unexpected");
+        }
+
         await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -154,9 +197,20 @@ public sealed class ContributionGovernanceService
                 throw new ContributionPolicyException("quarantine_findings_present");
             }
 
-            if (candidate.Kind != KnowledgeResourceKind.Ckb)
+            GlobalArtifactReference? artifact = null;
+            if (candidate.Kind == KnowledgeResourceKind.Ccb)
             {
-                throw new ContributionPolicyException("ccb_sandbox_review_required");
+                artifact = await ValidateCcbForPublicationAsync(
+                    connection,
+                    submissionId,
+                    reviewerId,
+                    candidate,
+                    issuedUtc,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            else if (candidate.Kind != KnowledgeResourceKind.Ckb)
+            {
+                throw new ContributionPolicyException("submission_kind_invalid");
             }
 
             var resource = new GlobalResourceRecord(
@@ -167,7 +221,8 @@ public sealed class ContributionGovernanceService
                 candidate.Body,
                 candidate.SourceUri,
                 candidate.License,
-                candidate.Capabilities);
+                candidate.Capabilities,
+                Artifact: artifact);
             var release = await registry.PublishAsync(
                 [new GlobalReleaseChange(GlobalReleaseChangeKind.Upsert, resource.ResourceId, resource.Version, resource)],
                 issuedUtc,
@@ -323,6 +378,24 @@ public sealed class ContributionGovernanceService
                 qualified INTEGER NOT NULL,
                 decision_code TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS ccb_sandbox_reviews(
+                submission_id TEXT NOT NULL,
+                test_name TEXT NOT NULL,
+                evidence_sha256 TEXT NOT NULL,
+                policy_version TEXT NOT NULL,
+                artifact_sha256 TEXT NOT NULL,
+                workspace_sha256 TEXT NOT NULL,
+                test_suite_sha256 TEXT NOT NULL,
+                launcher_sha256 TEXT NOT NULL,
+                backend_sha256 TEXT NOT NULL,
+                runtime_sha256 TEXT NOT NULL,
+                output_sha256 TEXT,
+                passed INTEGER NOT NULL,
+                failure_code TEXT,
+                reviewer_id TEXT NOT NULL,
+                reviewed_utc TEXT NOT NULL,
+                PRIMARY KEY(submission_id, test_name, evidence_sha256)
+            );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -336,6 +409,219 @@ public sealed class ContributionGovernanceService
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         return connection;
     }
+
+    private async Task<CcbContributionPackage> ValidateAndStageCcbArtifactAsync(
+        ContributionCandidate candidate,
+        ReadOnlyMemory<byte> artifact,
+        CancellationToken cancellationToken)
+    {
+        if (artifact.IsEmpty || artifact.Length > ContentAddressedArtifactStore.MaximumArtifactBytes ||
+            string.IsNullOrWhiteSpace(candidate.ArtifactSha256) || candidate.ArtifactSha256.Length != 64 ||
+            !candidate.ArtifactSha256.All(char.IsAsciiHexDigit))
+        {
+            throw new ContributionPolicyException("ccb_artifact_required");
+        }
+
+        var actualSha256 = Convert.ToHexStringLower(SHA256.HashData(artifact.Span));
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(actualSha256),
+                Convert.FromHexString(candidate.ArtifactSha256)))
+        {
+            throw new ContributionPolicyException("ccb_artifact_digest_invalid");
+        }
+
+        CcbContributionPackage package;
+        try
+        {
+            package = ccbPackageValidator.ReadContributionPackage(artifact);
+        }
+        catch (KnowledgeArtifactException)
+        {
+            throw new ContributionPolicyException("ccb_artifact_policy_invalid");
+        }
+
+        if (!string.Equals(package.Manifest.Id, candidate.ResourceId, StringComparison.Ordinal) ||
+            !string.Equals(package.Manifest.Version, candidate.Version, StringComparison.Ordinal) ||
+            !package.LicenseText.Contains(candidate.License, StringComparison.OrdinalIgnoreCase) ||
+            !package.DeclaredLicenses.Contains(candidate.License, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new ContributionPolicyException("ccb_artifact_metadata_mismatch");
+        }
+
+        var normalized = actualSha256.ToLowerInvariant();
+        var directory = Path.Combine(quarantineArtifactsRoot, normalized[..2]);
+        Directory.CreateDirectory(directory);
+        var destination = Path.Combine(directory, $"{normalized}.zip");
+        if (!File.Exists(destination))
+        {
+            var temporary = $"{destination}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                await File.WriteAllBytesAsync(temporary, artifact.ToArray(), cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    File.Move(temporary, destination, overwrite: false);
+                }
+                catch (IOException) when (File.Exists(destination))
+                {
+                    File.Delete(temporary);
+                }
+            }
+            finally
+            {
+                if (File.Exists(temporary)) File.Delete(temporary);
+            }
+        }
+
+        _ = await ReadStagedArtifactAsync(normalized, cancellationToken).ConfigureAwait(false);
+        return package;
+    }
+
+    private async Task<GlobalArtifactReference> ValidateCcbForPublicationAsync(
+        SqliteConnection connection,
+        string submissionId,
+        string reviewerId,
+        ContributionCandidate candidate,
+        DateTimeOffset issuedUtc,
+        CancellationToken cancellationToken)
+    {
+        if (ccbSandboxExecutor is null)
+        {
+            throw new ContributionPolicyException("ccb_sandbox_review_required");
+        }
+
+        var artifactSha256 = candidate.ArtifactSha256
+            ?? throw new ContributionPolicyException("ccb_artifact_required");
+        var artifact = await ReadStagedArtifactAsync(artifactSha256, cancellationToken).ConfigureAwait(false);
+        CcbContributionPackage package;
+        try
+        {
+            package = ccbPackageValidator.ReadContributionPackage(artifact);
+        }
+        catch (KnowledgeArtifactException)
+        {
+            throw new ContributionPolicyException("ccb_artifact_policy_invalid");
+        }
+
+        if (!package.LicenseText.Contains(candidate.License, StringComparison.OrdinalIgnoreCase) ||
+            !package.DeclaredLicenses.Contains(candidate.License, StringComparer.OrdinalIgnoreCase) ||
+            !scanner.Scan(candidate with { Body = $"{candidate.Body}\n{package.ReviewText}" }).IsEligible)
+        {
+            throw new ContributionPolicyException("quarantine_findings_present");
+        }
+
+        var workspace = Path.Combine(quarantineRoot, "workspaces", Guid.NewGuid().ToString("N"));
+        try
+        {
+            ccbPackageValidator.ExtractValidated(artifact, workspace);
+            var workspaceSha256 = await CcbSandboxEvidence.ComputeWorkspaceSha256Async(workspace, cancellationToken)
+                .ConfigureAwait(false);
+            foreach (var test in package.Tests)
+            {
+                var request = new CcbSandboxExecutionRequest(
+                    artifactSha256,
+                    workspaceSha256,
+                    package.TestSuiteSha256,
+                    workspace,
+                    package.Manifest.Entrypoint,
+                    test.Input);
+                var result = await ccbSandboxExecutor.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+                CcbSandboxEvidence.VerifyBoundResult(request, result);
+                await StoreSandboxEvidenceAsync(
+                    connection, submissionId, test.Name, reviewerId, issuedUtc, result, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!result.Passed)
+                {
+                    throw new ContributionPolicyException("ccb_sandbox_test_failed");
+                }
+
+                if (!string.Equals(result.OutputSha256, test.ExpectedOutputSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ContributionPolicyException("ccb_sandbox_output_mismatch");
+                }
+            }
+
+            return await registry.AddArtifactAsync(
+                artifact,
+                "application/vnd.dcx.ccb+zip",
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (Directory.Exists(workspace)) Directory.Delete(workspace, recursive: true);
+        }
+    }
+
+    private async Task<byte[]> ReadStagedArtifactAsync(string sha256, CancellationToken cancellationToken)
+    {
+        if (sha256.Length != 64 || !sha256.All(char.IsAsciiHexDigit))
+        {
+            throw new ContributionPolicyException("ccb_artifact_digest_invalid");
+        }
+
+        var normalized = sha256.ToLowerInvariant();
+        var path = Path.Combine(quarantineArtifactsRoot, normalized[..2], $"{normalized}.zip");
+        var file = new FileInfo(path);
+        if (!file.Exists || file.Length is <= 0 or > ContentAddressedArtifactStore.MaximumArtifactBytes ||
+            (file.Attributes & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new ContributionPolicyException("ccb_artifact_missing_or_unsafe");
+        }
+
+        var content = await File.ReadAllBytesAsync(file.FullName, cancellationToken).ConfigureAwait(false);
+        var actual = SHA256.HashData(content);
+        if (!CryptographicOperations.FixedTimeEquals(actual, Convert.FromHexString(normalized)))
+        {
+            throw new ContributionPolicyException("ccb_artifact_tampered");
+        }
+
+        return content;
+    }
+
+    private static async Task StoreSandboxEvidenceAsync(
+        SqliteConnection connection,
+        string submissionId,
+        string testName,
+        string reviewerId,
+        DateTimeOffset reviewedUtc,
+        CcbSandboxExecutionResult result,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT OR IGNORE INTO ccb_sandbox_reviews(
+                submission_id, test_name, evidence_sha256, policy_version, artifact_sha256,
+                workspace_sha256, test_suite_sha256, launcher_sha256, backend_sha256,
+                runtime_sha256, output_sha256, passed, failure_code, reviewer_id, reviewed_utc)
+            VALUES($submission, $test, $evidence, $policy, $artifact,
+                   $workspace, $suite, $launcher, $backend,
+                   $runtime, $output, $passed, $failure, $reviewer, $reviewed);
+            """;
+        command.Parameters.AddWithValue("$submission", submissionId);
+        command.Parameters.AddWithValue("$test", testName);
+        command.Parameters.AddWithValue("$evidence", result.EvidenceSha256);
+        command.Parameters.AddWithValue("$policy", result.PolicyVersion);
+        command.Parameters.AddWithValue("$artifact", result.ArtifactSha256);
+        command.Parameters.AddWithValue("$workspace", result.WorkspaceSha256);
+        command.Parameters.AddWithValue("$suite", result.TestSuiteSha256);
+        command.Parameters.AddWithValue("$launcher", result.LauncherSha256);
+        command.Parameters.AddWithValue("$backend", result.BackendSha256);
+        command.Parameters.AddWithValue("$runtime", result.RuntimeSha256);
+        command.Parameters.AddWithValue("$output", (object?)result.OutputSha256 ?? DBNull.Value);
+        command.Parameters.AddWithValue("$passed", result.Passed ? 1 : 0);
+        command.Parameters.AddWithValue("$failure", (object?)result.FailureCode ?? DBNull.Value);
+        command.Parameters.AddWithValue("$reviewer", reviewerId);
+        command.Parameters.AddWithValue("$reviewed", reviewedUtc.ToUniversalTime().ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static ContributionScanResult MergeScans(params ContributionScanResult[] scans) =>
+        new(scans
+            .SelectMany(scan => scan.Findings)
+            .DistinctBy(finding => finding.Code, StringComparer.Ordinal)
+            .OrderByDescending(finding => finding.Severity)
+            .ThenBy(finding => finding.Code, StringComparer.Ordinal)
+            .ToArray());
 
     private static async Task<SubmissionRow?> ReadSubmissionAsync(
         SqliteConnection connection,
