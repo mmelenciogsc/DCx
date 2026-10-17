@@ -31,5 +31,6 @@
 | [0027](architecture/adr/0027-path-private-ccb-artifact-review.md) | Review and submit exact CCB artifacts without retaining their local path | Accepted for local simulation | 2026-10-17 |
 | [0028](architecture/adr/0028-local-only-visible-web-video-frame-qa.md) | Pause and question only the visible web-video rectangle through an approved local vision model | Accepted for deterministic fixtures; live provider blocked | 2026-10-17 |
 | [0029](architecture/adr/0029-inert-exact-package-install-review.md) | Review an exact digest-bound package request without creating installation authority | Accepted for local validation; real install blocked | 2026-10-17 |
+| [0030](architecture/adr/0030-bounded-windows-msix-trust-inspection.md) | Bind bounded MSIX manifest identity to real Windows signature evidence before approval | Accepted for read-only admission; signed positive blocked | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

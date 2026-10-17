@@ -1,7 +1,7 @@
 # P13 — Packaging, security and reliability
 
 - Status: BLOCKED (substantial local reliability/release-staging checks pass; installer/signing/scanner/clean-VM/human-AT gates absent)
-- Implementation commits: `82452fe`, `3e9b172`, `1b32cdf`, `26da605`
+- Implementation commits: `82452fe`, `3e9b172`, `1b32cdf`, `26da605`, `7b0a03b`
 - Documentation commit: recorded by the commit containing this file
 
 The generated ZIP is an unsigned framework-dependent staging artifact. It is not an installer or production release.
@@ -26,6 +26,9 @@ The generated ZIP is an unsigned framework-dependent staging artifact. It is not
 - Update admission rejects equal/downgrade versions, manifests issued over five minutes in the future or valid longer than 30 days, expired manifests, cross-origin packages, query/user-info/fragment-bearing URIs, non-MSIX paths and noncanonical/unknown JSON.
 - The hardened HTTP transport is HTTPS-only and exact-origin, disables redirects, cookies, decompression and proxies, requires reviewed manifest/package media types and enforces 64 KiB manifest and 1 GiB package ceilings while streaming.
 - Package staging requires exact byte length/digest plus an injected signature/identity/publisher/version verifier under the same no-write read lease. Reused files are reverified; roots/reparse points are rejected; only the verified package and exact signed manifest are atomically retained. Nothing invokes installation, elevation or package activation.
+- A strict MSIX manifest inspector admits one bounded root `AppxManifest.xml` in the Windows 10 foundation namespace and one direct identity. It denies excessive/oversized/case-ambiguous entries, unsupported namespaces, malformed identity/version, DTD and XXE.
+- A real Windows read-only signature probe uses the absolute built-in Windows PowerShell 5.1 executable with a constant encoded command, scrubbed environment, package path outside arguments, strict JSON, ten-second deadline and 8 KiB output limits. Timeout and output flood kill the process tree.
+- Trust requires Windows status `Valid`, exact signer-subject/manifest-publisher equality and a lowercase signer-certificate SHA-256 that is bound into the approval proposal. The current synthetic package receives a real nonvalid Windows status and is denied; no real signed-positive package is claimed.
 - P13/P14 validators now emit TRX and fail unless exact selected counters prove every test passed. P14 uses its exact test namespace instead of a drifting substring match.
 
 ## Reproduction
@@ -38,17 +41,18 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 ## Measured result
 
-Recorded evidence directory: `artifacts/test-results/p13-af55654b93db4550ac1411bbc889e4a0/` (generated and intentionally not committed).
+Recorded evidence directory: `artifacts/test-results/p13-fb0fd01a63f94cee9aee58d16344fb0e/` (generated and intentionally not committed).
 
 - Locked Release build: 0 warnings, 0 errors.
 - Reliability tests: passed 23, failed 0, skipped 0; exact counters parsed from the retained TRX.
-- Current full suite: passed 240, failed 0, skipped 0; about 8 seconds.
-- Publish trees: 42 files, 63,157,667 bytes each; no path/length/SHA-256 differences.
-- Reproducible staging ZIP SHA-256: `d645fce197650c876400b763da6578b0a2057f47c48ed7eed4ffd4330db81e24` (25,263,605 bytes).
+- Package trust tests: passed 21, failed 0, skipped 0; exact counters parsed from the retained TRX. The native Windows probe denied the unsigned/incomplete fixture; positive `Valid` composition used an injected fixture only.
+- Current full suite: passed 261, failed 0, skipped 0; about 8 seconds.
+- Publish trees: 42 files, 63,180,707 bytes each; no path/length/SHA-256 differences.
+- Reproducible staging ZIP SHA-256: `aa7b4f402fddb6d47d49df34ccc900fdf217823c6afd596df86463d5862610ee` (25,271,662 bytes).
 - CycloneDX components: 7; third-party license records: 7.
 - Unexpected secret matches: 0; exact synthetic scanner-fixture matches: 2.
 - Authenticode: `NotSigned`.
-- Offline UIA heading: `DCx is ready offline`; startup 2,082 ms; working set 463.1 MiB under the provisional 1 GiB ceiling.
+- Offline UIA heading: `DCx is ready offline`; startup 2,609 ms; working set 462.4 MiB under the provisional 1 GiB ceiling.
 - Crash-diagnostics UIA heading: `Privacy and crash diagnostics`; consent defaulted unchecked, explicit opt-in persisted notice version 1, purge preserved enabled consent, opt-out disabled and purged, and network transfers remained zero.
 - Recovery UIA heading: `DCx backup and recovery`; main-app launcher, path input, create, default-unchecked approval, restore and assertive status are exposed.
 - Backup while main DCx held the lease was denied and wrote no archive. After main exit, backup and approved restore passed; restore without approval was denied; excluded synthetic WebView2 cookie data remained unchanged.
@@ -62,12 +66,13 @@ Recorded evidence directory: `artifacts/test-results/p13-af55654b93db4550ac1411b
 - Inert digest/trust-gated package staging: `src/DCx.Core/Reliability/ControlledUpdateStager.cs`.
 - Denial and reuse coverage: `tests/DCx.Core.Tests/Reliability/ControlledUpdateStagerTests.cs`.
 - Exact-counter release gates: `scripts/validate-p13.ps1`, `scripts/validate-p14.ps1`.
+- Bounded manifest/signature trust and denial coverage: `src/DCx.Core/Deployment/MsixPackageTrustVerifier.cs`, `tests/DCx.Core.Tests/Deployment/MsixPackageTrustVerifierTests.cs`.
 
 ## Blockers and limits
 
 - `makeappx.exe`, `signtool.exe`, MSIXMgr and WiX are absent. No code-signing identity is available. Installing tooling or acquiring a certificate requires approval.
 - The staging ZIP requires the pinned .NET desktop runtime and WebView2 runtime and provides no install, update activation, uninstall or runtime bootstrap behavior.
-- Controlled-update admission is an unwired core boundary. No production update origin/signing-root custody or rotation, real Windows MSIX/Authenticode package verifier, accessible update UI, scheduler, activation, restart coordination, installer integration or rollback exists. The package must be signature/digest/identity reverified again immediately before a future install; admission is not installation authority.
+- Controlled-update admission is an unwired core boundary. A real read-only Windows Authenticode denial path now exists, but there is no owner-authorized signed-positive MSIX, production update origin/signing-root custody or rotation, accessible update UI, scheduler, activation, restart coordination, installer integration or rollback. The package must be signature/digest/identity/certificate reverified again immediately before a future install; admission is not installation authority.
 - P12's accessible package-review window is likewise inert. Its synthetic trust adapter and non-executable approval receipt do not close any installer, signing, activation or clean-VM requirement.
 - No supported vulnerability scanner is installed; SBOM/license generation is not a vulnerability result.
 - No clean Windows 11 VM installation/uninstallation/upgrade/rollback run occurred.

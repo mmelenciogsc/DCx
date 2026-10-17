@@ -1,7 +1,7 @@
 # P12 — Full vertical end-to-end flows
 
 - Status: BLOCKED (nine cross-phase local fixtures pass; required live/provider/installer acceptance remains absent)
-- Implementation commits: `1c51f9d`, `10ac274`, `10e07d5`, `84e7f23`, `ee7d8bf`; P07 export-race fix `0ccf5e8`
+- Implementation commits: `1c51f9d`, `10ac274`, `10e07d5`, `84e7f23`, `ee7d8bf`, `7b0a03b`; P07 export-race fix `0ccf5e8`
 - Documentation commit: recorded by the commit containing this file
 
 ## Reproduction and evidence
@@ -24,11 +24,11 @@ The recorded run passed nine composed validators with zero production actions:
 8. Local, explicitly non-Facebook manual-login/old-post search through the live WebView2 UIA tree plus sandbox-shaped report to genuine OOXML XLSX.
 9. Exact digest-bound `.msix` request review with typed Windows deployment API preview, initially unchecked approval, denial, revalidation, cancellation and zero installer child processes.
 
-Measured composed result: `P12 fixture scenarios passed=9`. Evidence manifest: `artifacts/test-results/p12-93a2bc740b394c5da03ea060b991d57c/fixture-scenarios.json` (generated and intentionally not committed). All nine validators exited 0; production actions remained 0. Focused package-review evidence: `artifacts/test-results/p12-package-approval-3126b6b1b4f046b2a037b278b8ce8901/`, with 12/12 exact policy tests and native UIA (generated and intentionally not committed).
+Measured composed result: `P12 fixture scenarios passed=9`. Evidence manifest: `artifacts/test-results/p12-7c00f57f67f34957951d5e0798b16bcc/fixture-scenarios.json` (generated and intentionally not committed). All nine validators exited 0; production actions remained 0. Focused package-review evidence: `artifacts/test-results/p12-package-approval-52495810641f4cf9837b66f41521dc6c/`, with 12/12 exact policy tests and native UIA (generated and intentionally not committed).
 
 The XLSX fixture has a frozen header, filter, numeric currency cells, semantic text round-trip and formula-injection denial through inline strings. It makes zero QuickBooks network calls. The social fixture exposes a dated post, meaningful image alternative text and labeled video, but is deliberately not described as Facebook compatibility.
 
-The package-review fixture uses an injected synthetic trust adapter and a noninstallable file. The product boundary holds and rehashes the exact package under a read lease, displays all meaningful bindings, and can return only an in-memory receipt with `ExecutionPermitted=false` and `InstallerProcessesStarted=0`. It has no executor, shell, process-broker install operation or deployment API call. See `docs/accessibility/P12_PACKAGE_INSTALL_CHECKLIST.md` and ADR 0029.
+The successful package-review UI fixture uses an injected synthetic trust adapter and a noninstallable file. The product boundary holds and rehashes the exact package under a read lease, displays all meaningful bindings including signer-certificate SHA-256, and can return only an in-memory receipt with `ExecutionPermitted=false` and `InstallerProcessesStarted=0`. A separate real Windows Authenticode path denies the unsigned/incomplete fixture. Neither path has an executor, shell-controlled package path, process-broker install operation or deployment API call. See `docs/accessibility/P12_PACKAGE_INSTALL_CHECKLIST.md`, ADR 0029 and ADR 0030.
 
 ## Changed files in the latest milestone
 

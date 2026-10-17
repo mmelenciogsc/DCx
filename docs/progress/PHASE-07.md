@@ -29,7 +29,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 ## Measured result
 
 - Locked native Release build: 0 warnings, 0 errors.
-- Original P07 content tests: passed 74, failed 0, skipped 0. New bounded-question policy tests: passed 5, failed 0, skipped 0. Current full native suite: passed 240, failed 0, skipped 0.
+- Original P07 content tests: passed 74, failed 0, skipped 0. New bounded-question policy tests: passed 5, failed 0, skipped 0. Current full native suite: passed 261, failed 0, skipped 0.
 - Real generated H.264 MP4: initial pause and Play/Pause passed.
 - Local frame description identified the fixture's solid blue content; video remained paused; explicit user resume passed.
 - Shared-viewport generated HTML5 video Q&A answered `Blue`; the video remained paused after narration and explicit same-page resume passed.
