@@ -1,7 +1,7 @@
 # P07 — Files, documents, accessibility and media
 
 - Status: Complete (automated native gate; human assistive-technology pass unverified)
-- Implementation commits: `e21c654`, `4e8ee1f`, `c47edf9`, `c618254`, `10e07d5`, `ed6f001`
+- Implementation commits: `e21c654`, `4e8ee1f`, `c47edf9`, `c618254`, `10e07d5`, `ed6f001`, `acc8e62`
 - Documentation commit: recorded by the commit containing this file
 
 ## Implemented
@@ -12,9 +12,9 @@
 - Hardened, bounded XML/ZIP text extraction for DOCX, XLSX and PPTX. This is semantic text extraction, not layout-fidelity editing.
 - Scanned-PDF wizard using Windows PDF rendering and OCR across all pages, normalized word geometry, ordered blocks and a user-reviewable semantic repair overlay.
 - Validated semantic HTML and structured DOCX export. The output is not a tagged accessible PDF and is never presented as editable unless a reviewed block is explicitly marked as a labeled form field.
-- Local-video pause, FFmpeg frame extraction, bounded optional question, loopback-only Ollama description, continued pause after description and explicit user resume.
+- Local-video pause, frame extraction through the exact approved FFmpeg executable/license binding, bounded optional question, loopback-only Ollama description, continued pause after description and explicit user resume. No FFmpeg executable is selected from `PATH`.
 - User-invoked shared-viewport web-video Q&A: the current tab's largest ready, visible top-document HTML5 video is paused, its viewport-clipped rectangle is captured, the bounded question and frame go only to the approved loopback vision model, playback remains paused for follow-up questions, and resume is a separate same-tab/page action.
-- Direct admitted-WAV transcription through the exact approved local Whisper binding, with pause, accessible cancel, bounded strict transcript text, completed transcript focus and cleared-binding denial. No MP3/MP4 extraction is claimed.
+- Admitted WAV transcription through the exact approved local Whisper binding plus admitted MP3/MP4 transcription through separately approved FFmpeg extraction and Whisper recognition. The viewer pauses, announces extraction and recognition, exposes accessible cancel throughout, bounds strict transcript text, focuses completion and denies immediately when either required binding is cleared.
 - Denial tests for spoofed extensions, malformed containers, YouTube lookalikes, credentials and unsupported pages.
 
 ## Reproduction
@@ -30,7 +30,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 ## Measured result
 
 - Locked native Release build: 0 warnings, 0 errors.
-- Original P07 content tests: passed 74, failed 0, skipped 0. New bounded-question policy tests: passed 5, failed 0, skipped 0. Current full native suite: passed 275, failed 0, skipped 0.
+- Original P07 content tests: passed 74, failed 0, skipped 0. Bounded-question policy tests: passed 5, failed 0, skipped 0. Current full native suite: passed 289, failed 0, skipped 0.
 - Real generated H.264 MP4: initial pause and Play/Pause passed.
 - Local frame description identified the fixture's solid blue content; video remained paused; explicit user resume passed.
 - Shared-viewport generated HTML5 video Q&A answered `Blue`; the video remained paused after narration and explicit same-page resume passed.
@@ -39,14 +39,14 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 - Windows OCR recognized the golden `DCX`/`42` content and returned normalized geometry.
 - Semantic repair, HTML export, real OPC DOCX export and DOCX viewer round-trip passed.
 - Native UIA script result: `P07 content viewer UIA validation=PASS`.
-- Latest evidence directory: `artifacts/test-results/p07-27794477b0c44a369bd7134298ad9cfc/` (generated and intentionally not committed). The composed P06 evidence at `artifacts/test-results/p06-69ce389a91ea4d36b06745851d05f5a0/` contains native WAV transcription and FFmpeg-registration UIA fixtures.
+- Latest evidence directory: `artifacts/test-results/p07-15ebf4df5ff14865b6e6944ce062fedd/` (generated and intentionally not committed). The disposable profile explicitly registered the real installed FFmpeg candidate, proved the local blue-frame result through that exact binding, and did not retain approval. Composed P06 evidence at `artifacts/test-results/p06-ec2254a02625414ea7fe8eb09ba23453/` contains WAV/MP3 transcription and FFmpeg-registration/clear-denial UIA fixtures.
 
 ## Security, accessibility and limitations
 
 - ZIP/XML parsing caps entry count and expanded bytes; DTD processing and external XML resolution are disabled.
-- FFmpeg uses a typed argument list, bounded execution and a private temporary frame that is removed after use. Web capture is restricted to the visible video rectangle in the current tab. Ollama is loopback-only, exact approved model identity is revalidated, owned decoded frame bytes are zeroed and the model is unloaded.
+- FFmpeg requires a separately approved exact executable/license binding, with per-run digest verification, leased input/executable, typed arguments, a scrubbed environment, bounded execution and signature-validated leased output removed after use. Web capture is restricted to the visible video rectangle in the current tab. Ollama is loopback-only, exact approved model identity is revalidated, owned decoded frame bytes are zeroed and the model is unloaded.
 - Folder presentation is bounded and does not expose absolute paths in item labels.
 - Human JAWS, NVDA and Narrator results remain `UNVERIFIED`; see `docs/accessibility/P07_CONTENT_CHECKLIST.md`.
 - YouTube playback/provider limitations are reported in `docs/media/YOUTUBE_LIMITATIONS.md`. The gate proves safe URL admission/handoff and provider-neutral Q&A against a deterministic loopback HTML5 video. It does not prove live, authenticated, embedded, protected or universal YouTube frame Q&A.
-- The fake-CLI native WAV flow proves accessible broker integration, cancellation and text presentation, not speech accuracy. A real approved Whisper backend, accuracy/resource evidence and MP3/MP4 extraction remain blocked by P06.
-- Exact FFmpeg registration now exists, but frame extraction still uses the legacy `PATH` lookup and the real unsigned candidate remains unapproved. P07 does not claim that registration is wired to media processing.
+- The fake-CLI native WAV/MP3 flow proves accessible broker composition, cancellation and text presentation, not speech or extraction quality. A real approved Whisper backend and accuracy/resource evidence remain blocked by P06.
+- The real unsigned FFmpeg candidate was approved only in a disposable automated profile to prove wiring; it remains unapproved for normal use and requires owner/legal/provenance review. Human JAWS/NVDA/Narrator validation of the expanded media controls remains unverified.

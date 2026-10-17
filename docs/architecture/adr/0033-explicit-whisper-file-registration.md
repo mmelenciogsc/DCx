@@ -15,7 +15,7 @@ Registration rejects network/device paths, reparse files or ancestors, unsupport
 
 The UI provides unique keyboard access keys and stable UI Automation identifiers. It has no download or install action and explicitly states that digest review does not prove publisher authenticity, legal suitability or transcription accuracy.
 
-The files/media viewer consumes only this persisted binding for direct admitted-WAV transcription. It pauses media, keeps a cancel action enabled during processing, retains no partial transcript on cancellation, and places successful bounded text in a read-only accessible transcript field. Invalid UTF-8 and unsupported control characters fail closed. Clearing the binding makes the consumer unavailable immediately. MP3/MP4 audio extraction is not authorized by this decision and remains explicitly unavailable.
+The files/media viewer consumes only this persisted binding for transcription. Admitted WAV input is direct. MP3/MP4 input first requires the separately approved, bounded FFmpeg processor defined by ADR 0034; its leased temporary WAV is then passed to this unchanged Whisper boundary and deleted afterward. The viewer pauses media, keeps a cancel action enabled during processing, retains no partial transcript on cancellation, and places successful bounded text in a read-only accessible transcript field. Invalid UTF-8 and unsupported control characters fail closed. Clearing either required binding makes the corresponding consumer unavailable immediately.
 
 ## Consequences
 

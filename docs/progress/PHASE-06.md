@@ -1,7 +1,7 @@
 # P06 — Local models and resource inventory
 
-- Status: BLOCKED (real vision passes; transcription/embedding contracts pass fixtures; actual backends remain absent)
-- Implementation commits: `463bfb6`, `b4aa4c9`, `a160435`, `21001d2`, `a41702b`, `5cdf5ec`, `ed6f001`, `2f71398`
+- Status: BLOCKED (real vision passes; transcription/embedding contracts pass fixtures; real Whisper/embedding backends remain absent)
+- Implementation commits: `463bfb6`, `b4aa4c9`, `a160435`, `21001d2`, `a41702b`, `5cdf5ec`, `ed6f001`, `2f71398`, `acc8e62`
 - Documentation commit: recorded by the commit containing this file
 
 No model or runtime was downloaded or installed. The real benchmark uses only software and models already present on this Windows machine.
@@ -36,8 +36,10 @@ No model or runtime was downloaded or installed. The real benchmark uses only so
 - The accessible manager can now register an already-installed Whisper executable, model and two license files. It accepts only four distinct regular files on local drives, rejects reparse ancestors, bounds executable/model/license sizes, displays both complete UTF-8 licenses and all four exact byte digests, starts approval unchecked, invalidates review on any path edit, and rehashes all four files immediately before atomic persistence.
 - The Whisper registration actions expose stable UIA identifiers and distinct keyboard access keys. The manager has no Whisper download/install action. Clearing removes only the per-user binding and preserves every selected source file. Registration explicitly does not claim publisher authenticity, legal license approval or transcription accuracy.
 - Adapter creation revalidates both approved license-file digests. Each transcription revalidates bounded executable/model digests and holds the executable, model and WAV under no-write/no-delete read leases through child completion. UNC/device paths and reparse ancestors fail closed.
-- The files/media viewer pauses an admitted WAV and consumes only the persisted approved binding. It exposes distinct keyboard actions for transcription and cancellation, retains no canceled partial or cleared-binding stale text, focuses the completed read-only transcript, and keeps media paused. Output must be bounded strict UTF-8 without unsupported control characters. Direct MP3/MP4 extraction is explicitly unavailable.
-- A separate accessible FFmpeg manager reviews one existing local executable and license under read leases, exposes exact byte digests, full bounded UTF-8 license and real Windows Authenticode status, and requires default-off approval plus save-time revalidation. It cannot download, install, bundle, delete or upload FFmpeg. This registration is not yet an execution consumer.
+- The files/media viewer pauses admitted WAV, MP3 and MP4 media and consumes only persisted approved bindings. WAV goes directly to Whisper. MP3/MP4 require the FFmpeg binding, announce bounded audio extraction separately, then pass a leased temporary WAV to Whisper. Cancellation remains available, no canceled/cleared-binding stale text is retained, the completed read-only transcript receives focus, and media stays paused.
+- A separate accessible FFmpeg manager reviews one existing local executable and license under read leases, exposes exact byte digests, full bounded UTF-8 license and real Windows Authenticode status, and requires default-off approval plus save-time revalidation. It cannot download, install, bundle, delete or upload FFmpeg.
+- The approved FFmpeg processor revalidates the license at construction and executable digest per run; holds the executable and signature-checked MP3/MP4 under read-only/no-write/no-delete leases; uses an absolute executable, typed arguments and scrubbed environment; bounds input/output/time; tree-kills on cancel/timeout; accepts only validated WAV/PNG output; and deletes private random operation storage when the leased artifact is disposed.
+- Local MP4 frame description now requires and consumes this exact approved FFmpeg binding. The legacy `PATH` search and independent process implementation were removed.
 - A native fake Whisper CLI validates process/argument/output/cancellation behavior. It does not count as speech-recognition accuracy evidence.
 
 ## Reproduction
@@ -50,12 +52,12 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 ## Measured result
 
-- Locked Release build: 0 warnings, 0 errors; 1.36 seconds in the recorded P06 run.
-- P06 exact-namespace local-model tests: passed 53, failed 0, skipped 0; about 1 second, with counters parsed from retained TRX.
-- Current full suite: passed 282, failed 0, skipped 0; about 12 seconds.
+- Locked Release build: 0 warnings, 0 errors; 1.75 seconds in the recorded P06 run.
+- P06 exact-namespace local-model tests: passed 60, failed 0, skipped 0; about 2 seconds, with counters parsed from retained TRX.
+- Current full suite: passed 289, failed 0, skipped 0; about 12 seconds.
 - Vision response: `A blue square and a red circle are displayed above the text "DCX 42".`
-- Production-adapter prompt tokens: 1,100; output tokens: 20; total duration: 16,426,065,000 ns.
-- Separately measured Ollama duration: 13,701,388,000 ns; wall duration: 15,752 ms.
+- Production-adapter prompt tokens: 1,100; output tokens: 20; total duration: 15,823,987,500 ns.
+- Separately measured Ollama duration: 15,904,978,200 ns; wall duration: 17,930 ms.
 - Ollama-reported loaded model and VRAM allocation: 3,527,545,978 bytes each.
 - Exact digest and license binding before/after inference, malformed inventory/digest rejection, duplicate/mutable selection denial, changed-binding denial and changed-license denial passed.
 - Explicit model unload verification by loaded-process digest: passed.
@@ -63,10 +65,11 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - Whisper pinned-file write replacement was denied while the child fixture ran; the leases released after cancellation.
 - Native UIA proved the Whisper approval begins unchecked, saving without approval is denied, both complete licenses and all four digests are exposed, action access keys are unique, and no download/install action exists. The UI-persisted binding produced `DCx transcription fixture 42.` through both the production adapter and accessible media viewer. User cancellation killed the fixture and retained no partial text; completion focused the transcript; clearing denied the consumer and removed stale text while retaining all four source files.
 - FFmpeg native UIA proved exact executable/license digest and full-license review, real `NotSigned` status, default-off/save-before-approval denial, unique keyboard access keys, persisted identity, approval reset and clear-without-delete. The real installed candidate measured 148,583,424 bytes, executable SHA-256 `943c5c0623ded76eb02e4b593a7ac1bac043fbbcf6d1d34d673fb8c0369fab52`, GPLv3 license SHA-256 `8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903`, Windows `NotSigned`, and `approved=false`.
+- Seven processor tests passed leased WAV/PNG success and cleanup, input/output signature denial, executable and license tamper denial, cancellation/timeout tree kill, lease release and active input write denial. Native UIA composed the approved fixture FFmpeg and Whisper bindings for MP3 transcription, focused the expected transcript, then proved immediate denial after clearing FFmpeg.
 - Ollama inspection/embed request shape, capability/license parsing, two-vector response and inconsistent-dimension denial passed.
 - Ollama redirect/cookie/proxy denial, exact response-origin enforcement, image-signature admission and mismatched/incomplete response denial passed.
 - The P07 native WebView2/UIA media test selected the installed model through the accessible manager, read the complete license through `ValuePattern`, proved approval initially and subsequently unchecked, persisted the binding, found no download action, and passed local MP4 pause/describe/resume with the real loopback VLM.
-- Hardware/TRX/native-registration evidence: `artifacts/test-results/p06-69ce389a91ea4d36b06745851d05f5a0/`; P07 UIA fixtures: `artifacts/test-results/p07-27794477b0c44a369bd7134298ad9cfc/` (generated and intentionally not committed).
+- Hardware/TRX/native-registration evidence: `artifacts/test-results/p06-ec2254a02625414ea7fe8eb09ba23453/`; P07 UIA fixtures: `artifacts/test-results/p07-15ebf4df5ff14865b6e6944ce062fedd/` (generated and intentionally not committed).
 
 ## Changed files in the latest milestone
 
@@ -79,14 +82,14 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - Exact executable/model/WAV lease and local-path hardening: `src/DCx.Core/LocalModels/WhisperCliTranscriber.cs`, `tests/DCx.Core.Tests/LocalModels/WhisperCliTranscriberTests.cs`.
 - Accessible direct-WAV consumer and cancel/cleared-binding UIA: `src/DCx.Desktop/ContentViewerWindow.xaml`, `src/DCx.Desktop/ContentViewerWindow.xaml.cs`, `src/DCx.Desktop/MainWindow.xaml.cs`, `scripts/validate-p06-whisper-registration.ps1`, `tests/DCx.FakeWhisperCli/Program.cs`.
 - Exact FFmpeg executable/license/signature review and state: `src/DCx.Core/LocalModels/FfmpegBackendRegistration.cs`, `src/DCx.Desktop/LocalModelsWindow.xaml`, `src/DCx.Desktop/LocalModelsWindow.xaml.cs`, `tests/DCx.Core.Tests/LocalModels/FfmpegBackendRegistrationTests.cs`, `docs/architecture/adr/0034-explicit-ffmpeg-file-registration.md`.
+- Approved FFmpeg execution, composed MP3/MP4 transcription, migrated frame capture and denial coverage: `src/DCx.Core/LocalModels/FfmpegMediaProcessor.cs`, `src/DCx.Desktop/Media/MediaFrameDescriptionService.cs`, `src/DCx.Desktop/ContentViewerWindow.xaml`, `src/DCx.Desktop/ContentViewerWindow.xaml.cs`, `tests/DCx.Core.Tests/LocalModels/FfmpegMediaProcessorTests.cs`, `tests/DCx.FakeWhisperCli/Program.cs`, `scripts/validate-p06-whisper-registration.ps1`, `scripts/validate-p07.ps1`.
 - Decision, development and human-AT records: `docs/architecture/adr/0023-explicit-persisted-local-model-approval.md`, `docs/deployment/DEVELOPMENT.md`, `docs/accessibility/P06_LOCAL_MODELS_CHECKLIST.md`.
 
 ## Blockers and unblock condition
 
 - The native fake CLI proves the broker contract, not transcription accuracy, license suitability or real resource use. No approved Whisper executable/model exists on the machine.
 - The embedding mock proves the bounded loopback contract, not retrieval quality, actual dimensions, license suitability or real memory/latency. No installed model advertises embeddings.
-- Direct admitted-WAV transcription is wired, but MP3/MP4 audio extraction remains unavailable because no separately approved, digest/license-bound extraction boundary has been implemented.
-- The persisted FFmpeg registration is not yet consumed. The legacy local-frame extractor still resolves `PATH`; migration to the approved binding with per-run hash/license verification and leases is required before this trust gap can be considered closed. The measured unsigned GPLv3 candidate also requires owner/legal review before real approval or any distribution decision.
+- The exact approved FFmpeg boundary is wired for frame and MP3/MP4 audio extraction, but the real host candidate remains unsigned GPLv3 software that requires owner/legal review, acceptable provenance and real quality/resource benchmarks before production approval or any distribution decision. It was approved only inside disposable validation data and remains `approved=false` in the host inventory evidence.
 - The digest-qualified alias and before/after runtime checks bind the runtime-reported bytes and reviewed license text used for the measured call; they do not establish publisher authenticity, signed provenance, legal license approval or a production model install/update/revocation policy. The accessible manager selects only already-installed local models and deliberately performs no installation.
 - Automated UIA passed, but the dedicated JAWS/NVDA/Narrator checklist has not been run and cannot be inferred from automation.
 - The registration path proves safe consent and execution for already-installed files, but this host has no approved real Whisper executable/model to select. Install/download of whisper.cpp and a suitable embedding model, with source, version, license and SHA-256 recorded, requires owner approval.

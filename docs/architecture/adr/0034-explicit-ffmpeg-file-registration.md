@@ -1,6 +1,6 @@
 # ADR 0034: Require exact-file approval before expanding FFmpeg media processing
 
-- Status: Accepted for registration; consumer migration remains pending
+- Status: Accepted for bounded local media processing; real backend approval remains user/legal responsibility
 - Date: 2026-10-17
 
 ## Context
@@ -13,11 +13,11 @@ DCx exposes a separate keyboard/UIA-accessible registration for one existing loc
 
 Network/device paths, reparse files or ancestors, excessive sizes, malformed licenses, incomplete signer evidence and malformed/future persisted state fail closed. The registration UI cannot download, install, bundle, delete or upload FFmpeg.
 
-This decision does not yet authorize a consumer. Existing frame extraction must be migrated away from `PATH` to the exact persisted binding before the registration closes that execution gap. MP3/MP4 transcription extraction remains unavailable until a bounded, leased, hash-reverified processor and composed transcription fixture pass.
+The approved binding may be consumed only by the bounded media processor. Before every run it revalidates the complete license and executable digest, holds the executable and signature-checked input under no-write/no-delete leases, uses absolute paths and typed arguments in a scrubbed environment, and enforces time and output limits with tree termination. Outputs live in random private temporary storage, must pass WAV or PNG signature and size validation, remain leased through their consumer, and are deleted on disposal. Local MP4 frame capture and MP3/MP4-to-WAV transcription use this processor; no media consumer searches `PATH` for FFmpeg.
 
 ## Consequences
 
 - Users can inspect unsigned status and GPLv3 text before making a per-user exact-file choice.
 - Native fixture UIA can prove consent/persistence without approving the real installed candidate.
 - The installed candidate remains inventoried with `approved=false`; no legal or publisher claim is made.
-- P06 remains blocked on consumer migration, legal/license review, real media extraction benchmarks and real Whisper/embedding backends.
+- P06 remains blocked on owner/legal approval and production provenance for a real FFmpeg build, real media quality/resource benchmarks, real Whisper/embedding backends and human assistive-technology acceptance.
