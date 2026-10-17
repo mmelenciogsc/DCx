@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using DCx.Core.LocalModels;
+using DCx.Core.Storage;
 using Microsoft.Win32;
 
 namespace DCx.Desktop;
@@ -36,6 +37,15 @@ public partial class LocalModelsWindow : Window
     }
 
     private async void OnRefreshClick(object sender, RoutedEventArgs e) => await RefreshAsync();
+
+    private void OnOpenBenchmarkReviewClick(object sender, RoutedEventArgs e)
+    {
+        var window = new LocalModelBenchmarkWindow(whisperStore, ApplicationDataRoot.Resolve())
+        {
+            Owner = this,
+        };
+        window.Show();
+    }
 
     private async void OnModelSelectionChanged(object sender, SelectionChangedEventArgs e)
     {

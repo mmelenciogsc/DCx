@@ -28,6 +28,9 @@ $ffmpegLicense = Join-Path $runRoot "ffmpeg-license.txt"
 $audio = Join-Path $runRoot "fixture.wav"
 $timeoutAudio = Join-Path $runRoot "timeout.wav"
 $mp3Audio = Join-Path $runRoot "fixture.mp3"
+$benchmarkManifest = Join-Path $runRoot "transcription-benchmark.json"
+$slowBenchmarkManifest = Join-Path $runRoot "transcription-benchmark-slow.json"
+$benchmarkEvidencePath = Join-Path $dataRoot "local-models\benchmark-evidence\transcription-latest.json"
 $evidencePath = Join-Path $runRoot "whisper-registration-evidence.json"
 $previousDataRoot = $env:DCX_DATA_ROOT
 $previousOfflineStartup = $env:DCX_OFFLINE_STARTUP
@@ -85,12 +88,38 @@ New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 [IO.File]::Copy($audio, $timeoutAudio)
 [IO.File]::WriteAllBytes($mp3Audio, [byte[]]@(
     [byte][char]'I', [byte][char]'D', [byte][char]'3', 4, 0, 0, 0, 0, 0, 0))
+$benchmarkJson = @'
+{
+  "schemaVersion": 1,
+  "kind": "transcription",
+  "name": "DCx native UIA transcription fixture",
+  "provenance": { "source": "DCx synthetic validation fixture", "license": "CC0-1.0" },
+  "limits": {
+    "maximumWordErrorRate": 0.0,
+    "maximumCharacterErrorRate": 0.0,
+    "resources": {
+      "maximumElapsedMilliseconds": 60000,
+      "maximumPeakWorkingSetBytes": 1073741824,
+      "maximumPeakGpuBytes": null,
+      "requireUnloadConfirmation": true
+    }
+  },
+  "fixtures": [
+    { "id": "uia-speech-1", "waveFile": "fixture.wav", "expectedText": "DCx transcription fixture 42." }
+  ]
+}
+'@
+[IO.File]::WriteAllText($benchmarkManifest, $benchmarkJson)
+[IO.File]::WriteAllText(
+    $slowBenchmarkManifest,
+    $benchmarkJson.Replace('"fixture.wav"', '"timeout.wav"'))
 
 $executableDigest = (Get-FileHash -LiteralPath $fakeWhisper -Algorithm SHA256).Hash.ToLowerInvariant()
 $modelDigest = (Get-FileHash -LiteralPath $model -Algorithm SHA256).Hash.ToLowerInvariant()
 $runtimeLicenseDigest = (Get-FileHash -LiteralPath $runtimeLicense -Algorithm SHA256).Hash.ToLowerInvariant()
 $modelLicenseDigest = (Get-FileHash -LiteralPath $modelLicense -Algorithm SHA256).Hash.ToLowerInvariant()
 $ffmpegLicenseDigest = (Get-FileHash -LiteralPath $ffmpegLicense -Algorithm SHA256).Hash.ToLowerInvariant()
+$benchmarkManifestDigest = (Get-FileHash -LiteralPath $benchmarkManifest -Algorithm SHA256).Hash.ToLowerInvariant()
 
 $env:DCX_DATA_ROOT = $dataRoot
 $env:DCX_OFFLINE_STARTUP = "1"
@@ -219,6 +248,125 @@ try {
         throw "The UI-approved binding did not execute through the production Whisper adapter."
     }
 
+    Invoke-ById $localModelsWindow "OpenBenchmarkReviewButton" | Out-Null
+    $benchmarkWindow = Wait-For {
+        Find-WindowByProcessAndId $process.Id "LocalModelBenchmarkWindow"
+    } "The accessible local-model benchmark review window did not open."
+    $benchmarkApproval = Wait-For {
+        Find-ById $benchmarkWindow "ApproveBenchmarkRunBox"
+    } "The explicit benchmark-run approval checkbox was not exposed."
+    $benchmarkApprovalToggle = $benchmarkApproval.GetCurrentPattern(
+        [System.Windows.Automation.TogglePattern]::Pattern)
+    if ($benchmarkApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "Benchmark approval did not default to unchecked."
+    }
+    Set-Value $benchmarkWindow "BenchmarkManifestPath" $benchmarkManifest
+    Invoke-ById $benchmarkWindow "ReviewBenchmarkManifestButton" | Out-Null
+    $benchmarkDetails = Wait-For {
+        $candidate = Find-ById $benchmarkWindow "BenchmarkReviewDetails"
+        if ($null -ne $candidate -and
+            $candidate.Current.Name -like "*Type: transcription. Fixtures: 1.*" -and
+            $candidate.Current.Name -like "*Manifest SHA-256: $benchmarkManifestDigest*" -and
+            $candidate.Current.Name -match "Fixture-suite SHA-256: [0-9a-f]{64}" -and
+            $candidate.Current.Name -match "Policy SHA-256: [0-9a-f]{64}" -and
+            $candidate.Current.Name -match "Approved transcription backend binding SHA-256: [0-9a-f]{64}" -and
+            $candidate.Current.Name -like "*maximum WER 0.00%*maximum CER 0.00%*") { $candidate }
+    } "The benchmark review did not expose exact digests and thresholds." 160
+    if ($benchmarkApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "Benchmark approval changed without user action."
+    }
+    $benchmarkRun = Find-ById $benchmarkWindow "RunApprovedBenchmarkButton"
+    if ($null -eq $benchmarkRun -or $benchmarkRun.Current.IsEnabled) {
+        throw "The benchmark run action was enabled without explicit approval."
+    }
+    $benchmarkActionIds = @(
+        "BrowseBenchmarkManifestButton", "ReviewBenchmarkManifestButton", "ApproveBenchmarkRunBox",
+        "CloseBenchmarkWindowButton")
+    $benchmarkAccessKeys = @()
+    foreach ($automationId in $benchmarkActionIds) {
+        $action = Find-ById $benchmarkWindow $automationId
+        if ($null -eq $action -or -not $action.Current.IsKeyboardFocusable -or
+            [string]::IsNullOrWhiteSpace($action.Current.AccessKey)) {
+            throw "The $automationId benchmark action lacks a keyboard-focusable access key."
+        }
+        $benchmarkAccessKeys += $action.Current.AccessKey
+    }
+    if (@($benchmarkAccessKeys | Sort-Object -Unique).Count -ne $benchmarkAccessKeys.Count) {
+        throw "Benchmark review actions expose duplicate access keys."
+    }
+
+    $benchmarkApprovalToggle.Toggle()
+    $benchmarkRun = Wait-For {
+        $candidate = Find-ById $benchmarkWindow "RunApprovedBenchmarkButton"
+        if ($null -ne $candidate -and $candidate.Current.IsEnabled) { $candidate }
+    } "Explicit approval did not enable the exact benchmark run."
+    if (-not $benchmarkRun.Current.IsKeyboardFocusable -or
+        [string]::IsNullOrWhiteSpace($benchmarkRun.Current.AccessKey) -or
+        $benchmarkAccessKeys -contains $benchmarkRun.Current.AccessKey) {
+        throw "The enabled benchmark run action lacks a unique keyboard access key."
+    }
+    $benchmarkAccessKeys += $benchmarkRun.Current.AccessKey
+    $benchmarkRun.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $benchmarkResult = Wait-For {
+        $candidate = Find-ById $benchmarkWindow "BenchmarkAggregateResult"
+        if ($null -ne $candidate -and $candidate.Current.Name -like "PASS.*Fixtures: 1.*WER: 0.00%*") { $candidate }
+    } "The approved production-adapter benchmark did not return an aggregate passing result." 160
+    if (-not $benchmarkResult.Current.HasKeyboardFocus) {
+        throw "The completed aggregate benchmark result did not receive keyboard focus."
+    }
+    if ($benchmarkApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "Benchmark approval was not revoked after the completed run."
+    }
+    if (-not (Test-Path -LiteralPath $benchmarkEvidencePath -PathType Leaf)) {
+        throw "Aggregate benchmark evidence was not retained."
+    }
+    $benchmarkEvidenceJson = [IO.File]::ReadAllText($benchmarkEvidencePath)
+    $benchmarkEvidence = $benchmarkEvidenceJson | ConvertFrom-Json
+    if ($benchmarkEvidence.schemaVersion -ne 1 -or
+        $benchmarkEvidence.result.passed -ne $true -or
+        $benchmarkEvidence.result.fixtureCount -ne 1 -or
+        $benchmarkEvidenceJson -like "*DCx transcription fixture 42*" -or
+        $benchmarkEvidenceJson -like "*$runRoot*") {
+        throw "Persisted benchmark evidence was not aggregate-only passing evidence."
+    }
+    $completedEvidenceDigest = (Get-FileHash -LiteralPath $benchmarkEvidencePath -Algorithm SHA256).Hash
+
+    Set-Value $benchmarkWindow "BenchmarkManifestPath" $slowBenchmarkManifest
+    $invalidated = Find-ById $benchmarkWindow "RunApprovedBenchmarkButton"
+    if ($invalidated.Current.IsEnabled -or
+        $benchmarkApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "Changing the benchmark manifest path did not revoke exact review and approval."
+    }
+    Invoke-ById $benchmarkWindow "ReviewBenchmarkManifestButton" | Out-Null
+    $null = Wait-For {
+        $candidate = Find-ById $benchmarkWindow "ApproveBenchmarkRunBox"
+        if ($null -ne $candidate -and $candidate.Current.IsEnabled) { $candidate }
+    } "The slow cancellation fixture was not reviewed."
+    $benchmarkApprovalToggle.Toggle()
+    $benchmarkRun = Wait-For {
+        $candidate = Find-ById $benchmarkWindow "RunApprovedBenchmarkButton"
+        if ($null -ne $candidate -and $candidate.Current.IsEnabled) { $candidate }
+    } "The reviewed slow benchmark was not enabled after approval."
+    $benchmarkRun.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $benchmarkCancel = Wait-For {
+        $candidate = Find-ById $benchmarkWindow "CancelBenchmarkButton"
+        if ($null -ne $candidate -and $candidate.Current.IsEnabled) { $candidate }
+    } "Benchmark cancellation did not become available during processing."
+    if (-not $benchmarkCancel.Current.IsKeyboardFocusable -or
+        [string]::IsNullOrWhiteSpace($benchmarkCancel.Current.AccessKey) -or
+        $benchmarkAccessKeys -contains $benchmarkCancel.Current.AccessKey) {
+        throw "The enabled benchmark cancel action lacks a unique keyboard access key."
+    }
+    $benchmarkCancel.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $status = Find-ById $benchmarkWindow "LocalModelBenchmarkStatus"
+        if ($null -ne $status -and $status.Current.Name -like "The local benchmark was canceled.*") { $status }
+    } "The active local benchmark did not cancel." 160
+    if ((Get-FileHash -LiteralPath $benchmarkEvidencePath -Algorithm SHA256).Hash -ne $completedEvidenceDigest) {
+        throw "A canceled benchmark replaced the prior completed aggregate evidence."
+    }
+    Invoke-ById $benchmarkWindow "CloseBenchmarkWindowButton" | Out-Null
+
     Invoke-ById $mainWindow "ContentViewerButton" | Out-Null
     $contentViewer = Wait-For {
         Find-WindowByProcessAndId $process.Id "ContentViewerWindow"
@@ -284,6 +432,28 @@ try {
     } "The Whisper registration was not cleared."
     $cleared = $store.GetStateAsync([Threading.CancellationToken]::None).GetAwaiter().GetResult()
     if ($null -ne $cleared.Backend) { throw "The persisted Whisper binding remained after clear." }
+    Invoke-ById $localModelsWindow "OpenBenchmarkReviewButton" | Out-Null
+    $unavailableBenchmarkWindow = Wait-For {
+        Find-WindowByProcessAndId $process.Id "LocalModelBenchmarkWindow"
+    } "The benchmark review window did not reopen for unavailable-backend validation."
+    $null = Wait-For {
+        $candidate = Find-ById $unavailableBenchmarkWindow "BenchmarkBackendAvailability"
+        if ($null -ne $candidate -and
+            $candidate.Current.Name -like "Transcription benchmark unavailable: no explicitly approved local Whisper backend*") { $candidate }
+    } "The missing approved transcription backend was not exposed as unavailable."
+    Set-Value $unavailableBenchmarkWindow "BenchmarkManifestPath" $benchmarkManifest
+    Invoke-ById $unavailableBenchmarkWindow "ReviewBenchmarkManifestButton" | Out-Null
+    $null = Wait-For {
+        $status = Find-ById $unavailableBenchmarkWindow "LocalModelBenchmarkStatus"
+        if ($null -ne $status -and
+            $status.Current.Name -like "The exact transcription suite was reviewed, but running is unavailable*") { $status }
+    } "A reviewed suite did not remain unavailable without an approved backend."
+    $unavailableApproval = Find-ById $unavailableBenchmarkWindow "ApproveBenchmarkRunBox"
+    $unavailableRun = Find-ById $unavailableBenchmarkWindow "RunApprovedBenchmarkButton"
+    if ($unavailableApproval.Current.IsEnabled -or $unavailableRun.Current.IsEnabled) {
+        throw "Benchmark approval or execution was enabled without an approved backend."
+    }
+    Invoke-ById $unavailableBenchmarkWindow "CloseBenchmarkWindowButton" | Out-Null
     $transcribeButton = Wait-For {
         $candidate = Find-ById $contentViewer "TranscribeWavButton"
         if ($null -ne $candidate -and $candidate.Current.IsEnabled) { $candidate }
@@ -409,6 +579,15 @@ try {
         complete_model_license_exposed = $true
         exact_file_digests_exposed = $true
         keyboard_focusable_unique_access_keys = $true
+        benchmark_native_uia = "pass"
+        benchmark_approval_default_unchecked = $true
+        benchmark_run_without_approval_denied = $true
+        benchmark_exact_review_exposed = $true
+        benchmark_aggregate_evidence_only = $true
+        benchmark_result_focus = $true
+        benchmark_path_change_revoked_approval = $true
+        benchmark_cancellation_preserved_evidence = $true
+        benchmark_missing_backend_unavailable = $true
         executable_sha256 = $executableDigest
         model_sha256 = $modelDigest
         runtime_license_sha256 = $runtimeLicenseDigest
@@ -440,6 +619,8 @@ try {
     "Complete runtime/model licenses UIA=PASS"
     "Exact four-file digest review UIA=PASS"
     "UI-approved production adapter transcript=$($transcription.Text)"
+    "Approval-bound aggregate benchmark review and execution UIA=PASS"
+    "Benchmark cancellation and evidence preservation UIA=PASS"
     "Accessible viewer WAV transcription and focus=PASS"
     "Accessible viewer WAV cancellation=PASS"
     "Accessible viewer approved MP3 extraction and transcription=PASS"

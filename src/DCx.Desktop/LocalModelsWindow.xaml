@@ -61,6 +61,17 @@
                     </StackPanel>
                 </GroupBox>
 
+                <Button x:Name="OpenBenchmarkReviewButton"
+                        Width="230"
+                        MinHeight="36"
+                        Margin="0,16,0,0"
+                        HorizontalAlignment="Left"
+                        Content="Open _quality benchmark review"
+                        AutomationProperties.AutomationId="OpenBenchmarkReviewButton"
+                        AutomationProperties.Name="Open local model quality benchmark review"
+                        AutomationProperties.HelpText="Reviews bounded local fixtures and exact quality thresholds. It never installs a model or changes a production selection."
+                        Click="OnOpenBenchmarkReviewClick" />
+
                 <Button x:Name="RefreshButton"
                         Width="180"
                         MinHeight="36"

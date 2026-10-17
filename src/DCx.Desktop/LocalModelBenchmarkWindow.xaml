@@ -1,0 +1,152 @@
+<Window x:Class="DCx.Desktop.LocalModelBenchmarkWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DCx local model benchmark review"
+        Width="780"
+        Height="690"
+        MinWidth="620"
+        MinHeight="520"
+        AutomationProperties.AutomationId="LocalModelBenchmarkWindow"
+        AutomationProperties.Name="DCx local model benchmark review window">
+    <DockPanel Margin="20">
+        <TextBlock x:Name="StatusText"
+                   DockPanel.Dock="Bottom"
+                   Margin="0,16,0,0"
+                   Padding="10"
+                   Text="Loading approved local benchmark backends."
+                   TextWrapping="Wrap"
+                   Background="#F3F3F3"
+                   AutomationProperties.AutomationId="LocalModelBenchmarkStatus"
+                   AutomationProperties.Name="Loading approved local benchmark backends."
+                   AutomationProperties.LiveSetting="Assertive" />
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Focusable="False">
+            <StackPanel>
+                <TextBlock FontSize="26"
+                           FontWeight="SemiBold"
+                           Text="Local model benchmark review"
+                           AutomationProperties.AutomationId="LocalModelBenchmarkHeading"
+                           AutomationProperties.Name="Local model benchmark review" />
+                <TextBlock Margin="0,12,0,0"
+                           TextWrapping="Wrap"
+                           Text="Review a bounded local fixture manifest before running it. Approval is exact, expires within 30 minutes, and never installs a model or changes the production selection. Only aggregate quality and resource evidence is retained." />
+
+                <GroupBox Margin="0,16,0,0" Header="Approved backend availability">
+                    <TextBlock x:Name="BackendText"
+                               Margin="12,8"
+                               Text="Checking the approved transcription backend."
+                               TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="BenchmarkBackendAvailability"
+                               AutomationProperties.Name="Checking the approved transcription backend." />
+                </GroupBox>
+
+                <Label Margin="0,16,0,0"
+                       Padding="0,0,0,4"
+                       Target="{Binding ElementName=ManifestPathBox}"
+                       Content="_1 Benchmark manifest JSON" />
+                <DockPanel LastChildFill="True">
+                    <Button x:Name="BrowseManifestButton"
+                            DockPanel.Dock="Right"
+                            MinWidth="120"
+                            MinHeight="36"
+                            Margin="8,0,0,0"
+                            Content="_2 Browse..."
+                            AutomationProperties.AutomationId="BrowseBenchmarkManifestButton"
+                            AutomationProperties.Name="Browse for local benchmark manifest"
+                            Click="OnBrowseManifestClick" />
+                    <TextBox x:Name="ManifestPathBox"
+                             MinHeight="36"
+                             Padding="6"
+                             AutomationProperties.AutomationId="BenchmarkManifestPath"
+                             AutomationProperties.Name="Local benchmark manifest path"
+                             AutomationProperties.HelpText="Absolute path to a bounded local JSON manifest. Transcription WAV files must remain beneath its directory."
+                             TextChanged="OnManifestPathChanged" />
+                </DockPanel>
+
+                <Button x:Name="ReviewManifestButton"
+                        Width="210"
+                        MinHeight="36"
+                        Margin="0,14,0,0"
+                        HorizontalAlignment="Left"
+                        Content="_3 Review exact manifest"
+                        AutomationProperties.AutomationId="ReviewBenchmarkManifestButton"
+                        AutomationProperties.Name="Review exact local benchmark manifest"
+                        AutomationProperties.HelpText="Reads and hashes the local manifest and fixtures without running a model."
+                        Click="OnReviewManifestClick" />
+
+                <GroupBox Margin="0,16,0,0" Header="Exact review">
+                    <TextBox x:Name="ReviewDetailsText"
+                             MinHeight="150"
+                             MaxHeight="230"
+                             Margin="12,8"
+                             Padding="8"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             Text="No benchmark manifest has been reviewed."
+                             AutomationProperties.AutomationId="BenchmarkReviewDetails"
+                             AutomationProperties.Name="No benchmark manifest has been reviewed." />
+                </GroupBox>
+
+                <CheckBox x:Name="ApprovalBox"
+                          Margin="0,16,0,0"
+                          FontWeight="SemiBold"
+                          IsEnabled="False"
+                          Content="_4 I reviewed this exact backend, fixture-suite digest, policy digest, thresholds, provenance, and license and approve one bounded run"
+                          AutomationProperties.AutomationId="ApproveBenchmarkRunBox"
+                          AutomationProperties.Name="I reviewed this exact backend, fixture suite digest, policy digest, thresholds, provenance, and license and approve one bounded run"
+                          AutomationProperties.HelpText="Unchecked by default. Path changes and completed or failed runs revoke approval."
+                          Checked="OnApprovalChanged"
+                          Unchecked="OnApprovalChanged" />
+
+                <WrapPanel Margin="0,14,0,0">
+                    <Button x:Name="RunButton"
+                            MinWidth="170"
+                            MinHeight="36"
+                            Margin="0,0,10,10"
+                            IsEnabled="False"
+                            Content="_5 Run approved benchmark"
+                            AutomationProperties.AutomationId="RunApprovedBenchmarkButton"
+                            AutomationProperties.Name="Run explicitly approved local benchmark"
+                            Click="OnRunClick" />
+                    <Button x:Name="CancelButton"
+                            MinWidth="130"
+                            MinHeight="36"
+                            Margin="0,0,10,10"
+                            IsEnabled="False"
+                            Content="_6 Cancel run"
+                            AutomationProperties.AutomationId="CancelBenchmarkButton"
+                            AutomationProperties.Name="Cancel active local benchmark"
+                            Click="OnCancelClick" />
+                    <Button MinWidth="100"
+                            MinHeight="36"
+                            Margin="0,0,0,10"
+                            Content="_7 Close"
+                            IsCancel="True"
+                            AutomationProperties.AutomationId="CloseBenchmarkWindowButton"
+                            AutomationProperties.Name="Close local model benchmark review"
+                            Click="OnCloseClick" />
+                </WrapPanel>
+
+                <GroupBox Margin="0,8,0,0" Header="Aggregate result">
+                    <TextBox x:Name="ResultText"
+                             MinHeight="120"
+                             MaxHeight="200"
+                             Margin="12,8"
+                             Padding="8"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             Text="No benchmark has run. No evidence has been saved."
+                             AutomationProperties.AutomationId="BenchmarkAggregateResult"
+                             AutomationProperties.Name="No benchmark has run. No evidence has been saved."
+                             AutomationProperties.HelpText="Aggregate result only. No fixture text, transcript, corpus text, vector, or fixture path is retained." />
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

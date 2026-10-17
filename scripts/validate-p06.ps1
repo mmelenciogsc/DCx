@@ -52,6 +52,15 @@ try {
     if ($whisperRegistrationEvidence.native_uia -ne "pass" -or
         $whisperRegistrationEvidence.approval_default_unchecked -ne $true -or
         $whisperRegistrationEvidence.save_without_approval_denied -ne $true -or
+        $whisperRegistrationEvidence.benchmark_native_uia -ne "pass" -or
+        $whisperRegistrationEvidence.benchmark_approval_default_unchecked -ne $true -or
+        $whisperRegistrationEvidence.benchmark_run_without_approval_denied -ne $true -or
+        $whisperRegistrationEvidence.benchmark_exact_review_exposed -ne $true -or
+        $whisperRegistrationEvidence.benchmark_aggregate_evidence_only -ne $true -or
+        $whisperRegistrationEvidence.benchmark_result_focus -ne $true -or
+        $whisperRegistrationEvidence.benchmark_path_change_revoked_approval -ne $true -or
+        $whisperRegistrationEvidence.benchmark_cancellation_preserved_evidence -ne $true -or
+        $whisperRegistrationEvidence.benchmark_missing_backend_unavailable -ne $true -or
         $whisperRegistrationEvidence.accessible_viewer_cancellation -ne $true -or
         $whisperRegistrationEvidence.canceled_partial_transcript_retained -ne $false -or
         $whisperRegistrationEvidence.cleared_backend_consumer_denied -ne $true -or
