@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DCx.Core.Knowledge;
@@ -37,18 +38,25 @@ public static class ContributionTransportCodec
         }
 
         var metadata = JsonSerializer.SerializeToUtf8Bytes(submission, JsonOptions);
-        if (metadata.Length is <= 0 or > MaximumMetadataBytes)
+        try
         {
-            throw new ContributionPolicyException("contribution_envelope_size_invalid");
-        }
+            if (metadata.Length is <= 0 or > MaximumMetadataBytes)
+            {
+                throw new ContributionPolicyException("contribution_envelope_size_invalid");
+            }
 
-        var result = GC.AllocateUninitializedArray<byte>(HeaderBytes + metadata.Length + artifact.Length);
-        Magic.CopyTo(result);
-        result[4] = 1;
-        BinaryPrimitives.WriteInt32BigEndian(result.AsSpan(5, 4), metadata.Length);
-        metadata.CopyTo(result.AsSpan(HeaderBytes));
-        artifact.CopyTo(result.AsSpan(HeaderBytes + metadata.Length));
-        return result;
+            var result = GC.AllocateUninitializedArray<byte>(HeaderBytes + metadata.Length + artifact.Length);
+            Magic.CopyTo(result);
+            result[4] = 1;
+            BinaryPrimitives.WriteInt32BigEndian(result.AsSpan(5, 4), metadata.Length);
+            metadata.CopyTo(result.AsSpan(HeaderBytes));
+            artifact.CopyTo(result.AsSpan(HeaderBytes + metadata.Length));
+            return result;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(metadata);
+        }
     }
 
     public static ContributionTransportEnvelope Decode(ReadOnlySpan<byte> envelope)

@@ -62,6 +62,20 @@ internal sealed record SimulationContributionApiOptions(
 
 internal sealed record ContributionApiError(string Code);
 
+internal sealed record ContributionOwnerStatus(
+    string SubmissionId,
+    string CandidateSha256,
+    ContributionState State,
+    DateTimeOffset CreatedUtc,
+    DateTimeOffset? ReviewedUtc,
+    long? ReleaseSequence);
+
+internal sealed record ContributionOwnerWithdrawal(
+    string SubmissionId,
+    string CandidateSha256,
+    ContributionState State,
+    GlobalReleaseDescriptor Release);
+
 internal static class SimulationCcbSandboxConfiguration
 {
     public static ICcbSandboxExecutor? Load(string governanceRoot)
@@ -134,10 +148,13 @@ internal static class SimulationContributionApi
         {
             var authorization = Authorize(request, options, SimulationApiRole.Contributor);
             if (authorization.Error is not null) return authorization.Error;
+            byte[]? requestBytes = null;
+            byte[]? artifactBytes = null;
             try
             {
-                var bytes = await ReadBoundedRequestAsync(request, cancellationToken).ConfigureAwait(false);
-                var envelope = ContributionTransportCodec.Decode(bytes);
+                requestBytes = await ReadBoundedRequestAsync(request, cancellationToken).ConfigureAwait(false);
+                var envelope = ContributionTransportCodec.Decode(requestBytes);
+                artifactBytes = envelope.Artifact;
                 if (!string.Equals(
                         envelope.Submission.Candidate.ContributorPseudonym,
                         options.ContributorPseudonym,
@@ -162,6 +179,11 @@ internal static class SimulationContributionApi
             catch (InvalidDataException)
             {
                 return Error(StatusCodes.Status400BadRequest, "contribution_request_invalid");
+            }
+            finally
+            {
+                if (requestBytes is not null) CryptographicOperations.ZeroMemory(requestBytes);
+                if (artifactBytes is not null) CryptographicOperations.ZeroMemory(artifactBytes);
             }
         });
 
@@ -241,7 +263,15 @@ internal static class SimulationContributionApi
                     return Error(StatusCodes.Status404NotFound, "submission_missing");
                 }
 
-                return Results.Ok(item);
+                return authorization.Role == SimulationApiRole.Contributor
+                    ? Results.Ok(new ContributionOwnerStatus(
+                        item.SubmissionId,
+                        item.CandidateSha256,
+                        item.State,
+                        item.CreatedUtc,
+                        item.ReviewedUtc,
+                        item.ReleaseSequence))
+                    : Results.Ok(item);
             }
             catch (ContributionPolicyException exception)
             {
@@ -327,11 +357,18 @@ internal static class SimulationContributionApi
             if (authorization.Error is not null) return authorization.Error;
             try
             {
-                return Results.Ok(await governance.WithdrawOwnedAsync(
+                var release = await governance.WithdrawOwnedAsync(
                     submissionId,
                     options.ContributorPseudonym,
                     DateTimeOffset.UtcNow,
-                    cancellationToken).ConfigureAwait(false));
+                    cancellationToken).ConfigureAwait(false);
+                var item = await governance.GetReviewItemAsync(submissionId, cancellationToken)
+                    .ConfigureAwait(false);
+                return Results.Ok(new ContributionOwnerWithdrawal(
+                    item.SubmissionId,
+                    item.CandidateSha256,
+                    item.State,
+                    release));
             }
             catch (ContributionPolicyException exception)
             {

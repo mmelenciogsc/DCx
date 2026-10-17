@@ -165,6 +165,9 @@ public sealed class ContributionApiE2eTests : IDisposable
                 Assert.Equal(
                     new ContributionSubmissionResult(valid.SubmissionId, ContributionState.Quarantined),
                     accepted);
+                var ownerStatus = await submissionClient.GetStatusAsync(valid, contributorToken);
+                Assert.Equal(ContributionState.Quarantined, ownerStatus.State);
+                Assert.Equal(ContributionCodec.CandidateSha256(valid.Candidate), ownerStatus.CandidateSha256);
             }
             using (var duplicate = await SendIntakeAsync(client, intakeUri, valid, contributorToken))
             {
@@ -174,13 +177,6 @@ public sealed class ContributionApiE2eTests : IDisposable
             var pending = await GetJsonAsync<ContributionReviewItem[]>(
                 client, new Uri(endpoint, "api/contributions/pending?limit=10"), reviewerToken);
             Assert.Equal(valid.SubmissionId, Assert.Single(pending).SubmissionId);
-            var status = await GetJsonAsync<ContributionReviewItem>(
-                client,
-                new Uri(endpoint, $"api/contributions/{Uri.EscapeDataString(valid.SubmissionId)}"),
-                contributorToken);
-            Assert.Equal(ContributionState.Quarantined, status.State);
-            Assert.Equal(privateBody, status.Candidate.Body);
-
             var approveUri = new Uri(
                 endpoint,
                 $"api/contributions/{Uri.EscapeDataString(valid.SubmissionId)}/approve");
@@ -195,6 +191,12 @@ public sealed class ContributionApiE2eTests : IDisposable
             {
                 Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
                 approvedRelease = (await approved.Content.ReadFromJsonAsync<GlobalReleaseDescriptor>())!;
+            }
+            using (var submissionClient = new ContributionSubmissionClient(endpoint, TimeSpan.FromSeconds(5)))
+            {
+                var approvedStatus = await submissionClient.GetStatusAsync(valid, contributorToken);
+                Assert.Equal(ContributionState.Approved, approvedStatus.State);
+                Assert.Equal(approvedRelease.Sequence, approvedStatus.ReleaseSequence);
             }
             using (var replayedApproval = await SendAuthorizedAsync(
                        client, HttpMethod.Post, approveUri, reviewerToken))
@@ -267,10 +269,15 @@ public sealed class ContributionApiE2eTests : IDisposable
             {
                 await AssertErrorAsync(forbiddenWithdrawal, HttpStatusCode.Forbidden, "role_forbidden");
             }
-            using (var withdrawn = await SendAuthorizedAsync(
-                       client, HttpMethod.Post, withdrawUri, contributorToken))
+            using (var submissionClient = new ContributionSubmissionClient(endpoint, TimeSpan.FromSeconds(5)))
             {
-                Assert.Equal(HttpStatusCode.OK, withdrawn.StatusCode);
+                var withdrawn = await submissionClient.WithdrawAsync(valid, contributorToken);
+                Assert.Equal(ContributionState.Withdrawn, withdrawn.State);
+                Assert.Equal(valid.SubmissionId, withdrawn.SubmissionId);
+                Assert.Equal(2, withdrawn.Release.Sequence);
+                var withdrawnStatus = await submissionClient.GetStatusAsync(valid, contributorToken);
+                Assert.Equal(ContributionState.Withdrawn, withdrawnStatus.State);
+                Assert.Equal(withdrawn.Release.Sequence, withdrawnStatus.ReleaseSequence);
             }
             await replica.SynchronizeAsync(transport);
             Assert.True(Assert.Single(await replica.SearchAsync("authenticated loopback", null)).Deprecated);

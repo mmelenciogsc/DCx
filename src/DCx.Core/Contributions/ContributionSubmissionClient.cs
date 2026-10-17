@@ -3,10 +3,25 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DCx.Core.GlobalKnowledge;
 
 namespace DCx.Core.Contributions;
 
 public sealed record ContributionSubmissionResult(string SubmissionId, ContributionState State);
+
+public sealed record ContributionSimulationStatus(
+    string SubmissionId,
+    string CandidateSha256,
+    ContributionState State,
+    DateTimeOffset CreatedUtc,
+    DateTimeOffset? ReviewedUtc,
+    long? ReleaseSequence);
+
+public sealed record ContributionWithdrawalResult(
+    string SubmissionId,
+    string CandidateSha256,
+    ContributionState State,
+    GlobalReleaseDescriptor Release);
 
 public sealed class ContributionSubmissionException(string code) : Exception(code)
 {
@@ -107,39 +122,159 @@ public sealed class ContributionSubmissionClient : IDisposable
                 .ConfigureAwait(false);
             EnsureResponseOrigin(response);
             var body = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode != HttpStatusCode.Accepted)
+            try
+            {
+                if (response.StatusCode != HttpStatusCode.Accepted)
+                {
+                    throw new ContributionSubmissionException(ReadErrorCode(body));
+                }
+
+                EnsureJsonResponse(response);
+
+                AcceptedResponse? accepted;
+                try
+                {
+                    accepted = JsonSerializer.Deserialize<AcceptedResponse>(body, JsonOptions);
+                }
+                catch (JsonException)
+                {
+                    throw new ContributionSubmissionException("submission_response_invalid");
+                }
+
+                if (accepted is null || accepted.SubmissionId != contribution.SubmissionId ||
+                    accepted.State != ContributionState.Quarantined ||
+                    response.Headers.Location is null ||
+                    !LocationMatches(response.Headers.Location, contribution.SubmissionId))
+                {
+                    throw new ContributionSubmissionException("submission_response_invalid");
+                }
+
+                return new ContributionSubmissionResult(accepted.SubmissionId, accepted.State);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(body);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(envelope);
+        }
+    }
+
+    public async Task<ContributionSimulationStatus> GetStatusAsync(
+        PreparedContribution contribution,
+        string contributorToken,
+        CancellationToken cancellationToken = default)
+    {
+        var expectedCandidateSha256 = ValidatePreparedContribution(contribution);
+        ValidateToken(contributorToken);
+        using var request = CreateAuthorizedRequest(
+            HttpMethod.Get,
+            $"api/contributions/{Uri.EscapeDataString(contribution.SubmissionId)}",
+            contributorToken);
+        using var response = await httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken)
+            .ConfigureAwait(false);
+        EnsureResponseOrigin(response);
+        var body = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (response.StatusCode != HttpStatusCode.OK)
             {
                 throw new ContributionSubmissionException(ReadErrorCode(body));
             }
 
-            if (response.Content.Headers.ContentType?.MediaType is not "application/json")
-            {
-                throw new ContributionSubmissionException("submission_response_invalid");
-            }
-
-            AcceptedResponse? accepted;
+            EnsureJsonResponse(response);
+            OwnerStatusResponse? status;
             try
             {
-                accepted = JsonSerializer.Deserialize<AcceptedResponse>(body, JsonOptions);
+                status = JsonSerializer.Deserialize<OwnerStatusResponse>(body, JsonOptions);
             }
             catch (JsonException)
             {
                 throw new ContributionSubmissionException("submission_response_invalid");
             }
 
-            if (accepted is null || accepted.SubmissionId != contribution.SubmissionId ||
-                accepted.State != ContributionState.Quarantined ||
-                response.Headers.Location is null ||
-                !LocationMatches(response.Headers.Location, contribution.SubmissionId))
+            if (status is null ||
+                !string.Equals(status.SubmissionId, contribution.SubmissionId, StringComparison.Ordinal) ||
+                !string.Equals(status.CandidateSha256, expectedCandidateSha256, StringComparison.Ordinal) ||
+                !StatusFieldsAreValid(status.State, status.CreatedUtc, status.ReviewedUtc, status.ReleaseSequence))
             {
                 throw new ContributionSubmissionException("submission_response_invalid");
             }
 
-            return new ContributionSubmissionResult(accepted.SubmissionId, accepted.State);
+            return new ContributionSimulationStatus(
+                status.SubmissionId,
+                status.CandidateSha256,
+                status.State,
+                status.CreatedUtc,
+                status.ReviewedUtc,
+                status.ReleaseSequence);
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(envelope);
+            CryptographicOperations.ZeroMemory(body);
+        }
+    }
+
+    public async Task<ContributionWithdrawalResult> WithdrawAsync(
+        PreparedContribution contribution,
+        string contributorToken,
+        CancellationToken cancellationToken = default)
+    {
+        var expectedCandidateSha256 = ValidatePreparedContribution(contribution);
+        ValidateToken(contributorToken);
+        using var request = CreateAuthorizedRequest(
+            HttpMethod.Post,
+            $"api/contributions/{Uri.EscapeDataString(contribution.SubmissionId)}/withdraw",
+            contributorToken);
+        using var response = await httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken)
+            .ConfigureAwait(false);
+        EnsureResponseOrigin(response);
+        var body = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                throw new ContributionSubmissionException(ReadErrorCode(body));
+            }
+
+            EnsureJsonResponse(response);
+            OwnerWithdrawalResponse? withdrawal;
+            try
+            {
+                withdrawal = JsonSerializer.Deserialize<OwnerWithdrawalResponse>(body, JsonOptions);
+            }
+            catch (JsonException)
+            {
+                throw new ContributionSubmissionException("submission_response_invalid");
+            }
+
+            if (withdrawal is null ||
+                !string.Equals(withdrawal.SubmissionId, contribution.SubmissionId, StringComparison.Ordinal) ||
+                !string.Equals(withdrawal.CandidateSha256, expectedCandidateSha256, StringComparison.Ordinal) ||
+                withdrawal.State != ContributionState.Withdrawn ||
+                withdrawal.Release is null || withdrawal.Release.Sequence <= 0 ||
+                withdrawal.Release.SizeBytes <= 0 || !IsSha256(withdrawal.Release.Sha256))
+            {
+                throw new ContributionSubmissionException("submission_response_invalid");
+            }
+
+            return new ContributionWithdrawalResult(
+                withdrawal.SubmissionId,
+                withdrawal.CandidateSha256,
+                withdrawal.State,
+                withdrawal.Release);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(body);
         }
     }
 
@@ -155,6 +290,69 @@ public sealed class ContributionSubmissionClient : IDisposable
             throw new ContributionSubmissionException("submission_response_origin_invalid");
         }
     }
+
+    private static HttpRequestMessage CreateAuthorizedRequest(
+        HttpMethod method,
+        string requestUri,
+        string contributorToken)
+    {
+        var request = new HttpRequestMessage(method, requestUri);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", contributorToken);
+        return request;
+    }
+
+    private static void EnsureJsonResponse(HttpResponseMessage response)
+    {
+        if (response.Content.Headers.ContentType?.MediaType is not "application/json")
+        {
+            throw new ContributionSubmissionException("submission_response_invalid");
+        }
+    }
+
+    private static string ValidatePreparedContribution(PreparedContribution contribution)
+    {
+        ArgumentNullException.ThrowIfNull(contribution);
+        if (string.IsNullOrWhiteSpace(contribution.SubmissionId) ||
+            contribution.State != ContributionState.Quarantined)
+        {
+            throw new ContributionSubmissionException("submission_envelope_invalid");
+        }
+
+        try
+        {
+            return ContributionCodec.CandidateSha256(contribution.Candidate);
+        }
+        catch
+        {
+            throw new ContributionSubmissionException("submission_envelope_invalid");
+        }
+    }
+
+    private static bool StatusFieldsAreValid(
+        ContributionState state,
+        DateTimeOffset createdUtc,
+        DateTimeOffset? reviewedUtc,
+        long? releaseSequence)
+    {
+        if (!Enum.IsDefined(state) || createdUtc.Offset != TimeSpan.Zero ||
+            reviewedUtc is not null &&
+            (reviewedUtc.Value.Offset != TimeSpan.Zero || reviewedUtc.Value < createdUtc))
+        {
+            return false;
+        }
+
+        return state switch
+        {
+            ContributionState.Quarantined => reviewedUtc is null && releaseSequence is null,
+            ContributionState.Approved or ContributionState.Withdrawn =>
+                reviewedUtc is not null && releaseSequence is > 0,
+            ContributionState.Rejected => reviewedUtc is not null && releaseSequence is null,
+            _ => false,
+        };
+    }
+
+    private static bool IsSha256(string value) =>
+        value is { Length: 64 } && value.All(char.IsAsciiHexDigit);
 
     private bool LocationMatches(Uri location, string submissionId)
     {
@@ -179,18 +377,29 @@ public sealed class ContributionSubmissionClient : IDisposable
         await using var input = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var output = new MemoryStream();
         var buffer = new byte[4096];
-        int read;
-        while ((read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) != 0)
+        try
         {
-            if (output.Length + read > MaximumResponseBytes)
+            int read;
+            while ((read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) != 0)
             {
-                throw new ContributionSubmissionException("submission_response_invalid");
+                if (output.Length + read > MaximumResponseBytes)
+                {
+                    throw new ContributionSubmissionException("submission_response_invalid");
+                }
+
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
             }
 
-            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            return output.ToArray();
         }
-
-        return output.ToArray();
+        finally
+        {
+            if (output.TryGetBuffer(out var written))
+            {
+                CryptographicOperations.ZeroMemory(written.AsSpan());
+            }
+            CryptographicOperations.ZeroMemory(buffer);
+        }
     }
 
     private static string ReadErrorCode(ReadOnlySpan<byte> body)
@@ -219,5 +428,17 @@ public sealed class ContributionSubmissionClient : IDisposable
     }
 
     private sealed record AcceptedResponse(string SubmissionId, ContributionState State);
+    private sealed record OwnerStatusResponse(
+        string SubmissionId,
+        string CandidateSha256,
+        ContributionState State,
+        DateTimeOffset CreatedUtc,
+        DateTimeOffset? ReviewedUtc,
+        long? ReleaseSequence);
+    private sealed record OwnerWithdrawalResponse(
+        string SubmissionId,
+        string CandidateSha256,
+        ContributionState State,
+        GlobalReleaseDescriptor Release);
     private sealed record ErrorResponse(string Code);
 }

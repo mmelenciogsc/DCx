@@ -122,7 +122,7 @@
             <GroupBox Margin="0,18,0,0" Header="Optional local simulation submission">
                 <StackPanel Margin="12,8">
                     <TextBlock TextWrapping="Wrap"
-                               Text="This test-only action sends the exact prepared item to a loopback DCx simulation API. It cannot contact a remote host. The token is used once and is not saved. Server acceptance means quarantine only, never publication." />
+                               Text="This test-only section can send the exact prepared item, query minimized lifecycle status, or withdraw an approved item from a loopback DCx simulation API. Every network action has a separate approval. It cannot contact a remote host. The token is used for one action and is not saved. Server acceptance means quarantine only, never publication." />
                     <Label Margin="0,10,0,0"
                            Target="{Binding ElementName=SimulationEndpointBox}"
                            Content="Loopback simulation origin" Padding="0" />
@@ -141,7 +141,7 @@
                                  Padding="5"
                                  AutomationProperties.AutomationId="ContributionSimulationTokenBox"
                                  AutomationProperties.Name="One-time local simulation contributor token"
-                                 AutomationProperties.HelpText="This token is not saved or logged and is cleared after a submission attempt."
+                                 AutomationProperties.HelpText="This token is not saved or logged and is cleared after any simulation action attempt."
                                  PasswordChanged="OnSubmissionSettingsChanged" />
                     <CheckBox x:Name="SubmissionApprovalBox"
                               Margin="0,6,0,10"
@@ -153,28 +153,64 @@
                               AutomationProperties.HelpText="This approval is separate from local preparation and resets when the item, endpoint, or token changes."
                               Checked="OnSubmissionApprovalChanged"
                               Unchecked="OnSubmissionApprovalChanged" />
-                    <WrapPanel>
-                        <Button x:Name="SubmitSimulationButton"
-                                MinWidth="210"
-                                Margin="0,0,10,0"
-                                Content="Send to local _simulation"
-                                IsEnabled="False"
-                                AutomationProperties.AutomationId="SubmitContributionSimulationButton"
-                                AutomationProperties.Name="Send exact prepared item to local contribution simulation"
-                                Click="OnSubmitSimulationClick" />
-                        <Button x:Name="CancelSubmissionButton"
-                                MinWidth="130"
-                                Content="_Cancel send"
-                                IsEnabled="False"
-                                AutomationProperties.AutomationId="CancelContributionSubmissionButton"
-                                AutomationProperties.Name="Cancel local contribution simulation submission"
-                                Click="OnCancelSubmissionClick" />
-                    </WrapPanel>
+                    <Button x:Name="SubmitSimulationButton"
+                            MinWidth="210"
+                            HorizontalAlignment="Left"
+                            Content="Send to local _simulation"
+                            IsEnabled="False"
+                            AutomationProperties.AutomationId="SubmitContributionSimulationButton"
+                            AutomationProperties.Name="Send exact prepared item to local contribution simulation"
+                            Click="OnSubmitSimulationClick" />
+                    <CheckBox x:Name="StatusApprovalBox"
+                              Margin="0,14,0,10"
+                              IsChecked="False"
+                              IsEnabled="False"
+                              Content="I approve querying this exact item's status from this loopback simulation now"
+                              AutomationProperties.AutomationId="ContributionStatusApprovalBox"
+                              AutomationProperties.Name="Approve querying this exact prepared contribution from the loopback simulation now, initially unchecked"
+                              AutomationProperties.HelpText="The response contains identifiers and bounded lifecycle metadata only, not the contribution body. Approval resets after the request."
+                              Checked="OnSubmissionApprovalChanged"
+                              Unchecked="OnSubmissionApprovalChanged" />
+                    <Button x:Name="QuerySimulationStatusButton"
+                            MinWidth="210"
+                            HorizontalAlignment="Left"
+                            Content="_Query simulation status"
+                            IsEnabled="False"
+                            AutomationProperties.AutomationId="QueryContributionSimulationStatusButton"
+                            AutomationProperties.Name="Query exact prepared item status from local contribution simulation"
+                            Click="OnQuerySimulationStatusClick" />
+                    <CheckBox x:Name="WithdrawalApprovalBox"
+                              Margin="0,14,0,10"
+                              IsChecked="False"
+                              IsEnabled="False"
+                              Content="I approve withdrawing this approved item and creating a deprecation in this local simulation now"
+                              AutomationProperties.AutomationId="ContributionWithdrawalApprovalBox"
+                              AutomationProperties.Name="Approve withdrawing this approved contribution from the loopback simulation now, initially unchecked"
+                              AutomationProperties.HelpText="Withdrawal is enabled only after a bound status query reports Approved. It affects only the local simulation used here."
+                              Checked="OnSubmissionApprovalChanged"
+                              Unchecked="OnSubmissionApprovalChanged" />
+                    <Button x:Name="WithdrawSimulationButton"
+                            MinWidth="240"
+                            HorizontalAlignment="Left"
+                            Content="_Withdraw from simulation"
+                            IsEnabled="False"
+                            AutomationProperties.AutomationId="WithdrawContributionSimulationButton"
+                            AutomationProperties.Name="Withdraw exact approved item from local contribution simulation"
+                            Click="OnWithdrawSimulationClick" />
+                    <Button x:Name="CancelSubmissionButton"
+                            MinWidth="150"
+                            Margin="0,14,0,0"
+                            HorizontalAlignment="Left"
+                            Content="_Cancel request"
+                            IsEnabled="False"
+                            AutomationProperties.AutomationId="CancelContributionSubmissionButton"
+                            AutomationProperties.Name="Cancel current local contribution simulation request"
+                            Click="OnCancelSubmissionClick" />
                 </StackPanel>
             </GroupBox>
             <TextBlock x:Name="ContributionStatusText"
                        Margin="0,12,0,0"
-                       Text="Preparation is off. No network request occurs without a separate explicit loopback send approval."
+                       Text="Preparation is off. No network request occurs without a separate explicit approval for that loopback action."
                        TextWrapping="Wrap"
                        AutomationProperties.AutomationId="ContributionStatusText"
                        AutomationProperties.LiveSetting="Assertive" />

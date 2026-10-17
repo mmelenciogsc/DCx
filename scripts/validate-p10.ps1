@@ -179,20 +179,28 @@ try {
         $prepare = Find-ById $window "PrepareContributionButton"
         $submissionApproval = Find-ById $window "ContributionSubmissionApprovalBox"
         $submitSimulation = Find-ById $window "SubmitContributionSimulationButton"
+        $statusApproval = Find-ById $window "ContributionStatusApprovalBox"
+        $queryStatus = Find-ById $window "QueryContributionSimulationStatusButton"
+        $withdrawalApproval = Find-ById $window "ContributionWithdrawalApprovalBox"
+        $withdrawSimulation = Find-ById $window "WithdrawContributionSimulationButton"
         $cancelSubmission = Find-ById $window "CancelContributionSubmissionButton"
         $submissionToken = Find-ById $window "ContributionSimulationTokenBox"
+        $endpointInput = Find-ById $window "ContributionSimulationEndpointBox"
         $status = Find-ById $window "ContributionStatusText"
-        foreach ($checkbox in @($optIn, $itemApproval, $rights, $license, $sensitive, $submissionApproval)) {
+        foreach ($checkbox in @(
+                $optIn, $itemApproval, $rights, $license, $sensitive,
+                $submissionApproval, $statusApproval, $withdrawalApproval)) {
             $toggle = $checkbox.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
             if ($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
                 throw "A contribution consent or approval checkbox was not initially unchecked."
             }
         }
         if ($prepare.Current.IsEnabled) { throw "Preparation was enabled without consent and item approval." }
-        if ($submitSimulation.Current.IsEnabled -or $cancelSubmission.Current.IsEnabled) {
-            throw "A contribution send action was enabled without a prepared item and separate approval."
+        if ($submitSimulation.Current.IsEnabled -or $queryStatus.Current.IsEnabled -or
+            $withdrawSimulation.Current.IsEnabled -or $cancelSubmission.Current.IsEnabled) {
+            throw "A contribution network action was enabled without a prepared item and separate approval."
         }
-        if ($status.Current.Name -notmatch "No network request occurs without a separate explicit loopback send approval") {
+        if ($status.Current.Name -notmatch "No network request occurs without a separate explicit approval for that loopback action") {
             throw "The default no-network state was not announced accessibly."
         }
 
@@ -204,8 +212,8 @@ try {
             [System.Windows.Automation.ValuePattern]::Pattern).SetValue("A reviewed deterministic local simulation contribution.")
         (Find-ById $window "ContributionPseudonymBox").GetCurrentPattern(
             [System.Windows.Automation.ValuePattern]::Pattern).SetValue($contributorPseudonym)
-        (Find-ById $window "ContributionSimulationEndpointBox").GetCurrentPattern(
-            [System.Windows.Automation.ValuePattern]::Pattern).SetValue($endpoint)
+        $endpointValue = $endpointInput.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        $endpointValue.SetValue($endpoint)
         foreach ($checkbox in @($optIn, $rights, $license, $sensitive)) {
             $checkbox.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
         }
@@ -219,8 +227,10 @@ try {
         $null = Wait-For {
             $status.Current.Name -like "Prepared locally as Quarantined.*separate approval.*"
         } "The exact reviewed item was not prepared locally."
-        if (-not $submissionApproval.Current.IsEnabled -or $submitSimulation.Current.IsEnabled) {
-            throw "Loopback send approval was not separate and default-off after preparation."
+        if (-not $submissionApproval.Current.IsEnabled -or -not $statusApproval.Current.IsEnabled -or
+            $withdrawalApproval.Current.IsEnabled -or $submitSimulation.Current.IsEnabled -or
+            $queryStatus.Current.IsEnabled -or $withdrawSimulation.Current.IsEnabled) {
+            throw "Loopback lifecycle approvals were not separate, state-bound and default-off after preparation."
         }
         $submissionTokenValue = $submissionToken.GetCurrentPattern(
             [System.Windows.Automation.ValuePattern]::Pattern)
@@ -231,6 +241,12 @@ try {
         $null = Wait-For {
             $status.Current.Name -like "The local simulation accepted submission:* into Quarantined.*"
         } "The native client did not submit the exact prepared item to loopback quarantine."
+        $submissionIdMatch = [regex]::Match(
+            $status.Current.Name,
+            'accepted (submission:[0-9a-f]{32}) into Quarantined',
+            [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+        if (-not $submissionIdMatch.Success) { throw "The accepted submission identity was not exposed safely." }
+        $submissionId = $submissionIdMatch.Groups[1].Value
         if ($submissionApproval.GetCurrentPattern(
                 [System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne
             [System.Windows.Automation.ToggleState]::Off) {
@@ -239,14 +255,77 @@ try {
         if (-not [string]::IsNullOrEmpty($submissionTokenValue.Current.Value)) {
             throw "The one-time loopback contributor token was not cleared from the password control."
         }
+        if ($submitSimulation.Current.IsEnabled -or -not $statusApproval.Current.IsEnabled -or
+            $withdrawalApproval.Current.IsEnabled) {
+            throw "Accepted intake did not require status reconciliation before retry or withdrawal."
+        }
+
+        $endpointValue.SetValue("http://127.0.0.1:6553/")
+        $submissionTokenValue.SetValue($contributorToken)
+        $statusApproval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+        $null = Wait-For { $queryStatus.Current.IsEnabled } `
+            "The mismatched-origin reconciliation fixture did not reach its local policy gate."
+        $queryStatus.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        $null = Wait-For {
+            $status.Current.Name -eq "Request blocked. Restore the original loopback simulation origin and reconcile this exact item first."
+        } "The prepared item was not bound to its original loopback origin."
+        if (-not [string]::IsNullOrEmpty($submissionTokenValue.Current.Value)) {
+            throw "The rejected cross-origin action did not clear its one-action credential."
+        }
+        $endpointValue.SetValue($endpoint)
+
+        $reviewerHeaders = @{ Authorization = "Bearer $reviewerToken" }
+        $approveUri = [Uri]::new(
+            [Uri]$endpoint,
+            "api/contributions/$([Uri]::EscapeDataString($submissionId))/approve")
+        $approvedRelease = Invoke-RestMethod -Method Post -Uri $approveUri -Headers $reviewerHeaders `
+            -TimeoutSec 10 -NoProxy -MaximumRedirection 0
+        if ([long]$approvedRelease.sequence -ne 1) {
+            throw "The local reviewer fixture did not approve the exact contribution into release 1."
+        }
+
+        $submissionTokenValue.SetValue($contributorToken)
+        $statusApproval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+        $null = Wait-For { $queryStatus.Current.IsEnabled } "The separately approved status query did not enable."
+        $queryStatus.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        $null = Wait-For {
+            $status.Current.Name -eq "The exact item is Approved at release 1. Withdrawal requires a separate approval. No contribution body was returned."
+        } "The native client did not reconcile the exact approved status without returning its body."
+        if ($statusApproval.GetCurrentPattern(
+                [System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne
+            [System.Windows.Automation.ToggleState]::Off -or
+            -not [string]::IsNullOrEmpty($submissionTokenValue.Current.Value) -or
+            -not $withdrawalApproval.Current.IsEnabled -or $withdrawSimulation.Current.IsEnabled) {
+            throw "Status reconciliation did not clear credentials or preserve a separate withdrawal approval."
+        }
+
+        $submissionTokenValue.SetValue($contributorToken)
+        $withdrawalApproval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+        $null = Wait-For { $withdrawSimulation.Current.IsEnabled } `
+            "The separately approved state-bound withdrawal did not enable."
+        $withdrawSimulation.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        $null = Wait-For {
+            $status.Current.Name -eq "The exact item is Withdrawn. Local simulation deprecation release 2 was created. No remote publication occurred."
+        } "The native client did not withdraw and deprecate the exact approved item."
+        if ($withdrawalApproval.GetCurrentPattern(
+                [System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne
+            [System.Windows.Automation.ToggleState]::Off -or
+            -not [string]::IsNullOrEmpty($submissionTokenValue.Current.Value) -or
+            $withdrawSimulation.Current.IsEnabled) {
+            throw "Withdrawal did not clear its credential/approval or leave the action disabled."
+        }
 
         "Contribution global opt-in initially unchecked=True"
         "Per-item approval initially unchecked=True"
         "Rights license and sensitive-data attestations initially unchecked=True"
         "Prepare action disabled without all gates=True"
         "Separate loopback send approval initially unchecked=True"
-        "No-network-without-send-approval status exposed through UIA=True"
+        "Separate loopback status and withdrawal approvals initially unchecked=True"
+        "No-network-without-action-approval status exposed through UIA=True"
         "Native prepared-item loopback quarantine submission=PASS"
+        "Prepared-item origin binding and cross-origin denial=PASS"
+        "Native minimized owner-status reconciliation=PASS"
+        "Native separately approved owner withdrawal and deprecation=PASS"
         "One-time contributor token not persisted and approval reset=PASS"
         "Hostile CCB namespace sandbox=PASS"
         "CCB host/system filesystem and network denial=PASS"
