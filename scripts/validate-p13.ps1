@@ -9,6 +9,7 @@ $tests = Join-Path $repoRoot "tests\DCx.Core.Tests\DCx.Core.Tests.csproj"
 $runRoot = Join-Path $repoRoot "artifacts\test-results\p13-$([Guid]::NewGuid().ToString('N'))"
 $publishOne = Join-Path $runRoot "publish-a"
 $publishTwo = Join-Path $runRoot "publish-b"
+$reliabilityTrx = Join-Path $runRoot "p13-reliability.trx"
 $previousDataRoot = $env:DCX_DATA_ROOT
 $previousOfflineStartup = $env:DCX_OFFLINE_STARTUP
 $process = $null
@@ -162,8 +163,21 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Locked restore failed with exit code $LASTEXITCODE." }
     dotnet build $solution --configuration Release --no-restore
     if ($LASTEXITCODE -ne 0) { throw "Release build failed with exit code $LASTEXITCODE." }
-    dotnet test $tests --configuration Release --no-build --no-restore --filter "FullyQualifiedName~Reliability"
+    dotnet test $tests --configuration Release --no-build --no-restore --filter "FullyQualifiedName~Reliability" `
+        --logger "trx;LogFileName=p13-reliability.trx" --results-directory $runRoot
     if ($LASTEXITCODE -ne 0) { throw "P13 reliability tests failed with exit code $LASTEXITCODE." }
+    [xml]$reliabilityReport = Get-Content -LiteralPath $reliabilityTrx -Raw
+    $reliabilityCounters = $reliabilityReport.TestRun.ResultSummary.Counters
+    $reliabilityTestsPassed = [int]$reliabilityCounters.passed
+    if ($reliabilityTestsPassed -lt 1 -or
+        [int]$reliabilityCounters.total -ne $reliabilityTestsPassed -or
+        [int]$reliabilityCounters.executed -ne $reliabilityTestsPassed -or
+        [int]$reliabilityCounters.failed -ne 0 -or
+        [int]$reliabilityCounters.error -ne 0 -or
+        [int]$reliabilityCounters.timeout -ne 0 -or
+        [int]$reliabilityCounters.aborted -ne 0) {
+        throw "P13 TRX counters did not prove that every selected reliability test passed."
+    }
 
     dotnet publish $desktopProject --configuration Release --no-build --no-restore --self-contained false --output $publishOne
     if ($LASTEXITCODE -ne 0) { throw "First framework-dependent publish failed with exit code $LASTEXITCODE." }
@@ -386,7 +400,7 @@ try {
         captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
         release_build_warnings = 0
         release_build_errors = 0
-        reliability_tests_passed = 18
+        reliability_tests_passed = $reliabilityTestsPassed
         publish_file_count = $manifestOne.Count
         publish_bytes = [long](($manifestOne | Measure-Object length -Sum).Sum)
         reproducible_publish = $true
@@ -416,7 +430,7 @@ try {
     }
     $result | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runRoot "validation.json") -Encoding utf8
 
-    "P13 reliability tests=PASS"
+    "P13 reliability tests=PASS ($reliabilityTestsPassed/$reliabilityTestsPassed)"
     "Reproducible framework-dependent publish files=$($manifestOne.Count)"
     "Reproducible portable staging ZIP SHA-256=$zipHashOne"
     "CycloneDX components=$($components.Count)"

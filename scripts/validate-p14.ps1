@@ -9,6 +9,7 @@ $reporter = Join-Path $repoRoot "tests\DCx.ReadinessReport\bin\Release\net10.0\D
 $desktop = Join-Path $repoRoot "src\DCx.Desktop\bin\Release\net10.0-windows10.0.19041.0\DCx.exe"
 $runRoot = Join-Path $repoRoot "artifacts\test-results\p14-$([Guid]::NewGuid().ToString('N'))"
 $report = Join-Path $runRoot "go-no-go.json"
+$readinessTrx = Join-Path $runRoot "p14-readiness.trx"
 $previousDataRoot = $env:DCX_DATA_ROOT
 $process = $null
 
@@ -53,8 +54,22 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Locked restore failed with exit code $LASTEXITCODE." }
     dotnet build $solution --configuration Release --no-restore
     if ($LASTEXITCODE -ne 0) { throw "Release build failed with exit code $LASTEXITCODE." }
-    dotnet test $tests --configuration Release --no-build --no-restore --filter "FullyQualifiedName~Release"
+    dotnet test $tests --configuration Release --no-build --no-restore `
+        --filter "FullyQualifiedName~DCx.Core.Tests.Release." `
+        --logger "trx;LogFileName=p14-readiness.trx" --results-directory $runRoot
     if ($LASTEXITCODE -ne 0) { throw "P14 readiness tests failed with exit code $LASTEXITCODE." }
+    [xml]$readinessReport = Get-Content -LiteralPath $readinessTrx -Raw
+    $readinessCounters = $readinessReport.TestRun.ResultSummary.Counters
+    $readinessTestsPassed = [int]$readinessCounters.passed
+    if ($readinessTestsPassed -lt 1 -or
+        [int]$readinessCounters.total -ne $readinessTestsPassed -or
+        [int]$readinessCounters.executed -ne $readinessTestsPassed -or
+        [int]$readinessCounters.failed -ne 0 -or
+        [int]$readinessCounters.error -ne 0 -or
+        [int]$readinessCounters.timeout -ne 0 -or
+        [int]$readinessCounters.aborted -ne 0) {
+        throw "P14 TRX counters did not prove that every selected readiness test passed."
+    }
 
     dotnet $reporter $report
     if ($LASTEXITCODE -ne 0) { throw "The readiness reporter failed with exit code $LASTEXITCODE." }
@@ -88,7 +103,7 @@ try {
         throw "The read-only readiness dashboard exposed a production activation action."
     }
 
-    "P14 readiness tests=PASS"
+    "P14 readiness tests=PASS ($readinessTestsPassed/$readinessTestsPassed)"
     "Critical and major issues triaged=$($assessment.critical_and_major_issues_triaged)/$($assessment.critical_and_major_issues)"
     "Blocking critical and major issues=$($assessment.blocking_critical_and_major_issues)"
     "Privacy-minimized pilot metrics=$($assessment.pilot_metrics.Count)"
