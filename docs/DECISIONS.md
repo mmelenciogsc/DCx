@@ -38,5 +38,6 @@
 | [0034](architecture/adr/0034-explicit-ffmpeg-file-registration.md) | Require exact executable/license/signature review before bounded FFmpeg media processing | Accepted for bounded local consumers; real approval blocked | 2026-10-17 |
 | [0035](architecture/adr/0035-fail-closed-paypal-sandbox-boundary.md) | Bind official PayPal sandbox contracts to durable, item-checked payout reconciliation | Accepted for uncredentialed contract validation; credentialed acceptance blocked | 2026-10-17 |
 | [0036](architecture/adr/0036-verified-paypal-subscription-bindings.md) | Map only officially verified PayPal events through durable plan, subscription and sale bindings | Accepted for uncredentialed handler-backed validation; credentialed acceptance blocked | 2026-10-17 |
+| [0037](architecture/adr/0037-idempotent-post-terminal-payout-returns.md) | Reconcile later payout returns through one-way item corrections and compensating journals | Accepted for uncredentialed sandbox reconciliation; provider acceptance blocked | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

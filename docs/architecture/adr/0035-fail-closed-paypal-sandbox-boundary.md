@@ -18,4 +18,4 @@ Bind each owner-approved item to an immutable recipient-snapshot ID and exact de
 - Handler-backed tests can validate the official contract shape and failure policy without credentials or financial side effects.
 - A crash after provider acceptance can reconcile by provider reference instead of duplicating a payout.
 - Provider response bodies and credentials are excluded from durable errors and logs; transient managed header strings cannot be securely erased.
-- Credentialed PayPal acceptance, subscription mapping, merchant/recipient eligibility, a production protected snapshot directory plus accessible approval UI, separately approved failed-item retry/remediation and post-terminal reversal reconciliation remain explicit P11 blockers.
+- ADRs 0036 and 0037 add verified subscription mapping and local post-terminal return/reversal reconciliation. Credentialed PayPal acceptance, merchant/recipient eligibility, a production protected snapshot directory plus accessible approval UI, separately approved failed-item retry/remediation and production reconciliation scheduling remain explicit P11 blockers.
