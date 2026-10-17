@@ -1,6 +1,8 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Globalization;
 using DCx.Core.Contributions;
 using DCx.Core.GlobalKnowledge;
 using DCx.Core.Knowledge;
@@ -16,9 +18,13 @@ public sealed record AuthoritativeUsageContext(
 
 public sealed class ContributionGovernanceService
 {
+    private const int MaximumRecoveryBatch = 100;
+    private const int MaximumPublicationChangeJsonBytes = 256 * 1024;
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = false,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         MaxDepth = 32,
     };
 
@@ -27,6 +33,7 @@ public sealed class ContributionGovernanceService
     private readonly string quarantineArtifactsRoot;
     private readonly GlobalRegistryRepository registry;
     private readonly ICcbSandboxExecutor? ccbSandboxExecutor;
+    private readonly IContributionPublicationFaultInjector? publicationFaultInjector;
     private readonly ContributionScanner scanner = new();
     private readonly CcbPackageValidator ccbPackageValidator = new();
     private readonly SemaphoreSlim mutationLock = new(1, 1);
@@ -34,10 +41,12 @@ public sealed class ContributionGovernanceService
     private ContributionGovernanceService(
         string root,
         GlobalRegistryRepository registry,
-        ICcbSandboxExecutor? ccbSandboxExecutor)
+        ICcbSandboxExecutor? ccbSandboxExecutor,
+        IContributionPublicationFaultInjector? publicationFaultInjector)
     {
         this.registry = registry;
         this.ccbSandboxExecutor = ccbSandboxExecutor;
+        this.publicationFaultInjector = publicationFaultInjector;
         quarantineRoot = Path.Combine(root, "quarantine");
         quarantineArtifactsRoot = Path.Combine(quarantineRoot, "artifacts", "sha256");
         Directory.CreateDirectory(quarantineArtifactsRoot);
@@ -55,7 +64,24 @@ public sealed class ContributionGovernanceService
         string root,
         GlobalRegistryRepository registry,
         ICcbSandboxExecutor? ccbSandboxExecutor = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await OpenCoreAsync(root, registry, ccbSandboxExecutor, null, cancellationToken).ConfigureAwait(false);
+
+    internal static async Task<ContributionGovernanceService> OpenForTestingAsync(
+        string root,
+        GlobalRegistryRepository registry,
+        ICcbSandboxExecutor? ccbSandboxExecutor,
+        IContributionPublicationFaultInjector publicationFaultInjector,
+        CancellationToken cancellationToken = default) =>
+        await OpenCoreAsync(
+            root, registry, ccbSandboxExecutor, publicationFaultInjector, cancellationToken).ConfigureAwait(false);
+
+    private static async Task<ContributionGovernanceService> OpenCoreAsync(
+        string root,
+        GlobalRegistryRepository registry,
+        ICcbSandboxExecutor? ccbSandboxExecutor,
+        IContributionPublicationFaultInjector? publicationFaultInjector,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(registry);
@@ -66,8 +92,10 @@ public sealed class ContributionGovernanceService
             throw new ContributionPolicyException("governance_root_link_denied");
         }
 
-        var service = new ContributionGovernanceService(canonical, registry, ccbSandboxExecutor);
+        var service = new ContributionGovernanceService(
+            canonical, registry, ccbSandboxExecutor, publicationFaultInjector);
         await service.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await service.RecoverPendingPublicationsAsync(cancellationToken).ConfigureAwait(false);
         return service;
     }
 
@@ -190,8 +218,7 @@ public sealed class ContributionGovernanceService
                 throw new ContributionPolicyException("submission_not_quarantined");
             }
 
-            var candidate = JsonSerializer.Deserialize<ContributionCandidate>(row.CandidateJson, JsonOptions)
-                ?? throw new ContributionPolicyException("submission_corrupt");
+            var candidate = DecodeCandidate(row);
             var scan = scanner.Scan(candidate);
             if (!scan.IsEligible)
             {
@@ -224,27 +251,26 @@ public sealed class ContributionGovernanceService
                 candidate.License,
                 candidate.Capabilities,
                 Artifact: artifact);
-            var release = await registry.PublishIdempotentAsync(
-                PublicationOperationId("approval", submissionId),
-                [new GlobalReleaseChange(GlobalReleaseChangeKind.Upsert, resource.ResourceId, resource.Version, resource)],
+            var change = new GlobalReleaseChange(
+                GlobalReleaseChangeKind.Upsert, resource.ResourceId, resource.Version, resource);
+            var intent = await StorePublicationIntentAsync(
+                connection,
+                submissionId,
+                PublicationIntentAction.Approval,
+                change,
+                reviewerId,
                 issuedUtc,
                 cancellationToken).ConfigureAwait(false);
-            var command = connection.CreateCommand();
-            command.CommandText = """
-                UPDATE contributions
-                SET state = $state, reviewer_id = $reviewer, release_sequence = $release, reviewed_utc = $reviewed
-                WHERE submission_id = $submission AND state = $quarantined;
-                """;
-            command.Parameters.AddWithValue("$state", (int)ContributionState.Approved);
-            command.Parameters.AddWithValue("$reviewer", reviewerId);
-            command.Parameters.AddWithValue("$release", release.Sequence);
-            command.Parameters.AddWithValue("$reviewed", issuedUtc.ToUniversalTime().ToString("O"));
-            command.Parameters.AddWithValue("$submission", submissionId);
-            command.Parameters.AddWithValue("$quarantined", (int)ContributionState.Quarantined);
-            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
-            {
-                throw new ContributionPolicyException("approval_state_conflict");
-            }
+            await NotifyCheckpointAsync(
+                ContributionPublicationCheckpoint.IntentStored, intent.OperationId, cancellationToken).ConfigureAwait(false);
+            var release = await registry.PublishIdempotentAsync(
+                intent.OperationId,
+                [intent.Change],
+                intent.RequestedUtc,
+                cancellationToken).ConfigureAwait(false);
+            await NotifyCheckpointAsync(
+                ContributionPublicationCheckpoint.RegistryCommitted, intent.OperationId, cancellationToken).ConfigureAwait(false);
+            await CompletePublicationIntentAsync(connection, intent, release, cancellationToken).ConfigureAwait(false);
 
             return release;
         }
@@ -270,21 +296,54 @@ public sealed class ContributionGovernanceService
                 throw new ContributionPolicyException("submission_not_approved");
             }
 
-            var candidate = JsonSerializer.Deserialize<ContributionCandidate>(row.CandidateJson, JsonOptions)
-                ?? throw new ContributionPolicyException("submission_corrupt");
-            var release = await registry.PublishIdempotentAsync(
-                PublicationOperationId("withdrawal", submissionId),
-                [new GlobalReleaseChange(GlobalReleaseChangeKind.Deprecate, candidate.ResourceId, candidate.Version)],
+            var candidate = DecodeCandidate(row);
+            var change = new GlobalReleaseChange(
+                GlobalReleaseChangeKind.Deprecate, candidate.ResourceId, candidate.Version);
+            var intent = await StorePublicationIntentAsync(
+                connection,
+                submissionId,
+                PublicationIntentAction.Withdrawal,
+                change,
+                reviewerId: null,
                 issuedUtc,
                 cancellationToken).ConfigureAwait(false);
-            var command = connection.CreateCommand();
-            command.CommandText = "UPDATE contributions SET state = $state, release_sequence = $release, reviewed_utc = $reviewed WHERE submission_id = $submission;";
-            command.Parameters.AddWithValue("$state", (int)ContributionState.Withdrawn);
-            command.Parameters.AddWithValue("$release", release.Sequence);
-            command.Parameters.AddWithValue("$reviewed", issuedUtc.ToUniversalTime().ToString("O"));
-            command.Parameters.AddWithValue("$submission", submissionId);
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await NotifyCheckpointAsync(
+                ContributionPublicationCheckpoint.IntentStored, intent.OperationId, cancellationToken).ConfigureAwait(false);
+            var release = await registry.PublishIdempotentAsync(
+                intent.OperationId,
+                [intent.Change],
+                intent.RequestedUtc,
+                cancellationToken).ConfigureAwait(false);
+            await NotifyCheckpointAsync(
+                ContributionPublicationCheckpoint.RegistryCommitted, intent.OperationId, cancellationToken).ConfigureAwait(false);
+            await CompletePublicationIntentAsync(connection, intent, release, cancellationToken).ConfigureAwait(false);
             return release;
+        }
+        finally
+        {
+            mutationLock.Release();
+        }
+    }
+
+    public async Task<int> RecoverPendingPublicationsAsync(CancellationToken cancellationToken = default)
+    {
+        await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var intents = await ReadPendingPublicationIntentsAsync(connection, cancellationToken).ConfigureAwait(false);
+            foreach (var intent in intents)
+            {
+                await ValidatePublicationIntentAsync(connection, intent, cancellationToken).ConfigureAwait(false);
+                var release = await registry.PublishIdempotentAsync(
+                    intent.OperationId,
+                    [intent.Change],
+                    intent.RequestedUtc,
+                    cancellationToken).ConfigureAwait(false);
+                await CompletePublicationIntentAsync(connection, intent, release, cancellationToken).ConfigureAwait(false);
+            }
+
+            return intents.Count;
         }
         finally
         {
@@ -399,6 +458,20 @@ public sealed class ContributionGovernanceService
                 reviewed_utc TEXT NOT NULL,
                 PRIMARY KEY(submission_id, test_name, evidence_sha256)
             );
+            CREATE TABLE IF NOT EXISTS publication_intents(
+                operation_id TEXT PRIMARY KEY,
+                submission_id TEXT NOT NULL,
+                action INTEGER NOT NULL,
+                request_sha256 TEXT NOT NULL,
+                change_json TEXT NOT NULL,
+                reviewer_id TEXT,
+                requested_utc TEXT NOT NULL,
+                completed INTEGER NOT NULL DEFAULT 0,
+                release_sequence INTEGER,
+                completed_utc TEXT,
+                UNIQUE(submission_id, action),
+                FOREIGN KEY(submission_id) REFERENCES contributions(submission_id)
+            );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -408,7 +481,7 @@ public sealed class ContributionGovernanceService
         var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         var command = connection.CreateCommand();
-        command.CommandText = "PRAGMA busy_timeout = 5000;";
+        command.CommandText = "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         return connection;
     }
@@ -618,6 +691,301 @@ public sealed class ContributionGovernanceService
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task<PublicationIntent> StorePublicationIntentAsync(
+        SqliteConnection connection,
+        string submissionId,
+        PublicationIntentAction action,
+        GlobalReleaseChange change,
+        string? reviewerId,
+        DateTimeOffset requestedUtc,
+        CancellationToken cancellationToken)
+    {
+        if (action == PublicationIntentAction.Approval &&
+            (string.IsNullOrWhiteSpace(reviewerId) || reviewerId.Length > 128) ||
+            action == PublicationIntentAction.Withdrawal && reviewerId is not null)
+        {
+            throw new ContributionPolicyException("publication_intent_actor_invalid");
+        }
+
+        var actionName = action == PublicationIntentAction.Approval ? "approval" : "withdrawal";
+        var operationId = PublicationOperationId(actionName, submissionId);
+        var requestSha256 = GlobalReleaseCodec.Sha256(
+            GlobalReleaseCodec.CreateCanonicalChangeSet([change]));
+        var changeJson = JsonSerializer.Serialize(change, JsonOptions);
+        if (Encoding.UTF8.GetByteCount(changeJson) > MaximumPublicationChangeJsonBytes)
+        {
+            throw new ContributionPolicyException("publication_intent_size_invalid");
+        }
+
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT OR IGNORE INTO publication_intents(
+                operation_id, submission_id, action, request_sha256, change_json,
+                reviewer_id, requested_utc, completed)
+            VALUES($operation, $submission, $action, $request, $change,
+                   $reviewer, $requested, 0);
+            """;
+        command.Parameters.AddWithValue("$operation", operationId);
+        command.Parameters.AddWithValue("$submission", submissionId);
+        command.Parameters.AddWithValue("$action", (int)action);
+        command.Parameters.AddWithValue("$request", requestSha256);
+        command.Parameters.AddWithValue("$change", changeJson);
+        command.Parameters.AddWithValue("$reviewer", (object?)reviewerId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$requested", requestedUtc.ToUniversalTime().ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+        var stored = await ReadPublicationIntentAsync(connection, operationId, cancellationToken).ConfigureAwait(false)
+            ?? throw new ContributionPolicyException("publication_intent_missing");
+        if (stored.Completed || stored.SubmissionId != submissionId || stored.Action != action ||
+            stored.RequestSha256 != requestSha256 || stored.ReviewerId != reviewerId)
+        {
+            throw new ContributionPolicyException("publication_intent_conflict");
+        }
+
+        await ValidatePublicationIntentAsync(connection, stored, cancellationToken).ConfigureAwait(false);
+        return stored;
+    }
+
+    private static async Task<PublicationIntent?> ReadPublicationIntentAsync(
+        SqliteConnection connection,
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT operation_id, submission_id, action, request_sha256, change_json,
+                   reviewer_id, requested_utc, completed, release_sequence
+            FROM publication_intents
+            WHERE operation_id = $operation;
+            """;
+        command.Parameters.AddWithValue("$operation", operationId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) return null;
+        return ParsePublicationIntent(reader);
+    }
+
+    private static async Task<IReadOnlyList<PublicationIntent>> ReadPendingPublicationIntentsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT operation_id, submission_id, action, request_sha256, change_json,
+                   reviewer_id, requested_utc, completed, release_sequence
+            FROM publication_intents
+            WHERE completed = 0
+            ORDER BY requested_utc, operation_id
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$limit", MaximumRecoveryBatch);
+        var intents = new List<PublicationIntent>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            intents.Add(ParsePublicationIntent(reader));
+        }
+
+        return intents;
+    }
+
+    private static PublicationIntent ParsePublicationIntent(SqliteDataReader reader)
+    {
+        var operationId = reader.GetString(0);
+        var submissionId = reader.GetString(1);
+        var actionValue = reader.GetInt32(2);
+        var requestSha256 = reader.GetString(3);
+        var changeJson = reader.GetString(4);
+        var reviewerId = reader.IsDBNull(5) ? null : reader.GetString(5);
+        var requestedText = reader.GetString(6);
+        var completedValue = reader.GetInt32(7);
+        long? releaseSequence = reader.IsDBNull(8) ? null : reader.GetInt64(8);
+        if (!Enum.IsDefined((PublicationIntentAction)actionValue) ||
+            requestSha256.Length != 64 || !requestSha256.All(char.IsAsciiHexDigit) ||
+            Encoding.UTF8.GetByteCount(changeJson) > MaximumPublicationChangeJsonBytes ||
+            !DateTimeOffset.TryParseExact(
+                requestedText,
+                "O",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var requestedUtc) ||
+            completedValue is not 0 and not 1 || completedValue == 0 && releaseSequence is not null ||
+            completedValue == 1 && releaseSequence is null)
+        {
+            throw new ContributionPolicyException("publication_intent_corrupt");
+        }
+
+        try
+        {
+            var change = JsonSerializer.Deserialize<GlobalReleaseChange>(changeJson, JsonOptions)
+                ?? throw new ContributionPolicyException("publication_intent_corrupt");
+            _ = GlobalReleaseCodec.CreateCanonicalChangeSet([change]);
+            return new PublicationIntent(
+                operationId,
+                submissionId,
+                (PublicationIntentAction)actionValue,
+                requestSha256.ToLowerInvariant(),
+                change,
+                reviewerId,
+                requestedUtc.ToUniversalTime(),
+                completedValue == 1,
+                releaseSequence);
+        }
+        catch (ContributionPolicyException)
+        {
+            throw;
+        }
+        catch (JsonException)
+        {
+            throw new ContributionPolicyException("publication_intent_corrupt");
+        }
+        catch (GlobalReplicaException)
+        {
+            throw new ContributionPolicyException("publication_intent_corrupt");
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or InvalidOperationException or NullReferenceException or OverflowException)
+        {
+            throw new ContributionPolicyException("publication_intent_corrupt");
+        }
+    }
+
+    private async Task ValidatePublicationIntentAsync(
+        SqliteConnection connection,
+        PublicationIntent intent,
+        CancellationToken cancellationToken)
+    {
+        var actionName = intent.Action == PublicationIntentAction.Approval ? "approval" : "withdrawal";
+        var expectedOperationId = PublicationOperationId(actionName, intent.SubmissionId);
+        var expectedRequestSha256 = GlobalReleaseCodec.Sha256(
+            GlobalReleaseCodec.CreateCanonicalChangeSet([intent.Change]));
+        if (intent.OperationId != expectedOperationId ||
+            !CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(intent.RequestSha256),
+                Convert.FromHexString(expectedRequestSha256)))
+        {
+            throw new ContributionPolicyException("publication_intent_binding_invalid");
+        }
+
+        var row = await ReadSubmissionAsync(connection, intent.SubmissionId, cancellationToken).ConfigureAwait(false)
+            ?? throw new ContributionPolicyException("publication_intent_submission_missing");
+        var candidate = DecodeCandidate(row);
+        if (intent.Action == PublicationIntentAction.Approval)
+        {
+            if (row.State != ContributionState.Quarantined ||
+                string.IsNullOrWhiteSpace(intent.ReviewerId) || intent.ReviewerId.Length > 128 ||
+                intent.Change.Kind != GlobalReleaseChangeKind.Upsert ||
+                intent.Change.Resource is not { } resource ||
+                resource.ResourceId != candidate.ResourceId || resource.Version != candidate.Version ||
+                resource.Kind != candidate.Kind || resource.Title != candidate.Title ||
+                resource.Summary != candidate.Body || resource.SourceUri != candidate.SourceUri ||
+                resource.License != candidate.License || resource.Deprecated || resource.Embedding is not null ||
+                !resource.Capabilities.SequenceEqual(candidate.Capabilities, StringComparer.Ordinal) ||
+                !ArtifactMatchesCandidate(resource.Artifact, candidate))
+            {
+                throw new ContributionPolicyException("publication_intent_candidate_mismatch");
+            }
+
+            if (candidate.Kind == KnowledgeResourceKind.Ccb)
+            {
+                var stagedArtifact = await ReadStagedArtifactAsync(
+                    candidate.ArtifactSha256!, cancellationToken).ConfigureAwait(false);
+                var verifiedReference = await registry.AddArtifactAsync(
+                    stagedArtifact, "application/vnd.dcx.ccb+zip", cancellationToken).ConfigureAwait(false);
+                if (resource.Artifact != verifiedReference)
+                {
+                    throw new ContributionPolicyException("publication_intent_artifact_mismatch");
+                }
+            }
+        }
+        else if (row.State != ContributionState.Approved || intent.ReviewerId is not null ||
+                 intent.Change.Kind != GlobalReleaseChangeKind.Deprecate || intent.Change.Resource is not null ||
+                 intent.Change.ResourceId != candidate.ResourceId || intent.Change.Version != candidate.Version)
+        {
+            throw new ContributionPolicyException("publication_intent_candidate_mismatch");
+        }
+    }
+
+    private static bool ArtifactMatchesCandidate(
+        GlobalArtifactReference? artifact,
+        ContributionCandidate candidate) =>
+        candidate.Kind switch
+        {
+            KnowledgeResourceKind.Ckb => artifact is null,
+            KnowledgeResourceKind.Ccb => artifact is not null &&
+                                         artifact.Sha256.Equals(candidate.ArtifactSha256, StringComparison.OrdinalIgnoreCase) &&
+                                         artifact.SizeBytes is > 0 and <= ContentAddressedArtifactStore.MaximumArtifactBytes &&
+                                         artifact.MediaType == "application/vnd.dcx.ccb+zip",
+            _ => false,
+        };
+
+    private static async Task CompletePublicationIntentAsync(
+        SqliteConnection connection,
+        PublicationIntent intent,
+        GlobalReleaseDescriptor release,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        if (intent.Action == PublicationIntentAction.Approval)
+        {
+            command.CommandText = """
+                UPDATE contributions
+                SET state = $state, reviewer_id = $reviewer, release_sequence = $release, reviewed_utc = $reviewed
+                WHERE submission_id = $submission AND state = $expected;
+                """;
+            command.Parameters.AddWithValue("$reviewer", intent.ReviewerId!);
+            command.Parameters.AddWithValue("$state", (int)ContributionState.Approved);
+            command.Parameters.AddWithValue("$expected", (int)ContributionState.Quarantined);
+        }
+        else
+        {
+            command.CommandText = """
+                UPDATE contributions
+                SET state = $state, release_sequence = $release, reviewed_utc = $reviewed
+                WHERE submission_id = $submission AND state = $expected;
+                """;
+            command.Parameters.AddWithValue("$state", (int)ContributionState.Withdrawn);
+            command.Parameters.AddWithValue("$expected", (int)ContributionState.Approved);
+        }
+
+        command.Parameters.AddWithValue("$release", release.Sequence);
+        command.Parameters.AddWithValue("$reviewed", intent.RequestedUtc.ToString("O"));
+        command.Parameters.AddWithValue("$submission", intent.SubmissionId);
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new ContributionPolicyException("publication_intent_state_conflict");
+        }
+
+        command.Parameters.Clear();
+        command.CommandText = """
+            UPDATE publication_intents
+            SET completed = 1, release_sequence = $release, completed_utc = $completed
+            WHERE operation_id = $operation AND completed = 0;
+            """;
+        command.Parameters.AddWithValue("$release", release.Sequence);
+        command.Parameters.AddWithValue("$completed", DateTimeOffset.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$operation", intent.OperationId);
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new ContributionPolicyException("publication_intent_completion_conflict");
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task NotifyCheckpointAsync(
+        ContributionPublicationCheckpoint checkpoint,
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        if (publicationFaultInjector is not null)
+        {
+            await publicationFaultInjector.OnCheckpointAsync(checkpoint, operationId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
     private static ContributionScanResult MergeScans(params ContributionScanResult[] scans) =>
         new(scans
             .SelectMany(scan => scan.Findings)
@@ -638,9 +1006,43 @@ public sealed class ContributionGovernanceService
         command.CommandText = "SELECT candidate_sha256, candidate_json, state, contributor_pseudonym FROM contributions WHERE submission_id = $id;";
         command.Parameters.AddWithValue("$id", submissionId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-            ? new SubmissionRow(reader.GetString(0), reader.GetString(1), (ContributionState)reader.GetInt32(2), reader.GetString(3))
-            : null;
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) return null;
+        var stateValue = reader.GetInt32(2);
+        if (!Enum.IsDefined((ContributionState)stateValue))
+        {
+            throw new ContributionPolicyException("submission_corrupt");
+        }
+
+        return new SubmissionRow(
+            reader.GetString(0), reader.GetString(1), (ContributionState)stateValue, reader.GetString(3));
+    }
+
+    private static ContributionCandidate DecodeCandidate(SubmissionRow row)
+    {
+        try
+        {
+            var candidate = JsonSerializer.Deserialize<ContributionCandidate>(row.CandidateJson, JsonOptions)
+                ?? throw new ContributionPolicyException("submission_corrupt");
+            var actualSha256 = ContributionCodec.CandidateSha256(candidate);
+            if (row.CandidateSha256.Length != 64 || !row.CandidateSha256.All(char.IsAsciiHexDigit) ||
+                !CryptographicOperations.FixedTimeEquals(
+                    Convert.FromHexString(row.CandidateSha256),
+                    Convert.FromHexString(actualSha256)))
+            {
+                throw new ContributionPolicyException("submission_corrupt");
+            }
+
+            return candidate;
+        }
+        catch (ContributionPolicyException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            exception is JsonException or FormatException or ArgumentException or InvalidOperationException or NullReferenceException)
+        {
+            throw new ContributionPolicyException("submission_corrupt");
+        }
     }
 
     private static async Task<SubmissionRow?> ReadApprovedResourceAsync(
@@ -705,4 +1107,21 @@ public sealed class ContributionGovernanceService
         string CandidateJson,
         ContributionState State,
         string ContributorPseudonym);
+
+    private enum PublicationIntentAction
+    {
+        Approval = 1,
+        Withdrawal = 2,
+    }
+
+    private sealed record PublicationIntent(
+        string OperationId,
+        string SubmissionId,
+        PublicationIntentAction Action,
+        string RequestSha256,
+        GlobalReleaseChange Change,
+        string? ReviewerId,
+        DateTimeOffset RequestedUtc,
+        bool Completed,
+        long? ReleaseSequence);
 }

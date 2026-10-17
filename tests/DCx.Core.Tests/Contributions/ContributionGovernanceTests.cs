@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using DCx.Core.Contributions;
 using DCx.Core.GlobalKnowledge;
 using DCx.Core.Knowledge;
@@ -140,6 +141,199 @@ public sealed class ContributionGovernanceTests : IDisposable
             Path.Combine(root, "reconciliation-client"), registry.TrustRootSubjectPublicKeyInfo);
         await client.SynchronizeAsync(new RepositoryRegistryTransport(registry));
         Assert.True(Assert.Single(await client.SearchAsync("cross database recovery", null)).Deprecated);
+    }
+
+    [Fact]
+    public async Task ApprovalAndWithdrawal_AutomaticallyRecoverDurableIntentsAcrossRestart()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "automatic-recovery-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "automatic-recovery-governance");
+        var approvalFault = new ThrowOncePublicationFaultInjector(
+            ContributionPublicationCheckpoint.RegistryCommitted);
+        var crashingApproval = await ContributionGovernanceService.OpenForTestingAsync(
+            governanceRoot, registry, null, approvalFault);
+        var candidate = Candidate(
+            "candidate:automatic-recovery",
+            "resource:automatic-recovery",
+            "A reviewer-authorized fixture that verifies automatic publication recovery after restart.");
+        var prepared = Prepare(candidate, "nonce-automatic-recovery");
+        await crashingApproval.IntakeAsync(prepared, now);
+
+        await Assert.ThrowsAsync<SimulatedPublicationCrashException>(() =>
+            crashingApproval.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now));
+        Assert.Equal(1, (await registry.GetLatestAsync())!.Sequence);
+
+        var recoveredApproval = await ContributionGovernanceService.OpenAsync(governanceRoot, registry);
+        Assert.Equal(0, await recoveredApproval.RecoverPendingPublicationsAsync());
+        Assert.Equal(1, (await registry.GetLatestAsync())!.Sequence);
+
+        var withdrawalFault = new ThrowOncePublicationFaultInjector(
+            ContributionPublicationCheckpoint.IntentStored);
+        var crashingWithdrawal = await ContributionGovernanceService.OpenForTestingAsync(
+            governanceRoot, registry, null, withdrawalFault);
+        await Assert.ThrowsAsync<SimulatedPublicationCrashException>(() =>
+            crashingWithdrawal.WithdrawAsync(prepared.SubmissionId, now.AddDays(1)));
+        Assert.Equal(1, (await registry.GetLatestAsync())!.Sequence);
+
+        var recoveredWithdrawal = await ContributionGovernanceService.OpenAsync(governanceRoot, registry);
+        Assert.Equal(0, await recoveredWithdrawal.RecoverPendingPublicationsAsync());
+        Assert.Equal(2, (await registry.GetLatestAsync())!.Sequence);
+        var (state, completedIntents) = await ReadRecoveryStateAsync(governanceRoot, prepared.SubmissionId);
+        Assert.Equal(ContributionState.Withdrawn, state);
+        Assert.Equal(2L, completedIntents);
+    }
+
+    [Fact]
+    public async Task CcbApproval_RecoversAfterValidatedIntentWithoutRerunningUntrustedCode()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "ccb-recovery-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "ccb-recovery-governance");
+        var executor = new FixtureSandboxExecutor();
+        var fault = new ThrowOncePublicationFaultInjector(ContributionPublicationCheckpoint.IntentStored);
+        var crashing = await ContributionGovernanceService.OpenForTestingAsync(
+            governanceRoot, registry, executor, fault);
+        var artifact = CcbContributionPackageTests.CreatePackage();
+        var artifactSha256 = Convert.ToHexStringLower(SHA256.HashData(artifact));
+        var candidate = CcbCandidate("candidate:ccb-recovery", "tool:community-upper", artifactSha256);
+        var prepared = Prepare(candidate, "nonce-ccb-recovery-1234");
+        await crashing.IntakeAsync(prepared, artifact, now);
+
+        await Assert.ThrowsAsync<SimulatedPublicationCrashException>(() =>
+            crashing.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now));
+        Assert.Null(await registry.GetLatestAsync());
+        Assert.Equal(2, executor.ExecutionCount);
+
+        var recovered = await ContributionGovernanceService.OpenAsync(governanceRoot, registry);
+        Assert.Equal(0, await recovered.RecoverPendingPublicationsAsync());
+        Assert.Equal(2, executor.ExecutionCount);
+        var transport = new RepositoryRegistryTransport(registry);
+        var client = await GlobalReplicaClient.OpenAsync(
+            Path.Combine(root, "ccb-recovery-client"), registry.TrustRootSubjectPublicKeyInfo);
+        await client.SynchronizeAsync(transport);
+        var resource = Assert.Single(await client.SearchAsync("community upper", null));
+        var reference = Assert.IsType<GlobalArtifactReference>(resource.Artifact);
+        Assert.Equal(artifact, await File.ReadAllBytesAsync(
+            await client.GetArtifactAsync(reference.Sha256, transport)));
+        var (state, completedIntents) = await ReadRecoveryStateAsync(governanceRoot, prepared.SubmissionId);
+        Assert.Equal(ContributionState.Approved, state);
+        Assert.Equal(1L, completedIntents);
+    }
+
+    [Fact]
+    public async Task CcbRecovery_RejectsSameLengthAuthoritativeArtifactTampering()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var registryRoot = Path.Combine(root, "ccb-recovery-tamper-registry");
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            registryRoot, key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "ccb-recovery-tamper-governance");
+        var fault = new ThrowOncePublicationFaultInjector(ContributionPublicationCheckpoint.IntentStored);
+        var crashing = await ContributionGovernanceService.OpenForTestingAsync(
+            governanceRoot, registry, new FixtureSandboxExecutor(), fault);
+        var artifact = CcbContributionPackageTests.CreatePackage();
+        var artifactSha256 = Convert.ToHexStringLower(SHA256.HashData(artifact));
+        var candidate = CcbCandidate("candidate:ccb-recovery-tamper", "tool:community-upper", artifactSha256);
+        var prepared = Prepare(candidate, "nonce-ccb-recovery-tamper");
+        await crashing.IntakeAsync(prepared, artifact, now);
+        await Assert.ThrowsAsync<SimulatedPublicationCrashException>(() =>
+            crashing.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now));
+
+        var authoritativePath = Path.Combine(
+            registryRoot, "artifacts", "sha256", artifactSha256[..2], artifactSha256);
+        var changed = await File.ReadAllBytesAsync(authoritativePath);
+        changed[0] ^= 0x01;
+        await File.WriteAllBytesAsync(authoritativePath, changed);
+
+        var exception = await Assert.ThrowsAsync<GlobalReplicaException>(() =>
+            ContributionGovernanceService.OpenAsync(governanceRoot, registry));
+        Assert.Contains("integrity", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(await registry.GetLatestAsync());
+    }
+
+    [Fact]
+    public async Task AutomaticRecovery_RejectsTamperedPublicationIntent()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "tampered-intent-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "tampered-intent-governance");
+        var fault = new ThrowOncePublicationFaultInjector(ContributionPublicationCheckpoint.IntentStored);
+        var crashing = await ContributionGovernanceService.OpenForTestingAsync(
+            governanceRoot, registry, null, fault);
+        var candidate = Candidate(
+            "candidate:tampered-intent",
+            "resource:tampered-intent",
+            "A deterministic publication-intent corruption denial fixture for startup recovery.");
+        var prepared = Prepare(candidate, "nonce-tampered-intent-123");
+        await crashing.IntakeAsync(prepared, now);
+        await Assert.ThrowsAsync<SimulatedPublicationCrashException>(() =>
+            crashing.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now));
+
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+                     {
+                         DataSource = Path.Combine(governanceRoot, "contribution-governance.sqlite3"),
+                         Mode = SqliteOpenMode.ReadWrite,
+                         Pooling = false,
+                     }.ToString()))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = "UPDATE publication_intents SET request_sha256 = $sha WHERE submission_id = $submission;";
+            command.Parameters.AddWithValue("$sha", new string('0', 64));
+            command.Parameters.AddWithValue("$submission", prepared.SubmissionId);
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+
+        var exception = await Assert.ThrowsAsync<ContributionPolicyException>(() =>
+            ContributionGovernanceService.OpenAsync(governanceRoot, registry));
+        Assert.Equal("publication_intent_binding_invalid", exception.Code);
+        Assert.Null(await registry.GetLatestAsync());
+    }
+
+    [Fact]
+    public async Task AutomaticRecovery_RejectsCandidateChangedAfterReviewerIntent()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "tampered-candidate-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "tampered-candidate-governance");
+        var fault = new ThrowOncePublicationFaultInjector(ContributionPublicationCheckpoint.IntentStored);
+        var crashing = await ContributionGovernanceService.OpenForTestingAsync(
+            governanceRoot, registry, null, fault);
+        var candidate = Candidate(
+            "candidate:tampered-after-review",
+            "resource:tampered-after-review",
+            "A digest-bound candidate that must not change after its reviewer intent is persisted.");
+        var prepared = Prepare(candidate, "nonce-tampered-after-review");
+        await crashing.IntakeAsync(prepared, now);
+        await Assert.ThrowsAsync<SimulatedPublicationCrashException>(() =>
+            crashing.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now));
+
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+                     {
+                         DataSource = Path.Combine(governanceRoot, "contribution-governance.sqlite3"),
+                         Mode = SqliteOpenMode.ReadWrite,
+                         Pooling = false,
+                     }.ToString()))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = "UPDATE contributions SET candidate_json = $candidate WHERE submission_id = $submission;";
+            command.Parameters.AddWithValue(
+                "$candidate",
+                JsonSerializer.Serialize(candidate with { Body = "Changed after review." }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            command.Parameters.AddWithValue("$submission", prepared.SubmissionId);
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+
+        var exception = await Assert.ThrowsAsync<ContributionPolicyException>(() =>
+            ContributionGovernanceService.OpenAsync(governanceRoot, registry));
+        Assert.Equal("submission_corrupt", exception.Code);
+        Assert.Null(await registry.GetLatestAsync());
     }
 
     [Fact]
@@ -344,6 +538,51 @@ public sealed class ContributionGovernanceTests : IDisposable
 
     private static string PublicationOperationId(string action, string submissionId) =>
         $"contribution-{action}:{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(submissionId)))}";
+
+    private static async Task<(ContributionState State, long CompletedIntents)> ReadRecoveryStateAsync(
+        string governanceRoot,
+        string submissionId)
+    {
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(governanceRoot, "contribution-governance.sqlite3"),
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false,
+        }.ToString());
+        await connection.OpenAsync();
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT state FROM contributions WHERE submission_id = $submission;";
+        command.Parameters.AddWithValue("$submission", submissionId);
+        var state = (ContributionState)Convert.ToInt32(await command.ExecuteScalarAsync());
+        command.Parameters.Clear();
+        command.CommandText = "SELECT COUNT(*) FROM publication_intents WHERE submission_id = $submission AND completed = 1;";
+        command.Parameters.AddWithValue("$submission", submissionId);
+        return (state, (long)(await command.ExecuteScalarAsync())!);
+    }
+
+    private sealed class ThrowOncePublicationFaultInjector(
+        ContributionPublicationCheckpoint target) : IContributionPublicationFaultInjector
+    {
+        private bool thrown;
+
+        public Task OnCheckpointAsync(
+            ContributionPublicationCheckpoint checkpoint,
+            string operationId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Assert.False(string.IsNullOrWhiteSpace(operationId));
+            if (!thrown && checkpoint == target)
+            {
+                thrown = true;
+                throw new SimulatedPublicationCrashException();
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class SimulatedPublicationCrashException : Exception;
 
     private sealed class FixtureSandboxExecutor(bool outputMismatch = false) : ICcbSandboxExecutor
     {
