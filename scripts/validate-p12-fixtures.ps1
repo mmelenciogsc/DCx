@@ -12,7 +12,8 @@ $scenarios = @(
     @{ name = "private CKB CCB search and tested reuse fixture"; script = "validate-p08.ps1" },
     @{ name = "signed global replica process simulation"; script = "validate-p09.ps1" },
     @{ name = "consent quarantine contribution and receipt fixture"; script = "validate-p10.ps1" },
-    @{ name = "CARE ledger and payout safety mock"; script = "validate-p11.ps1" }
+    @{ name = "durable CARE ledger and payout safety mock"; script = "validate-p11.ps1" },
+    @{ name = "local social login post search and QuickBooks XLSX fixtures"; script = "validate-p12-integrations.ps1" }
 )
 $results = @()
 
@@ -34,8 +35,8 @@ $manifest = [ordered]@{
     captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
     fixture_scenarios = $results
     blocked_scenarios = @(
-        "Facebook-specific authenticated search and human acceptance",
-        "QuickBooks sandbox OAuth to XLSX",
+        "live Facebook authenticated search and human acceptance",
+        "real QuickBooks sandbox OAuth and API retrieval",
         "YouTube frame capture and Q&A beyond safe browser handoff",
         "approved package installer execution",
         "Docker Compose global-service run",
