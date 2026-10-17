@@ -15,7 +15,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Locked restore failed with exit code $LASTEXITCODE." }
     dotnet build $solution --configuration Release --no-restore
     if ($LASTEXITCODE -ne 0) { throw "Release build failed with exit code $LASTEXITCODE." }
-    dotnet test $tests --configuration Release --no-build --no-restore --filter "FullyQualifiedName~ReleaseReadinessTests"
+    dotnet test $tests --configuration Release --no-build --no-restore --filter "FullyQualifiedName~Release"
     if ($LASTEXITCODE -ne 0) { throw "P14 readiness tests failed with exit code $LASTEXITCODE." }
 
     dotnet $reporter $report
@@ -31,6 +31,10 @@ try {
     "Critical and major issues triaged=$($assessment.critical_and_major_issues_triaged)/$($assessment.critical_and_major_issues)"
     "Blocking critical and major issues=$($assessment.blocking_critical_and_major_issues)"
     "Privacy-minimized pilot metrics=$($assessment.pilot_metrics.Count)"
+    "Pilot metric recording default-off and opt-in=PASS"
+    "Aggregate-only daily metric persistence=PASS"
+    "Consent revocation purge=PASS"
+    "Uncataloged metric and free-form dimension rejection=PASS"
     "Production activation approved=$($assessment.production_activation_approved)"
     "P14 decision=NO_GO"
     "P14 evidence=$report"
