@@ -12,6 +12,7 @@
     <Project Path="tests/DCx.FakeCodexAppServer/DCx.FakeCodexAppServer.csproj" />
     <Project Path="tests/DCx.GlobalSyncBenchmark/DCx.GlobalSyncBenchmark.csproj" />
     <Project Path="tests/DCx.NativeFixture/DCx.NativeFixture.csproj" />
+    <Project Path="tests/DCx.ReadinessReport/DCx.ReadinessReport.csproj" />
     <Project Path="tests/DCx.WebFixtureServer/DCx.WebFixtureServer.csproj" />
   </Folder>
 </Solution>
