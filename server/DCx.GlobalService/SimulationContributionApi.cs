@@ -180,6 +180,44 @@ internal static class SimulationContributionApi
             }
         });
 
+        group.MapGet("/publication-queue", async (
+            HttpRequest request,
+            int? limit,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = Authorize(request, options, SimulationApiRole.Reviewer);
+            if (authorization.Error is not null) return authorization.Error;
+            try
+            {
+                return Results.Ok(await governance.GetPublicationQueueAsync(
+                    limit ?? 50, cancellationToken).ConfigureAwait(false));
+            }
+            catch (ContributionPolicyException exception)
+            {
+                return PolicyError(exception.Code);
+            }
+        });
+
+        group.MapPost("/publication-queue/{operationId}/retry", async (
+            string operationId,
+            HttpRequest request,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = Authorize(request, options, SimulationApiRole.Reviewer);
+            if (authorization.Error is not null) return authorization.Error;
+            try
+            {
+                return Results.Ok(await governance.RetryDeadLetterAsync(
+                    operationId,
+                    DateTimeOffset.UtcNow,
+                    cancellationToken).ConfigureAwait(false));
+            }
+            catch (ContributionPolicyException exception)
+            {
+                return PolicyError(exception.Code);
+            }
+        });
+
         group.MapGet("/{submissionId}", async (
             string submissionId,
             HttpRequest request,
@@ -341,8 +379,11 @@ internal static class SimulationContributionApi
     {
         "submission_missing" or "submission_owner_mismatch" =>
             Error(StatusCodes.Status404NotFound, "submission_missing"),
+        "publication_dead_letter_missing" =>
+            Error(StatusCodes.Status404NotFound, "publication_dead_letter_missing"),
         "submission_id_invalid" or "review_limit_invalid" or
-            "contribution_envelope_invalid" or "contribution_envelope_size_invalid" =>
+            "contribution_envelope_invalid" or "contribution_envelope_size_invalid" or
+            "publication_queue_limit_invalid" or "publication_operation_id_invalid" =>
             Error(StatusCodes.Status400BadRequest, code),
         _ => Error(StatusCodes.Status409Conflict, code),
     };

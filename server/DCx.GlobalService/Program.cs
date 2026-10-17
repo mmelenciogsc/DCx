@@ -14,6 +14,8 @@ if (string.IsNullOrWhiteSpace(dataRoot) || string.IsNullOrWhiteSpace(signingKeyP
 
 var builder = WebApplication.CreateBuilder(args);
 var contributionApiOptions = SimulationContributionApiOptions.Load();
+var contributionWorkerOptions = SimulationContributionWorkerOptions.Load(
+    contributionApiOptions is not null);
 var inContainer = string.Equals(Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"), "true", StringComparison.OrdinalIgnoreCase);
 var simulationUrl = Environment.GetEnvironmentVariable("DCX_GLOBAL_SIMULATION_URL") ?? "http://127.0.0.1:5087";
 if (!inContainer &&
@@ -73,10 +75,17 @@ if (contributionApiOptions is not null)
 {
     var governanceRoot = Path.Combine(dataRoot, "governance");
     ccbSandbox = SimulationCcbSandboxConfiguration.Load(governanceRoot);
-    governance = await ContributionGovernanceService.OpenAsync(
-        governanceRoot, repository, ccbSandbox);
+    governance = contributionWorkerOptions is null
+        ? await ContributionGovernanceService.OpenAsync(governanceRoot, repository, ccbSandbox)
+        : await ContributionGovernanceService.OpenForContinuousWorkerAsync(
+            governanceRoot, repository, ccbSandbox);
     builder.Services.AddSingleton(governance);
     builder.Services.AddSingleton(contributionApiOptions);
+    if (contributionWorkerOptions is not null)
+    {
+        builder.Services.AddSingleton(contributionWorkerOptions);
+        builder.Services.AddHostedService<ContributionPublicationWorker>();
+    }
 }
 
 var app = builder.Build();
@@ -84,6 +93,7 @@ app.MapGet("/health", () => Results.Ok(new
 {
     status = "simulation",
     contributionApi = contributionApiOptions is not null,
+    contributionWorker = contributionWorkerOptions is not null,
     ccbSandbox = ccbSandbox is not null,
 }));
 app.MapGet("/api/trust-policy/latest", async (GlobalRegistryRepository registry, CancellationToken cancellationToken) =>

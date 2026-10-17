@@ -28,12 +28,31 @@ public sealed record ContributionReviewItem(
     DateTimeOffset? ReviewedUtc,
     long? ReleaseSequence);
 
+public sealed record ContributionPublicationQueueItem(
+    string OperationId,
+    string SubmissionId,
+    string Action,
+    int ConsecutiveFailures,
+    string FailureCode,
+    DateTimeOffset LastFailedUtc,
+    DateTimeOffset? NextAttemptUtc,
+    DateTimeOffset? DeadLetteredUtc,
+    int RemediationCount,
+    DateTimeOffset? LastRemediatedUtc);
+
+public sealed record ContributionPublicationWorkerResult(
+    int Completed,
+    int Failed,
+    int DeadLettered);
+
 public sealed class ContributionGovernanceService
 {
     private const int MaximumRecoveryBatch = 100;
     private const int MaximumPublicationAttempts = 20;
+    private const int MaximumConsecutivePublicationFailures = 5;
     private const int MaximumPublicationChangeJsonBytes = 256 * 1024;
     private static readonly TimeSpan PublicationLeaseDuration = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan MaximumPublicationRetryDelay = TimeSpan.FromMinutes(5);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -80,7 +99,18 @@ public sealed class ContributionGovernanceService
         GlobalRegistryRepository registry,
         ICcbSandboxExecutor? ccbSandboxExecutor = null,
         CancellationToken cancellationToken = default) =>
-        await OpenCoreAsync(root, registry, ccbSandboxExecutor, null, cancellationToken).ConfigureAwait(false);
+        await OpenCoreAsync(
+            root, registry, ccbSandboxExecutor, null, recoverPending: true, cancellationToken)
+            .ConfigureAwait(false);
+
+    internal static async Task<ContributionGovernanceService> OpenForContinuousWorkerAsync(
+        string root,
+        GlobalRegistryRepository registry,
+        ICcbSandboxExecutor? ccbSandboxExecutor = null,
+        CancellationToken cancellationToken = default) =>
+        await OpenCoreAsync(
+            root, registry, ccbSandboxExecutor, null, recoverPending: false, cancellationToken)
+            .ConfigureAwait(false);
 
     internal static async Task<ContributionGovernanceService> OpenForTestingAsync(
         string root,
@@ -89,13 +119,19 @@ public sealed class ContributionGovernanceService
         IContributionPublicationFaultInjector publicationFaultInjector,
         CancellationToken cancellationToken = default) =>
         await OpenCoreAsync(
-            root, registry, ccbSandboxExecutor, publicationFaultInjector, cancellationToken).ConfigureAwait(false);
+            root,
+            registry,
+            ccbSandboxExecutor,
+            publicationFaultInjector,
+            recoverPending: true,
+            cancellationToken).ConfigureAwait(false);
 
     private static async Task<ContributionGovernanceService> OpenCoreAsync(
         string root,
         GlobalRegistryRepository registry,
         ICcbSandboxExecutor? ccbSandboxExecutor,
         IContributionPublicationFaultInjector? publicationFaultInjector,
+        bool recoverPending,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
@@ -110,7 +146,11 @@ public sealed class ContributionGovernanceService
         var service = new ContributionGovernanceService(
             canonical, registry, ccbSandboxExecutor, publicationFaultInjector);
         await service.InitializeAsync(cancellationToken).ConfigureAwait(false);
-        await service.RecoverPendingPublicationsAsync(cancellationToken).ConfigureAwait(false);
+        if (recoverPending)
+        {
+            await service.RecoverPendingPublicationsAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         return service;
     }
 
@@ -464,6 +504,180 @@ public sealed class ContributionGovernanceService
         }
     }
 
+    public async Task<ContributionPublicationWorkerResult> ProcessReadyPublicationIntentsAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        if (now.Offset != TimeSpan.Zero)
+        {
+            throw new ContributionPolicyException("publication_worker_time_invalid");
+        }
+
+        await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var intents = await ReadReadyPublicationIntentsAsync(connection, now, cancellationToken)
+                .ConfigureAwait(false);
+            var completed = 0;
+            var failed = 0;
+            var deadLettered = 0;
+            foreach (var intent in intents)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var lease = await TryClaimPublicationIntentAsync(connection, intent, cancellationToken)
+                    .ConfigureAwait(false);
+                if (lease is null) continue;
+                try
+                {
+                    await ValidatePublicationIntentAsync(connection, intent, cancellationToken).ConfigureAwait(false);
+                    await RenewPublicationLeaseAsync(connection, lease, cancellationToken).ConfigureAwait(false);
+                    var release = await registry.PublishIdempotentAsync(
+                        intent.OperationId,
+                        [intent.Change],
+                        intent.RequestedUtc,
+                        cancellationToken).ConfigureAwait(false);
+                    await RenewPublicationLeaseAsync(connection, lease, cancellationToken).ConfigureAwait(false);
+                    await CompletePublicationIntentAsync(
+                        connection, intent, lease, release, cancellationToken).ConfigureAwait(false);
+                    completed++;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    await TryReleasePublicationLeaseAsync(connection, lease).ConfigureAwait(false);
+                    throw;
+                }
+                catch (ContributionPolicyException exception)
+                {
+                    var isDeadLettered = await RecordPublicationFailureAsync(
+                        connection,
+                        lease,
+                        SanitizeWorkerFailureCode(exception.Code),
+                        now,
+                        permanent: IsPermanentPublicationFailure(exception.Code),
+                        cancellationToken).ConfigureAwait(false);
+                    failed++;
+                    deadLettered += isDeadLettered ? 1 : 0;
+                }
+                catch (GlobalReplicaException)
+                {
+                    var isDeadLettered = await RecordPublicationFailureAsync(
+                        connection,
+                        lease,
+                        "registry_operation_failed",
+                        now,
+                        permanent: false,
+                        cancellationToken).ConfigureAwait(false);
+                    failed++;
+                    deadLettered += isDeadLettered ? 1 : 0;
+                }
+                catch (SqliteException)
+                {
+                    var isDeadLettered = await RecordPublicationFailureAsync(
+                        connection,
+                        lease,
+                        "publication_database_failed",
+                        now,
+                        permanent: false,
+                        cancellationToken).ConfigureAwait(false);
+                    failed++;
+                    deadLettered += isDeadLettered ? 1 : 0;
+                }
+                catch (Exception exception) when (
+                    exception is IOException or UnauthorizedAccessException or CryptographicException)
+                {
+                    var isDeadLettered = await RecordPublicationFailureAsync(
+                        connection,
+                        lease,
+                        exception is UnauthorizedAccessException
+                            ? "publication_storage_access_denied"
+                            : exception is CryptographicException
+                                ? "publication_cryptography_failed"
+                                : "publication_storage_failed",
+                        now,
+                        permanent: exception is UnauthorizedAccessException or CryptographicException,
+                        cancellationToken).ConfigureAwait(false);
+                    failed++;
+                    deadLettered += isDeadLettered ? 1 : 0;
+                }
+            }
+
+            return new ContributionPublicationWorkerResult(completed, failed, deadLettered);
+        }
+        finally
+        {
+            mutationLock.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<ContributionPublicationQueueItem>> GetPublicationQueueAsync(
+        int limit = 50,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit is < 1 or > 100)
+        {
+            throw new ContributionPolicyException("publication_queue_limit_invalid");
+        }
+
+        await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            return await ReadPublicationQueueAsync(connection, limit, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            mutationLock.Release();
+        }
+    }
+
+    public async Task<ContributionPublicationQueueItem> RetryDeadLetterAsync(
+        string operationId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        ValidatePublicationOperationId(operationId);
+        if (now.Offset != TimeSpan.Zero)
+        {
+            throw new ContributionPolicyException("publication_worker_time_invalid");
+        }
+
+        await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE publication_intent_failures
+                SET consecutive_failures = 0,
+                    next_attempt_utc = $next,
+                    dead_lettered_utc = NULL,
+                    resolved_utc = NULL,
+                    remediation_count = remediation_count + 1,
+                    last_remediated_utc = $next
+                WHERE operation_id = $operation AND dead_lettered_utc IS NOT NULL
+                  AND EXISTS(
+                      SELECT 1 FROM publication_intents
+                      WHERE operation_id = $operation AND completed = 0
+                  );
+                """;
+            command.Parameters.AddWithValue("$next", now.ToString("O"));
+            command.Parameters.AddWithValue("$operation", operationId);
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+            {
+                throw new ContributionPolicyException("publication_dead_letter_missing");
+            }
+
+            return await ReadPublicationQueueItemAsync(connection, operationId, cancellationToken)
+                .ConfigureAwait(false)
+                ?? throw new ContributionPolicyException("publication_dead_letter_missing");
+        }
+        finally
+        {
+            mutationLock.Release();
+        }
+    }
+
     public async Task<UsageReceiptDecision> EvaluateUsageAsync(
         QualifiedUsageReceipt receipt,
         string integritySignature,
@@ -597,6 +811,26 @@ public sealed class ContributionGovernanceService
                 CHECK(
                     (lease_owner IS NULL AND lease_token IS NULL AND acquired_utc IS NULL AND expires_utc IS NULL) OR
                     (lease_owner IS NOT NULL AND lease_token IS NOT NULL AND acquired_utc IS NOT NULL AND expires_utc IS NOT NULL)
+                )
+            );
+            CREATE TABLE IF NOT EXISTS publication_intent_failures(
+                operation_id TEXT PRIMARY KEY,
+                consecutive_failures INTEGER NOT NULL,
+                failure_code TEXT NOT NULL,
+                last_failed_utc TEXT NOT NULL,
+                next_attempt_utc TEXT,
+                dead_lettered_utc TEXT,
+                resolved_utc TEXT,
+                remediation_count INTEGER NOT NULL DEFAULT 0,
+                last_remediated_utc TEXT,
+                FOREIGN KEY(operation_id) REFERENCES publication_intents(operation_id) ON DELETE CASCADE,
+                CHECK(consecutive_failures >= 0 AND consecutive_failures <= 5),
+                CHECK(length(failure_code) >= 1 AND length(failure_code) <= 64),
+                CHECK(remediation_count >= 0),
+                CHECK(
+                    (dead_lettered_utc IS NULL AND next_attempt_utc IS NOT NULL) OR
+                    (dead_lettered_utc IS NOT NULL AND next_attempt_utc IS NULL) OR
+                    (resolved_utc IS NOT NULL AND next_attempt_utc IS NULL AND dead_lettered_utc IS NULL)
                 )
             );
             """;
@@ -950,6 +1184,252 @@ public sealed class ContributionGovernanceService
         }
 
         return intents;
+    }
+
+    private static async Task<IReadOnlyList<PublicationIntent>> ReadReadyPublicationIntentsAsync(
+        SqliteConnection connection,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT i.operation_id, i.submission_id, i.action, i.request_sha256, i.change_json,
+                   i.reviewer_id, i.requested_utc, i.completed, i.release_sequence
+            FROM publication_intents AS i
+            LEFT JOIN publication_intent_failures AS f ON f.operation_id = i.operation_id
+            WHERE i.completed = 0
+              AND (f.operation_id IS NULL OR (
+                  f.resolved_utc IS NULL AND f.dead_lettered_utc IS NULL AND
+                  f.next_attempt_utc <= $now
+              ))
+            ORDER BY i.requested_utc, i.operation_id
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$now", now.ToString("O"));
+        command.Parameters.AddWithValue("$limit", MaximumRecoveryBatch);
+        var intents = new List<PublicationIntent>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            intents.Add(ParsePublicationIntent(reader));
+        }
+
+        return intents;
+    }
+
+    private static async Task<IReadOnlyList<ContributionPublicationQueueItem>> ReadPublicationQueueAsync(
+        SqliteConnection connection,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT i.operation_id, i.submission_id, i.action,
+                   f.consecutive_failures, f.failure_code, f.last_failed_utc,
+                   f.next_attempt_utc, f.dead_lettered_utc,
+                   f.remediation_count, f.last_remediated_utc
+            FROM publication_intent_failures AS f
+            JOIN publication_intents AS i ON i.operation_id = f.operation_id
+            WHERE i.completed = 0 AND f.resolved_utc IS NULL
+            ORDER BY (f.dead_lettered_utc IS NULL),
+                     COALESCE(f.dead_lettered_utc, f.next_attempt_utc), i.operation_id
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$limit", limit);
+        var items = new List<ContributionPublicationQueueItem>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            items.Add(ParsePublicationQueueItem(reader));
+        }
+
+        return items;
+    }
+
+    private static async Task<ContributionPublicationQueueItem?> ReadPublicationQueueItemAsync(
+        SqliteConnection connection,
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT i.operation_id, i.submission_id, i.action,
+                   f.consecutive_failures, f.failure_code, f.last_failed_utc,
+                   f.next_attempt_utc, f.dead_lettered_utc,
+                   f.remediation_count, f.last_remediated_utc
+            FROM publication_intent_failures AS f
+            JOIN publication_intents AS i ON i.operation_id = f.operation_id
+            WHERE i.operation_id = $operation AND i.completed = 0 AND f.resolved_utc IS NULL;
+            """;
+        command.Parameters.AddWithValue("$operation", operationId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? ParsePublicationQueueItem(reader)
+            : null;
+    }
+
+    private static ContributionPublicationQueueItem ParsePublicationQueueItem(SqliteDataReader reader)
+    {
+        var operationId = reader.GetString(0);
+        var submissionId = reader.GetString(1);
+        var actionValue = reader.GetInt32(2);
+        var failures = reader.GetInt32(3);
+        var code = reader.GetString(4);
+        var lastFailed = ParseWorkerTimestamp(reader.GetString(5));
+        DateTimeOffset? nextAttempt = reader.IsDBNull(6)
+            ? null
+            : ParseWorkerTimestamp(reader.GetString(6));
+        DateTimeOffset? deadLettered = reader.IsDBNull(7)
+            ? null
+            : ParseWorkerTimestamp(reader.GetString(7));
+        var remediationCount = reader.GetInt32(8);
+        DateTimeOffset? lastRemediated = reader.IsDBNull(9)
+            ? null
+            : ParseWorkerTimestamp(reader.GetString(9));
+        ValidatePublicationOperationId(operationId);
+        ValidateSubmissionId(submissionId);
+        if (!Enum.IsDefined((PublicationIntentAction)actionValue) ||
+            failures is < 0 or > MaximumConsecutivePublicationFailures ||
+            code != SanitizeWorkerFailureCode(code) ||
+            remediationCount < 0 ||
+            nextAttempt is null == (deadLettered is null) ||
+            (remediationCount == 0) != (lastRemediated is null))
+        {
+            throw new ContributionPolicyException("publication_queue_corrupt");
+        }
+
+        return new ContributionPublicationQueueItem(
+            operationId,
+            submissionId,
+            (PublicationIntentAction)actionValue == PublicationIntentAction.Approval
+                ? "approval"
+                : "withdrawal",
+            failures,
+            code,
+            lastFailed,
+            nextAttempt,
+            deadLettered,
+            remediationCount,
+            lastRemediated);
+    }
+
+    private static DateTimeOffset ParseWorkerTimestamp(string value)
+    {
+        if (!DateTimeOffset.TryParseExact(
+                value,
+                "O",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var timestamp) || timestamp.Offset != TimeSpan.Zero)
+        {
+            throw new ContributionPolicyException("publication_queue_corrupt");
+        }
+
+        return timestamp;
+    }
+
+    private static async Task<bool> RecordPublicationFailureAsync(
+        SqliteConnection connection,
+        PublicationLease lease,
+        string failureCode,
+        DateTimeOffset failedUtc,
+        bool permanent,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = """
+            SELECT consecutive_failures
+            FROM publication_intent_failures
+            WHERE operation_id = $operation AND resolved_utc IS NULL;
+            """;
+        command.Parameters.AddWithValue("$operation", lease.OperationId);
+        var priorValue = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        var priorFailures = priorValue is null or DBNull ? 0 : Convert.ToInt32(priorValue);
+        if (priorFailures is < 0 or >= MaximumConsecutivePublicationFailures)
+        {
+            throw new ContributionPolicyException("publication_queue_corrupt");
+        }
+
+        var failures = priorFailures + 1;
+        var isDeadLettered = permanent || failures >= MaximumConsecutivePublicationFailures;
+        var delaySeconds = Math.Min(
+            Math.Pow(2, failures),
+            MaximumPublicationRetryDelay.TotalSeconds);
+        var nextAttemptUtc = isDeadLettered ? (DateTimeOffset?)null : failedUtc.AddSeconds(delaySeconds);
+        var deadLetteredUtc = isDeadLettered ? failedUtc : (DateTimeOffset?)null;
+
+        command.Parameters.Clear();
+        command.CommandText = """
+            INSERT INTO publication_intent_failures(
+                operation_id, consecutive_failures, failure_code, last_failed_utc,
+                next_attempt_utc, dead_lettered_utc, resolved_utc,
+                remediation_count, last_remediated_utc)
+            VALUES($operation, $failures, $code, $failed, $next, $dead, NULL, 0, NULL)
+            ON CONFLICT(operation_id) DO UPDATE SET
+                consecutive_failures = excluded.consecutive_failures,
+                failure_code = excluded.failure_code,
+                last_failed_utc = excluded.last_failed_utc,
+                next_attempt_utc = excluded.next_attempt_utc,
+                dead_lettered_utc = excluded.dead_lettered_utc,
+                resolved_utc = NULL;
+            """;
+        command.Parameters.AddWithValue("$operation", lease.OperationId);
+        command.Parameters.AddWithValue("$failures", failures);
+        command.Parameters.AddWithValue("$code", failureCode);
+        command.Parameters.AddWithValue("$failed", failedUtc.ToString("O"));
+        command.Parameters.AddWithValue("$next", nextAttemptUtc is null ? DBNull.Value : nextAttemptUtc.Value.ToString("O"));
+        command.Parameters.AddWithValue("$dead", deadLetteredUtc is null ? DBNull.Value : deadLetteredUtc.Value.ToString("O"));
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new ContributionPolicyException("publication_queue_write_failed");
+        }
+
+        command.Parameters.Clear();
+        command.CommandText = """
+            UPDATE publication_intent_leases
+            SET lease_owner = NULL, lease_token = NULL, acquired_utc = NULL, expires_utc = NULL
+            WHERE operation_id = $operation AND lease_owner = $owner AND lease_token = $token
+              AND EXISTS(
+                  SELECT 1 FROM publication_intents
+                  WHERE operation_id = $operation AND completed = 0
+              );
+            """;
+        command.Parameters.AddWithValue("$operation", lease.OperationId);
+        command.Parameters.AddWithValue("$owner", lease.Owner);
+        command.Parameters.AddWithValue("$token", lease.Token);
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new ContributionPolicyException("publication_lease_lost");
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return isDeadLettered;
+    }
+
+    private static string SanitizeWorkerFailureCode(string code) =>
+        !string.IsNullOrWhiteSpace(code) && code.Length <= 64 &&
+        code.All(character => character is >= 'a' and <= 'z' || char.IsAsciiDigit(character) || character == '_')
+            ? code
+            : "publication_worker_failed";
+
+    private static bool IsPermanentPublicationFailure(string code) => code switch
+    {
+        "publication_intent_busy" or
+        "publication_lease_lost" or
+        "publication_lease_claim_conflict" => false,
+        _ => true,
+    };
+
+    private static void ValidatePublicationOperationId(string operationId)
+    {
+        if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 256 ||
+            operationId.Any(character =>
+                !char.IsAsciiLetterOrDigit(character) && character is not '.' and not '_' and not '-' and not ':'))
+        {
+            throw new ContributionPolicyException("publication_operation_id_invalid");
+        }
     }
 
     private async Task<PublicationLease?> TryClaimPublicationIntentAsync(
@@ -1343,6 +1823,16 @@ public sealed class ContributionGovernanceService
         {
             throw new ContributionPolicyException("publication_intent_completion_conflict");
         }
+
+        command.Parameters.Clear();
+        command.CommandText = """
+            UPDATE publication_intent_failures
+            SET next_attempt_utc = NULL, dead_lettered_utc = NULL, resolved_utc = $completed
+            WHERE operation_id = $operation AND resolved_utc IS NULL;
+            """;
+        command.Parameters.AddWithValue("$completed", completedUtc.ToString("O"));
+        command.Parameters.AddWithValue("$operation", intent.OperationId);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
         command.Parameters.Clear();
         command.CommandText = """

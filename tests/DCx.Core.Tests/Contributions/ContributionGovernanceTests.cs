@@ -6,6 +6,7 @@ using DCx.Core.GlobalKnowledge;
 using DCx.Core.Knowledge;
 using DCx.GlobalService;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DCx.Core.Tests.Contributions;
 
@@ -354,6 +355,154 @@ public sealed class ContributionGovernanceTests : IDisposable
         Assert.Null(await registry.GetLatestAsync());
         Assert.Equal(ContributionState.Quarantined,
             (await ReadRecoveryStateAsync(governanceRoot, prepared.SubmissionId)).State);
+    }
+
+    [Fact]
+    public async Task HostedWorker_ContinuouslyCompletesAuthorizedPendingIntent()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "hosted-worker-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "hosted-worker-governance");
+        var fault = new ThrowOncePublicationFaultInjector(ContributionPublicationCheckpoint.IntentStored);
+        var governance = await ContributionGovernanceService.OpenForTestingAsync(
+            governanceRoot, registry, null, fault);
+        var candidate = Candidate(
+            "candidate:hosted-worker",
+            "resource:hosted-worker",
+            "A durable worker fixture completed without expanding the reviewer's authority.");
+        var prepared = Prepare(candidate, "nonce-hosted-worker-12345");
+        await governance.IntakeAsync(prepared, now);
+        await Assert.ThrowsAsync<SimulatedPublicationCrashException>(() =>
+            governance.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now));
+
+        governance = await ContributionGovernanceService.OpenForContinuousWorkerAsync(
+            governanceRoot, registry);
+
+        var worker = new ContributionPublicationWorker(
+            governance,
+            new SimulationContributionWorkerOptions(TimeSpan.FromMilliseconds(100)),
+            NullLogger<ContributionPublicationWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while ((await governance.GetReviewItemAsync(prepared.SubmissionId, timeout.Token)).State !=
+                   ContributionState.Approved)
+            {
+                await Task.Delay(50, timeout.Token);
+            }
+        }
+        finally
+        {
+            await worker.StopAsync(CancellationToken.None);
+            worker.Dispose();
+        }
+
+        Assert.Equal(1, (await registry.GetLatestAsync())!.Sequence);
+        Assert.Empty(await governance.GetPublicationQueueAsync());
+        var (state, completedIntents) = await ReadRecoveryStateAsync(
+            governanceRoot, prepared.SubmissionId);
+        Assert.Equal(ContributionState.Approved, state);
+        Assert.Equal(1L, completedIntents);
+    }
+
+    [Fact]
+    public async Task Worker_BackoffDeadLetterAndExplicitRetryRemainBodyFree()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "worker-dead-letter-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "worker-dead-letter-governance");
+        var fault = new ThrowOncePublicationFaultInjector(ContributionPublicationCheckpoint.IntentStored);
+        var governance = await ContributionGovernanceService.OpenForTestingAsync(
+            governanceRoot, registry, null, fault);
+        const string privateBody = "Private reviewed body that must never enter the worker queue.";
+        var candidate = Candidate(
+            "candidate:worker-dead-letter",
+            "resource:worker-dead-letter",
+            privateBody);
+        var prepared = Prepare(candidate, "nonce-worker-dead-letter");
+        await governance.IntakeAsync(prepared, now);
+        await Assert.ThrowsAsync<SimulatedPublicationCrashException>(() =>
+            governance.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now));
+
+        var operationId = PublicationOperationId("approval", prepared.SubmissionId);
+        var conflicting = new GlobalResourceRecord(
+            "resource:conflicting-operation",
+            "1",
+            KnowledgeResourceKind.Ckb,
+            "Conflicting fixture",
+            "A different canonical change bound to the stolen operation identifier.",
+            "https://example.test/conflict",
+            "CC-BY-4.0",
+            []);
+        await registry.PublishIdempotentAsync(
+            operationId,
+            [new GlobalReleaseChange(
+                GlobalReleaseChangeKind.Upsert,
+                conflicting.ResourceId,
+                conflicting.Version,
+                conflicting)],
+            now);
+
+        governance = await ContributionGovernanceService.OpenForContinuousWorkerAsync(
+            governanceRoot, registry);
+
+        var workerTime = now.AddHours(1);
+        var first = await governance.ProcessReadyPublicationIntentsAsync(workerTime);
+        Assert.Equal(new ContributionPublicationWorkerResult(0, 1, 0), first);
+        var queued = Assert.Single(await governance.GetPublicationQueueAsync());
+        Assert.Equal("registry_operation_failed", queued.FailureCode);
+        Assert.Equal(1, queued.ConsecutiveFailures);
+        Assert.NotNull(queued.NextAttemptUtc);
+        Assert.Null(queued.DeadLetteredUtc);
+        Assert.DoesNotContain(privateBody, JsonSerializer.Serialize(queued), StringComparison.Ordinal);
+
+        Assert.Equal(
+            new ContributionPublicationWorkerResult(0, 0, 0),
+            await governance.ProcessReadyPublicationIntentsAsync(workerTime));
+        for (var expectedFailures = 2; expectedFailures <= 5; expectedFailures++)
+        {
+            queued = Assert.Single(await governance.GetPublicationQueueAsync());
+            workerTime = queued.NextAttemptUtc!.Value;
+            var result = await governance.ProcessReadyPublicationIntentsAsync(workerTime);
+            Assert.Equal(0, result.Completed);
+            Assert.Equal(1, result.Failed);
+            Assert.Equal(expectedFailures == 5 ? 1 : 0, result.DeadLettered);
+        }
+
+        queued = Assert.Single(await governance.GetPublicationQueueAsync());
+        Assert.Equal(operationId, queued.OperationId);
+        Assert.Equal(prepared.SubmissionId, queued.SubmissionId);
+        Assert.Equal("approval", queued.Action);
+        Assert.Equal(5, queued.ConsecutiveFailures);
+        Assert.Null(queued.NextAttemptUtc);
+        Assert.NotNull(queued.DeadLetteredUtc);
+
+        var retryTime = workerTime.AddMinutes(1);
+        queued = await governance.RetryDeadLetterAsync(operationId, retryTime);
+        Assert.Equal(0, queued.ConsecutiveFailures);
+        Assert.Equal(1, queued.RemediationCount);
+        Assert.Equal(retryTime, queued.NextAttemptUtc);
+        Assert.Null(queued.DeadLetteredUtc);
+        Assert.Equal(
+            new ContributionPublicationWorkerResult(0, 1, 0),
+            await governance.ProcessReadyPublicationIntentsAsync(retryTime));
+        Assert.Equal(1, (await registry.GetLatestAsync())!.Sequence);
+        Assert.Equal(ContributionState.Quarantined,
+            (await ReadRecoveryStateAsync(governanceRoot, prepared.SubmissionId)).State);
+
+        await UpdateGovernanceAsync(
+            governanceRoot,
+            """
+            PRAGMA ignore_check_constraints = ON;
+            UPDATE publication_intent_failures
+            SET failure_code = 'INVALID persisted failure code';
+            """);
+        var corrupt = await Assert.ThrowsAsync<ContributionPolicyException>(() =>
+            governance.GetPublicationQueueAsync());
+        Assert.Equal("publication_queue_corrupt", corrupt.Code);
     }
 
     [Fact]

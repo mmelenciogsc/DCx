@@ -43,6 +43,8 @@ public sealed class ContributionApiE2eTests : IDisposable
         startInfo.Environment["DCX_GLOBAL_SIGNING_KEY"] = keyPath;
         startInfo.Environment["DCX_GLOBAL_SIMULATION_URL"] = endpoint.AbsoluteUri;
         startInfo.Environment["DCX_GLOBAL_CONTRIBUTION_API"] = "1";
+        startInfo.Environment["DCX_GLOBAL_CONTRIBUTION_WORKER"] = "1";
+        startInfo.Environment["DCX_GLOBAL_CONTRIBUTION_WORKER_INTERVAL_MS"] = "100";
         startInfo.Environment["DCX_GLOBAL_CONTRIBUTOR_TOKEN_SHA256"] = Digest(contributorToken);
         startInfo.Environment["DCX_GLOBAL_CONTRIBUTOR_PSEUDONYM"] = "contributor:api-fixture";
         startInfo.Environment["DCX_GLOBAL_REVIEWER_TOKEN_SHA256"] = Digest(reviewerToken);
@@ -58,6 +60,40 @@ public sealed class ContributionApiE2eTests : IDisposable
         {
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
             await WaitForHealthAsync(client, endpoint, process, errorTask);
+            using (var health = JsonDocument.Parse(
+                       await client.GetStringAsync(new Uri(endpoint, "health"))))
+            {
+                Assert.True(health.RootElement.GetProperty("contributionApi").GetBoolean());
+                Assert.True(health.RootElement.GetProperty("contributionWorker").GetBoolean());
+                Assert.False(health.RootElement.GetProperty("ccbSandbox").GetBoolean());
+            }
+            var queueUri = new Uri(endpoint, "api/contributions/publication-queue?limit=10");
+            using (var missingQueueAuth = await client.GetAsync(queueUri))
+            {
+                await AssertErrorAsync(
+                    missingQueueAuth, HttpStatusCode.Unauthorized, "authentication_required");
+            }
+            using (var contributorQueue = await SendAuthorizedAsync(
+                       client, HttpMethod.Get, queueUri, contributorToken))
+            {
+                await AssertErrorAsync(contributorQueue, HttpStatusCode.Forbidden, "role_forbidden");
+            }
+            Assert.Empty(await GetJsonAsync<ContributionPublicationQueueItem[]>(
+                client, queueUri, reviewerToken));
+            var missingRetryUri = new Uri(
+                endpoint,
+                $"api/contributions/publication-queue/contribution-approval:{new string('a', 64)}/retry");
+            using (var contributorRetry = await SendAuthorizedAsync(
+                       client, HttpMethod.Post, missingRetryUri, contributorToken))
+            {
+                await AssertErrorAsync(contributorRetry, HttpStatusCode.Forbidden, "role_forbidden");
+            }
+            using (var missingRetry = await SendAuthorizedAsync(
+                       client, HttpMethod.Post, missingRetryUri, reviewerToken))
+            {
+                await AssertErrorAsync(
+                    missingRetry, HttpStatusCode.NotFound, "publication_dead_letter_missing");
+            }
             var now = DateTimeOffset.UtcNow;
             var valid = Prepare(Candidate(
                 "candidate:api-approved", "resource:api-approved", privateBody), now, "nonce-api-approved-1234");
@@ -234,6 +270,42 @@ public sealed class ContributionApiE2eTests : IDisposable
             Assert.DoesNotContain(privateBody, diagnostics, StringComparison.Ordinal);
             Assert.DoesNotContain(riskyBody, diagnostics, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public async Task PublicationWorker_FailsStartupWhenContributionApiIsDisabled()
+    {
+        Directory.CreateDirectory(root);
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var keyPath = Path.Combine(root, "worker-gate-key.pk8");
+        await File.WriteAllBytesAsync(keyPath, key.ExportPkcs8PrivateKey());
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add(typeof(GlobalRegistryRepository).Assembly.Location);
+        startInfo.Environment["DCX_GLOBAL_SIMULATION"] = "1";
+        startInfo.Environment["DCX_GLOBAL_DATA_ROOT"] = Path.Combine(root, "worker-gate-server");
+        startInfo.Environment["DCX_GLOBAL_SIGNING_KEY"] = keyPath;
+        startInfo.Environment["DCX_GLOBAL_SIMULATION_URL"] =
+            $"http://127.0.0.1:{ReserveEphemeralPort()}/";
+        startInfo.Environment["DCX_GLOBAL_CONTRIBUTION_WORKER"] = "1";
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start the worker-gate fixture.");
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await process.WaitForExitAsync(timeout.Token);
+        var diagnostics = (await outputTask) + (await errorTask);
+
+        Assert.NotEqual(0, process.ExitCode);
+        Assert.Contains(
+            "contribution worker cannot run while the contribution API is disabled",
+            diagnostics,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     public void Dispose() => TestDirectory.DeleteIfExists(root);
