@@ -80,6 +80,14 @@ public sealed class ContributionApiE2eTests : IDisposable
             }
             Assert.Empty(await GetJsonAsync<ContributionPublicationQueueItem[]>(
                 client, queueUri, reviewerToken));
+            var ccbQueueUri = new Uri(endpoint, "api/contributions/ccb-review-queue?limit=10");
+            using (var contributorCcbQueue = await SendAuthorizedAsync(
+                       client, HttpMethod.Get, ccbQueueUri, contributorToken))
+            {
+                await AssertErrorAsync(contributorCcbQueue, HttpStatusCode.Forbidden, "role_forbidden");
+            }
+            Assert.Empty(await GetJsonAsync<CcbReviewQueueItem[]>(
+                client, ccbQueueUri, reviewerToken));
             var missingRetryUri = new Uri(
                 endpoint,
                 $"api/contributions/publication-queue/contribution-approval:{new string('a', 64)}/retry");
@@ -93,6 +101,15 @@ public sealed class ContributionApiE2eTests : IDisposable
             {
                 await AssertErrorAsync(
                     missingRetry, HttpStatusCode.NotFound, "publication_dead_letter_missing");
+            }
+            var missingCcbRetryUri = new Uri(
+                endpoint,
+                $"api/contributions/ccb-review-queue/ccb-review:{new string('a', 64)}/retry");
+            using (var missingCcbRetry = await SendAuthorizedAsync(
+                       client, HttpMethod.Post, missingCcbRetryUri, reviewerToken))
+            {
+                await AssertErrorAsync(
+                    missingCcbRetry, HttpStatusCode.NotFound, "ccb_review_dead_letter_missing");
             }
             var now = DateTimeOffset.UtcNow;
             var valid = Prepare(Candidate(

@@ -124,7 +124,8 @@ internal static class SimulationContributionApi
     public static void Map(
         WebApplication app,
         ContributionGovernanceService governance,
-        SimulationContributionApiOptions options)
+        SimulationContributionApiOptions options,
+        bool contributionWorkerEnabled)
     {
         var group = app.MapGroup("/api/contributions");
         group.MapPost("/intake", async (HttpRequest request, CancellationToken cancellationToken) =>
@@ -255,11 +256,17 @@ internal static class SimulationContributionApi
             if (authorization.Error is not null) return authorization.Error;
             try
             {
-                return Results.Ok(await governance.ApproveAndPublishAsync(
+                var result = await governance.RequestApprovalAsync(
                     submissionId,
                     options.ReviewerId,
                     DateTimeOffset.UtcNow,
-                    cancellationToken).ConfigureAwait(false));
+                    contributionWorkerEnabled,
+                    cancellationToken).ConfigureAwait(false);
+                return result.Queued
+                    ? Results.Accepted(
+                        $"/api/contributions/ccb-review-queue/{Uri.EscapeDataString(result.ReviewJobId!)}",
+                        result)
+                    : Results.Ok(result.Release);
             }
             catch (ContributionPolicyException exception)
             {
@@ -268,6 +275,44 @@ internal static class SimulationContributionApi
             catch (GlobalReplicaException)
             {
                 return Error(StatusCodes.Status409Conflict, "registry_operation_failed");
+            }
+        });
+
+        group.MapGet("/ccb-review-queue", async (
+            HttpRequest request,
+            int? limit,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = Authorize(request, options, SimulationApiRole.Reviewer);
+            if (authorization.Error is not null) return authorization.Error;
+            try
+            {
+                return Results.Ok(await governance.GetCcbReviewQueueAsync(
+                    limit ?? 50, cancellationToken).ConfigureAwait(false));
+            }
+            catch (ContributionPolicyException exception)
+            {
+                return PolicyError(exception.Code);
+            }
+        });
+
+        group.MapPost("/ccb-review-queue/{jobId}/retry", async (
+            string jobId,
+            HttpRequest request,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = Authorize(request, options, SimulationApiRole.Reviewer);
+            if (authorization.Error is not null) return authorization.Error;
+            try
+            {
+                return Results.Ok(await governance.RetryCcbReviewDeadLetterAsync(
+                    jobId,
+                    DateTimeOffset.UtcNow,
+                    cancellationToken).ConfigureAwait(false));
+            }
+            catch (ContributionPolicyException exception)
+            {
+                return PolicyError(exception.Code);
             }
         });
 
@@ -381,9 +426,12 @@ internal static class SimulationContributionApi
             Error(StatusCodes.Status404NotFound, "submission_missing"),
         "publication_dead_letter_missing" =>
             Error(StatusCodes.Status404NotFound, "publication_dead_letter_missing"),
+        "ccb_review_dead_letter_missing" or "ccb_review_job_missing" =>
+            Error(StatusCodes.Status404NotFound, "ccb_review_dead_letter_missing"),
         "submission_id_invalid" or "review_limit_invalid" or
             "contribution_envelope_invalid" or "contribution_envelope_size_invalid" or
-            "publication_queue_limit_invalid" or "publication_operation_id_invalid" =>
+            "publication_queue_limit_invalid" or "publication_operation_id_invalid" or
+            "ccb_review_queue_limit_invalid" or "ccb_review_job_id_invalid" =>
             Error(StatusCodes.Status400BadRequest, code),
         _ => Error(StatusCodes.Status409Conflict, code),
     };

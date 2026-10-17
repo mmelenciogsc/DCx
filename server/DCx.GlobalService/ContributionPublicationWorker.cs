@@ -45,6 +45,9 @@ internal sealed class ContributionPublicationWorker(
         {
             try
             {
+                await governance.ProcessReadyCcbReviewJobsAsync(
+                    DateTimeOffset.UtcNow,
+                    stoppingToken).ConfigureAwait(false);
                 await governance.ProcessReadyPublicationIntentsAsync(
                     DateTimeOffset.UtcNow,
                     stoppingToken).ConfigureAwait(false);

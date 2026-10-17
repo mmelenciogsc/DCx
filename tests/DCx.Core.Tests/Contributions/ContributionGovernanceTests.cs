@@ -67,6 +67,9 @@ public sealed class ContributionGovernanceTests : IDisposable
         var prepared = Prepare(candidate, "nonce-risky-123456789012");
 
         Assert.Equal(ContributionState.Quarantined, await governance.IntakeAsync(prepared, now));
+        var status = await governance.GetReviewItemAsync(prepared.SubmissionId);
+        Assert.Contains("secret.api_credential", status.FindingCodes);
+        Assert.Contains("pii.email", status.FindingCodes);
         var exception = await Assert.ThrowsAsync<ContributionPolicyException>(() =>
             governance.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now));
         Assert.Equal("quarantine_findings_present", exception.Code);
@@ -503,6 +506,201 @@ public sealed class ContributionGovernanceTests : IDisposable
         var corrupt = await Assert.ThrowsAsync<ContributionPolicyException>(() =>
             governance.GetPublicationQueueAsync());
         Assert.Equal("publication_queue_corrupt", corrupt.Code);
+    }
+
+    [Fact]
+    public async Task CcbApprovalRequest_IsDurablyQueuedBeforeSandboxExecution()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "ccb-review-worker-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "ccb-review-worker-governance");
+        var executor = new FixtureSandboxExecutor();
+        var governance = await ContributionGovernanceService.OpenForContinuousWorkerAsync(
+            governanceRoot, registry, executor);
+        var artifact = CcbContributionPackageTests.CreatePackage();
+        var candidate = CcbCandidate(
+            "candidate:ccb-review-worker",
+            "tool:community-upper",
+            Convert.ToHexStringLower(SHA256.HashData(artifact)));
+        var prepared = Prepare(candidate, "nonce-ccb-review-worker");
+        await governance.IntakeAsync(prepared, artifact, now);
+
+        var workerRequired = await Assert.ThrowsAsync<ContributionPolicyException>(() =>
+            governance.RequestApprovalAsync(
+                prepared.SubmissionId,
+                "reviewer:fixture",
+                now,
+                ccbReviewWorkerEnabled: false));
+        Assert.Equal("ccb_review_worker_required", workerRequired.Code);
+        Assert.Empty(await governance.GetCcbReviewQueueAsync());
+        var request = await governance.RequestApprovalAsync(
+            prepared.SubmissionId, "reviewer:fixture", now, ccbReviewWorkerEnabled: true);
+        Assert.True(request.Queued);
+        Assert.NotNull(request.ReviewJobId);
+        Assert.Null(request.Release);
+        Assert.Equal(0, executor.ExecutionCount);
+        Assert.Null(await registry.GetLatestAsync());
+        Assert.Equal(request.ReviewJobId, Assert.Single(await governance.GetCcbReviewQueueAsync()).JobId);
+
+        Assert.Equal(
+            new CcbReviewWorkerResult(1, 0, 0),
+            await governance.ProcessReadyCcbReviewJobsAsync(DateTimeOffset.UtcNow));
+
+        Assert.Equal(2, executor.ExecutionCount);
+        Assert.Empty(await governance.GetCcbReviewQueueAsync());
+        Assert.Equal(1, (await registry.GetLatestAsync())!.Sequence);
+    }
+
+    [Fact]
+    public async Task ConcurrentCcbReviewWorkers_ClaimSandboxWorkOnce()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var privateKey = key.ExportPkcs8PrivateKey();
+        var registryRoot = Path.Combine(root, "ccb-review-concurrent-registry");
+        await using var registryOne = await GlobalRegistryRepository.OpenAsync(registryRoot, privateKey);
+        await using var registryTwo = await GlobalRegistryRepository.OpenAsync(registryRoot, privateKey);
+        var governanceRoot = Path.Combine(root, "ccb-review-concurrent-governance");
+        var executorOne = new FixtureSandboxExecutor();
+        var executorTwo = new FixtureSandboxExecutor();
+        var governanceOne = await ContributionGovernanceService.OpenForContinuousWorkerAsync(
+            governanceRoot, registryOne, executorOne);
+        var governanceTwo = await ContributionGovernanceService.OpenForContinuousWorkerAsync(
+            governanceRoot, registryTwo, executorTwo);
+        var artifact = CcbContributionPackageTests.CreatePackage();
+        var candidate = CcbCandidate(
+            "candidate:ccb-review-concurrent",
+            "tool:community-upper",
+            Convert.ToHexStringLower(SHA256.HashData(artifact)));
+        var prepared = Prepare(candidate, "nonce-ccb-review-concurrent");
+        await governanceOne.IntakeAsync(prepared, artifact, now);
+        await governanceOne.RequestApprovalAsync(
+            prepared.SubmissionId, "reviewer:fixture", now, ccbReviewWorkerEnabled: true);
+
+        var results = await Task.WhenAll(
+            governanceOne.ProcessReadyCcbReviewJobsAsync(now),
+            governanceTwo.ProcessReadyCcbReviewJobsAsync(now));
+
+        Assert.Equal(1, results.Sum(result => result.Completed));
+        Assert.Equal(0, results.Sum(result => result.Failed));
+        Assert.Equal(2, executorOne.ExecutionCount + executorTwo.ExecutionCount);
+        Assert.Equal(1, (await registryOne.GetLatestAsync())!.Sequence);
+        Assert.Empty(await governanceOne.GetCcbReviewQueueAsync());
+    }
+
+    [Fact]
+    public async Task CcbReviewWorker_RejectsMalformedLeaseAndDeadLettersAttemptLimit()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "ccb-review-lease-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "ccb-review-lease-governance");
+        var executor = new FixtureSandboxExecutor();
+        var governance = await ContributionGovernanceService.OpenForContinuousWorkerAsync(
+            governanceRoot, registry, executor);
+        var artifact = CcbContributionPackageTests.CreatePackage();
+        var candidate = CcbCandidate(
+            "candidate:ccb-review-lease",
+            "tool:community-upper",
+            Convert.ToHexStringLower(SHA256.HashData(artifact)));
+        var prepared = Prepare(candidate, "nonce-ccb-review-lease");
+        await governance.IntakeAsync(prepared, artifact, now);
+        var request = await governance.RequestApprovalAsync(
+            prepared.SubmissionId,
+            "reviewer:fixture",
+            now,
+            ccbReviewWorkerEnabled: true);
+
+        await UpdateGovernanceAsync(
+            governanceRoot,
+            $"""
+            INSERT INTO ccb_review_job_leases(
+                job_id, lease_owner, lease_token, acquired_utc, expires_utc, attempt_count)
+            VALUES('{request.ReviewJobId}', 'worker-fixture', 'invalid-token',
+                   '2000-01-01T00:00:00.0000000+00:00',
+                   '2000-01-01T00:01:00.0000000+00:00', 1);
+            """);
+        var corrupt = await Assert.ThrowsAsync<ContributionPolicyException>(() =>
+            governance.ProcessReadyCcbReviewJobsAsync(now));
+        Assert.Equal("ccb_review_lease_corrupt", corrupt.Code);
+        Assert.Equal(0, executor.ExecutionCount);
+
+        await UpdateGovernanceAsync(
+            governanceRoot,
+            """
+            UPDATE ccb_review_job_leases
+            SET lease_token = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                acquired_utc = '2000-01-01T00:00:00.0000000+00:00',
+                expires_utc = '2000-01-01T00:01:00.0000000+00:00',
+                attempt_count = 20;
+            """);
+        Assert.Equal(
+            new CcbReviewWorkerResult(0, 0, 0),
+            await governance.ProcessReadyCcbReviewJobsAsync(now));
+        var queued = Assert.Single(await governance.GetCcbReviewQueueAsync());
+        Assert.Equal("ccb_review_attempt_limit", queued.FailureCode);
+        Assert.Equal(5, queued.ConsecutiveFailures);
+        Assert.NotNull(queued.DeadLetteredUtc);
+        Assert.Equal(0, executor.ExecutionCount);
+
+        var retryTime = now.AddMinutes(1);
+        queued = await governance.RetryCcbReviewDeadLetterAsync(queued.JobId, retryTime);
+        Assert.Equal(1, queued.RemediationCount);
+        Assert.Equal(
+            new CcbReviewWorkerResult(1, 0, 0),
+            await governance.ProcessReadyCcbReviewJobsAsync(retryTime));
+        Assert.Equal(2, executor.ExecutionCount);
+        Assert.Empty(await governance.GetCcbReviewQueueAsync());
+    }
+
+    [Fact]
+    public async Task FailedCcbReview_DeadLettersBodyFreeAndRequiresExplicitRetry()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "ccb-review-dead-letter-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "ccb-review-dead-letter-governance");
+        var governance = await ContributionGovernanceService.OpenForContinuousWorkerAsync(
+            governanceRoot, registry, new FixtureSandboxExecutor(outputMismatch: true));
+        var artifact = CcbContributionPackageTests.CreatePackage();
+        const string privateBody = "A private queued CCB description that must not enter worker status.";
+        var candidate = CcbCandidate(
+            "candidate:ccb-review-dead-letter",
+            "tool:community-upper",
+            Convert.ToHexStringLower(SHA256.HashData(artifact))) with { Body = privateBody };
+        var prepared = Prepare(candidate, "nonce-ccb-review-dead-letter");
+        await governance.IntakeAsync(prepared, artifact, now);
+        var request = await governance.RequestApprovalAsync(
+            prepared.SubmissionId, "reviewer:fixture", now, ccbReviewWorkerEnabled: true);
+
+        Assert.Equal(
+            new CcbReviewWorkerResult(0, 1, 1),
+            await governance.ProcessReadyCcbReviewJobsAsync(now));
+        var queued = Assert.Single(await governance.GetCcbReviewQueueAsync());
+        Assert.Equal(request.ReviewJobId, queued.JobId);
+        Assert.Equal("ccb_sandbox_output_mismatch", queued.FailureCode);
+        Assert.NotNull(queued.DeadLetteredUtc);
+        Assert.DoesNotContain(privateBody, JsonSerializer.Serialize(queued), StringComparison.Ordinal);
+        Assert.Null(await registry.GetLatestAsync());
+
+        var retryTime = now.AddMinutes(1);
+        queued = await governance.RetryCcbReviewDeadLetterAsync(queued.JobId, retryTime);
+        Assert.Equal(0, queued.ConsecutiveFailures);
+        Assert.Equal(1, queued.RemediationCount);
+        Assert.Equal(retryTime, queued.NextAttemptUtc);
+        Assert.Equal(
+            new CcbReviewWorkerResult(0, 1, 1),
+            await governance.ProcessReadyCcbReviewJobsAsync(retryTime));
+
+        await UpdateGovernanceAsync(
+            governanceRoot,
+            """
+            PRAGMA ignore_check_constraints = ON;
+            UPDATE ccb_review_jobs SET failure_code = 'INVALID persisted review failure';
+            """);
+        var corrupt = await Assert.ThrowsAsync<ContributionPolicyException>(() =>
+            governance.GetCcbReviewQueueAsync());
+        Assert.Equal("ccb_review_queue_corrupt", corrupt.Code);
     }
 
     [Fact]

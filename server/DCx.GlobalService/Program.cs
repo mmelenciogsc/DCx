@@ -139,7 +139,11 @@ app.MapGet("/api/artifacts/{sha256}", async (
 
 if (contributionApiOptions is not null && governance is not null)
 {
-    SimulationContributionApi.Map(app, governance, contributionApiOptions);
+    SimulationContributionApi.Map(
+        app,
+        governance,
+        contributionApiOptions,
+        contributionWorkerOptions is not null);
 }
 
 await app.RunAsync();

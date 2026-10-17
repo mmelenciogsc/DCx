@@ -45,7 +45,7 @@ public sealed record ContributionPublicationWorkerResult(
     int Failed,
     int DeadLettered);
 
-public sealed class ContributionGovernanceService
+public sealed partial class ContributionGovernanceService
 {
     private const int MaximumRecoveryBatch = 100;
     private const int MaximumPublicationAttempts = 20;
@@ -835,6 +835,7 @@ public sealed class ContributionGovernanceService
             );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await InitializeCcbReviewQueueAsync(connection, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
@@ -1957,7 +1958,7 @@ public sealed class ContributionGovernanceService
         if (findingCodes.Length > 100 || findingCodes.Any(code =>
                 code.Length is < 1 or > 64 ||
                 code.Any(character =>
-                    !char.IsAsciiLetterOrDigit(character) && character is not '_' and not '-')))
+                    !char.IsAsciiLetterOrDigit(character) && character is not '_' and not '-' and not '.')))
         {
             throw new ContributionPolicyException("submission_corrupt");
         }
