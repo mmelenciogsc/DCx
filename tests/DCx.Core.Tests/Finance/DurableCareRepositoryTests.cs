@@ -148,7 +148,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(3L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(4L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         {
             await connection.OpenAsync();
             var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 4;";
+            command.CommandText = "PRAGMA user_version = 5;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -177,7 +177,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(4L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(5L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -240,7 +240,13 @@ public sealed class DurableCareRepositoryTests : IDisposable
             new CarePeriodInput(2026, 1, 10_000, 0, 0, 0, 0, MinimumPayoutCents: 100),
             [new ContributorUsageWeight("contributor:one", 1m)]);
         await repository.PostAsync(CareLedgerJournal.ContributorAccrual("care:2026-01", care, now));
-        var preview = PayoutBatchPreviewFactory.CreateSandbox("batch:durable", care);
+        var preview = PayoutBatchPreviewFactory.CreateSandbox(
+            "batch:durable",
+            care,
+            new Dictionary<string, PayoutRecipientApproval>
+            {
+                ["contributor:one"] = Approval("contributor:one"),
+            });
         var provider = new FixtureProvider(true);
 
         var result = await new DurablePayoutCoordinator(repository, provider).ExecuteAsync(
@@ -266,7 +272,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
             "batch:failed",
             PayoutExecutionMode.Sandbox,
             new DateOnly(2026, 4, 1),
-            [new PayoutItem("contributor:one", 500)]);
+            [new PayoutItem("contributor:one", 500, Approval("contributor:one"))]);
         var result = await new DurablePayoutCoordinator(repository, new FixtureProvider(false)).ExecuteAsync(
             preview, true, true, new DateOnly(2026, 4, 1), now);
 
@@ -379,6 +385,122 @@ public sealed class DurableCareRepositoryTests : IDisposable
             reopened.StoreProviderBatchIdAsync(second.BatchId, "PB-123456"));
     }
 
+    [Fact]
+    public async Task PartialPayout_PostsOnlySuccessfulItemsAndPersistsExactItemStates()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var preview = new PayoutBatchPreview(
+            "batch:partial-items",
+            PayoutExecutionMode.Sandbox,
+            new DateOnly(2026, 4, 1),
+            [
+                new PayoutItem("contributor:one", 500, Approval("contributor:one")),
+                new PayoutItem("contributor:two", 700, Approval("contributor:two")),
+            ]);
+        await AccrueAsync(repository, preview);
+        Assert.True(await repository.ReservePayoutAsync(
+            preview, true, true, preview.EligibilityDate, now));
+        var result = new PayoutBatchResult(
+            preview.BatchId,
+            PayoutBatchOutcome.PartiallySucceeded,
+            "SUCCESS",
+            [
+                new PayoutItemResult("contributor:two", 700, false, "FAILED"),
+                new PayoutItemResult("contributor:one", 500, true, "SUCCESS"),
+            ]);
+
+        Assert.True(await repository.CompletePayoutAsync(preview, result, now));
+        var state = (await repository.GetPayoutStateAsync(preview.BatchId))!;
+        Assert.Equal("partially_succeeded", state.Status);
+        Assert.Equal(500, state.PaidCents);
+        Assert.Equal(-700, await repository.BalanceAsync(LedgerAccount.ContributorPayable));
+        Assert.Equal(-500, await repository.BalanceAsync(LedgerAccount.Cash));
+        Assert.True(await repository.ReconcilesAsync());
+
+        var reopened = await DurableCareRepository.OpenAsync(root);
+        var items = await reopened.GetPayoutItemStatesAsync(preview.BatchId);
+        Assert.Collection(
+            items,
+            item =>
+            {
+                Assert.Equal("contributor:one", item.ContributorPseudonym);
+                Assert.True(item.Succeeded);
+                Assert.Equal(500, item.AmountCents);
+                Assert.Equal(Approval("contributor:one").DestinationSha256, item.DestinationSha256);
+            },
+            item =>
+            {
+                Assert.Equal("contributor:two", item.ContributorPseudonym);
+                Assert.False(item.Succeeded);
+                Assert.Equal(700, item.AmountCents);
+            });
+        Assert.False(await reopened.CompletePayoutAsync(preview, result, now.AddMinutes(1)));
+        var conflict = result with
+        {
+            ItemResults =
+            [
+                new PayoutItemResult("contributor:one", 500, false, "FAILED"),
+                new PayoutItemResult("contributor:two", 700, false, "FAILED"),
+            ],
+            Outcome = PayoutBatchOutcome.Failed,
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            reopened.CompletePayoutAsync(preview, conflict, now.AddMinutes(2)));
+    }
+
+    [Fact]
+    public async Task SchemaThreeReservedPayout_IsQuarantinedForRecipientReapproval()
+    {
+        Directory.CreateDirectory(root);
+        var databasePath = Path.Combine(root, "care-ledger.sqlite3");
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Pooling = false,
+        }.ToString();
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE payout_batches(
+                    batch_id TEXT PRIMARY KEY,
+                    preview_sha256 TEXT NOT NULL,
+                    preview_json TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('reserved', 'succeeded', 'failed')),
+                    provider_status TEXT,
+                    provider_batch_id TEXT,
+                    created_utc TEXT NOT NULL,
+                    updated_utc TEXT NOT NULL
+                );
+                INSERT INTO payout_batches(
+                    batch_id, preview_sha256, preview_json, status, provider_batch_id,
+                    created_utc, updated_utc)
+                VALUES('batch:legacy-reserved', 'legacy-preview-digest', '{}', 'reserved',
+                    'PB-LEGACY', $created, $updated);
+                PRAGMA user_version = 3;
+                """;
+            command.Parameters.AddWithValue("$created", now.ToString("O"));
+            command.Parameters.AddWithValue("$updated", now.ToString("O"));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var state = (await repository.GetPayoutStateAsync("batch:legacy-reserved"))!;
+        Assert.Equal("review_required", state.Status);
+        Assert.Equal("RECIPIENT_REAPPROVAL_REQUIRED", state.ProviderStatus);
+        Assert.Equal("PB-LEGACY", await repository.GetProviderBatchIdAsync("batch:legacy-reserved"));
+        Assert.Empty(await repository.GetPendingPayoutsAsync(now.AddDays(1)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.StoreProviderBatchIdAsync("batch:legacy-reserved", "PB-LEGACY"));
+
+        await using var reopened = new SqliteConnection(connectionString);
+        await reopened.OpenAsync();
+        var version = reopened.CreateCommand();
+        version.CommandText = "PRAGMA user_version;";
+        Assert.Equal(4L, (long)(await version.ExecuteScalarAsync())!);
+    }
+
     public void Dispose()
     {
         TestDirectory.DeleteIfExists(root);
@@ -400,7 +522,12 @@ public sealed class DurableCareRepositoryTests : IDisposable
         batchId,
         PayoutExecutionMode.Sandbox,
         new DateOnly(2026, 1, 31),
-        [new PayoutItem("contributor:one", 500)]);
+        [new PayoutItem("contributor:one", 500, Approval("contributor:one"))]);
+
+    private static PayoutRecipientApproval Approval(string contributor) =>
+        PayoutRecipientApproval.Create(
+            $"snapshot:{contributor.Replace(':', '-')}",
+            $"{contributor.Replace(':', '-')}@personal.example.com");
 
     private async Task AccrueAsync(DurableCareRepository repository, PayoutBatchPreview preview) =>
         await repository.PostAsync(new LedgerJournalEntry(
@@ -419,10 +546,16 @@ public sealed class DurableCareRepositoryTests : IDisposable
         public Task<PayoutBatchResult> SendSandboxAsync(PayoutBatchPreview preview, CancellationToken cancellationToken)
         {
             Calls++;
+            var status = succeeds ? "SANDBOX_SUCCESS" : "SANDBOX_FAILED";
             return Task.FromResult(new PayoutBatchResult(
                 preview.BatchId,
-                succeeds,
-                succeeds ? "SANDBOX_SUCCESS" : "SANDBOX_FAILED"));
+                succeeds ? PayoutBatchOutcome.Succeeded : PayoutBatchOutcome.Failed,
+                status,
+                preview.Items.Select(item => new PayoutItemResult(
+                    item.ContributorPseudonym,
+                    item.AmountCents,
+                    succeeds,
+                    status)).ToArray()));
         }
     }
 
@@ -437,18 +570,47 @@ public sealed class DurableCareRepositoryTests : IDisposable
 
         public Task<SandboxPayoutLookupResult> LookupSandboxAsync(
             PayoutBatchPreview preview,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(lookups.GetValueOrDefault(preview.BatchId) ??
-                            new SandboxPayoutLookupResult(
-                                preview.BatchId, SandboxPayoutLookupState.NotFound, null));
+            CancellationToken cancellationToken)
+        {
+            var lookup = lookups.GetValueOrDefault(preview.BatchId) ??
+                new SandboxPayoutLookupResult(
+                    preview.BatchId, SandboxPayoutLookupState.NotFound, null);
+            if (lookup.State == SandboxPayoutLookupState.Succeeded &&
+                lookup.ItemResults is null)
+            {
+                lookup = lookup with
+                {
+                    ItemResults = preview.Items.Select(item => new PayoutItemResult(
+                        item.ContributorPseudonym,
+                        item.AmountCents,
+                        true,
+                        lookup.ProviderStatus!)).ToArray(),
+                };
+            }
+
+            return Task.FromResult(lookup);
+        }
 
         public Task<PayoutBatchResult> SendSandboxAsync(
             PayoutBatchPreview preview,
             CancellationToken cancellationToken)
         {
             SendCalls++;
-            SetLookup(preview.BatchId, SandboxPayoutLookupState.Succeeded, "SANDBOX_SUCCESS");
-            return Task.FromResult(new PayoutBatchResult(preview.BatchId, true, "SANDBOX_SUCCESS"));
+            var results = preview.Items.Select(item => new PayoutItemResult(
+                item.ContributorPseudonym,
+                item.AmountCents,
+                true,
+                "SANDBOX_SUCCESS")).ToArray();
+            lookups[preview.BatchId] = new SandboxPayoutLookupResult(
+                preview.BatchId,
+                SandboxPayoutLookupState.Succeeded,
+                "SANDBOX_SUCCESS",
+                results);
+            return Task.FromResult(new PayoutBatchResult(
+                preview.BatchId,
+                PayoutBatchOutcome.Succeeded,
+                "SANDBOX_SUCCESS",
+                results));
         }
     }
 
@@ -457,6 +619,9 @@ public sealed class DurableCareRepositoryTests : IDisposable
         public Task<PayoutBatchResult> SendSandboxAsync(
             PayoutBatchPreview preview,
             CancellationToken cancellationToken) =>
-            Task.FromResult(new PayoutBatchResult(preview.BatchId, false, "PENDING", false));
+            Task.FromResult(new PayoutBatchResult(
+                preview.BatchId,
+                PayoutBatchOutcome.Pending,
+                "PENDING"));
     }
 }

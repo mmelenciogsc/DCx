@@ -17,27 +17,45 @@ public static class CareLedgerJournal
 
     public static LedgerJournalEntry SandboxPayout(
         string eventId,
-        PayoutBatchPreview preview,
+        long paidCents,
         DateTimeOffset occurredUtc) =>
         new(
             eventId,
             occurredUtc,
             "sandbox_contributor_payout",
             [
-                new LedgerPosting(LedgerAccount.ContributorPayable, preview.TotalCents, 0),
-                new LedgerPosting(LedgerAccount.Cash, 0, preview.TotalCents),
+                new LedgerPosting(LedgerAccount.ContributorPayable, paidCents, 0),
+                new LedgerPosting(LedgerAccount.Cash, 0, paidCents),
             ]);
 }
 
 public static class PayoutBatchPreviewFactory
 {
-    public static PayoutBatchPreview CreateSandbox(string batchId, CarePeriodResult result) =>
-        new(
+    public static PayoutBatchPreview CreateSandbox(
+        string batchId,
+        CarePeriodResult result,
+        IReadOnlyDictionary<string, PayoutRecipientApproval> recipientApprovals)
+    {
+        ArgumentNullException.ThrowIfNull(recipientApprovals);
+        var payable = result.Allocations
+            .Where(item => !item.HeldBelowThreshold && item.AmountCents > 0)
+            .ToArray();
+        if (payable.Length != recipientApprovals.Count ||
+            payable.Any(item => !recipientApprovals.ContainsKey(item.ContributorPseudonym)))
+        {
+            throw new InvalidOperationException(
+                "Every payable contributor requires one exact recipient approval snapshot.");
+        }
+
+        return new PayoutBatchPreview(
             batchId,
             PayoutExecutionMode.Sandbox,
             result.Net60EligibilityDate,
-            result.Allocations
-                .Where(item => !item.HeldBelowThreshold && item.AmountCents > 0)
-                .Select(item => new PayoutItem(item.ContributorPseudonym, item.AmountCents))
+            payable
+                .Select(item => new PayoutItem(
+                    item.ContributorPseudonym,
+                    item.AmountCents,
+                    recipientApprovals[item.ContributorPseudonym]))
                 .ToArray());
+    }
 }

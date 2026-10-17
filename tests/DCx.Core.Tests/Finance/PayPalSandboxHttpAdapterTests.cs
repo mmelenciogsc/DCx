@@ -9,6 +9,9 @@ namespace DCx.Core.Tests.Finance;
 
 public sealed class PayPalSandboxHttpAdapterTests
 {
+    private const string DefaultContributor = "contributor:one";
+    private const string DefaultSnapshotId = "snapshot:contributor-one";
+    private const string DefaultEmail = "contributor-one@personal.example.com";
     private const string ClientId = "sandbox-client-id";
     private const string FixtureCredentialPassword = "sandbox-client-secret-never-log";
     private const string AccessToken = "sandbox-access-token-never-log";
@@ -261,7 +264,7 @@ public sealed class PayPalSandboxHttpAdapterTests
     }
 
     [Fact]
-    public async Task CompletedBatch_RequiresEveryBoundItemToHaveSucceeded()
+    public async Task CompletedBatch_RecordsFailedBoundItemWithoutPostingSuccess()
     {
         var store = new MemoryReferenceStore();
         await store.StoreProviderBatchIdAsync("batch:partial", "PB-PARTIAL");
@@ -279,12 +282,13 @@ public sealed class PayPalSandboxHttpAdapterTests
         });
         using var adapter = Adapter(handler, store: store);
 
-        var exception = await Assert.ThrowsAsync<PayPalSandboxException>(() =>
-            adapter.LookupSandboxAsync(Preview("batch:partial", 500), CancellationToken.None));
+        var lookup = await adapter.LookupSandboxAsync(
+            Preview("batch:partial", 500), CancellationToken.None);
 
-        Assert.Equal(
-            "paypal_sandbox_partial_payout_requires_item_reconciliation",
-            exception.Code);
+        Assert.Equal(SandboxPayoutLookupState.Failed, lookup.State);
+        var item = Assert.Single(lookup.ItemResults!);
+        Assert.False(item.Succeeded);
+        Assert.Equal("FAILED", item.ProviderStatus);
     }
 
     [Fact]
@@ -310,6 +314,81 @@ public sealed class PayPalSandboxHttpAdapterTests
             adapter.LookupSandboxAsync(Preview("batch:mismatch", 500), CancellationToken.None));
 
         Assert.Equal("paypal_sandbox_payout_lookup_response_invalid", exception.Code);
+    }
+
+    [Fact]
+    public async Task RecipientSnapshotSubstitution_IsDeniedBeforeCredentialUse()
+    {
+        var handler = new ScriptedHandler((_, request, _) =>
+            Task.FromResult(Json(request, HttpStatusCode.OK, TokenResponse())));
+        using var adapter = Adapter(
+            handler,
+            new StaticRecipientDirectory(new PayPalSandboxRecipient(
+                DefaultSnapshotId,
+                DefaultContributor,
+                "changed-recipient@personal.example.com",
+                true)));
+
+        var exception = await Assert.ThrowsAsync<PayPalSandboxException>(() =>
+            adapter.SendSandboxAsync(
+                Preview("batch:recipient-substitution", 500),
+                CancellationToken.None));
+
+        Assert.Equal("paypal_sandbox_recipient_snapshot_invalid", exception.Code);
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
+    public async Task CompletedBatch_ReturnsExactMixedItemOutcomes()
+    {
+        var store = new MemoryReferenceStore();
+        await store.StoreProviderBatchIdAsync("batch:mixed-items", "PB-MIXED");
+        var handler = new ScriptedHandler(async (index, request, cancellationToken) =>
+        {
+            if (index == 0)
+            {
+                await AssertTokenRequestAsync(request, cancellationToken);
+                return Json(request, HttpStatusCode.OK, TokenResponse());
+            }
+
+            return Json(request, HttpStatusCode.OK, MixedPayoutLookupResponse());
+        });
+        using var adapter = Adapter(handler, store: store);
+        var preview = new PayoutBatchPreview(
+            "batch:mixed-items",
+            PayoutExecutionMode.Sandbox,
+            new DateOnly(2026, 4, 1),
+            [
+                new PayoutItem(
+                    DefaultContributor,
+                    500,
+                    PayoutRecipientApproval.Create(DefaultSnapshotId, DefaultEmail)),
+                new PayoutItem(
+                    "contributor:two",
+                    700,
+                    PayoutRecipientApproval.Create(
+                        "snapshot:contributor-two",
+                        "contributor-two@personal.example.com")),
+            ]);
+
+        var lookup = await adapter.LookupSandboxAsync(preview, CancellationToken.None);
+
+        Assert.Equal(SandboxPayoutLookupState.PartiallySucceeded, lookup.State);
+        Assert.Collection(
+            lookup.ItemResults!,
+            item =>
+            {
+                Assert.Equal(DefaultContributor, item.ContributorPseudonym);
+                Assert.True(item.Succeeded);
+                Assert.Equal(500, item.AmountCents);
+            },
+            item =>
+            {
+                Assert.Equal("contributor:two", item.ContributorPseudonym);
+                Assert.False(item.Succeeded);
+                Assert.Equal("FAILED", item.ProviderStatus);
+                Assert.Equal(700, item.AmountCents);
+            });
     }
 
     [Fact]
@@ -422,15 +501,22 @@ public sealed class PayPalSandboxHttpAdapterTests
             new StaticCredentialSource(),
             "WHDCXSANDBOX",
             new StaticRecipientDirectory(new PayPalSandboxRecipient(
-                "not-eligible@personal.example.com", false)),
+                DefaultSnapshotId,
+                DefaultContributor,
+                DefaultEmail,
+                false)),
             new MemoryReferenceStore());
         var exception = await Assert.ThrowsAsync<PayPalSandboxException>(() =>
             ineligible.SendSandboxAsync(Preview("batch:ineligible", 500), CancellationToken.None));
-        Assert.Equal("paypal_sandbox_recipient_ineligible", exception.Code);
+        Assert.Equal("paypal_sandbox_recipient_snapshot_invalid", exception.Code);
         Assert.Equal(0, handler.Calls);
 
         var duplicateDirectory = new StaticRecipientDirectory(
-            new PayPalSandboxRecipient("same@personal.example.com", true));
+            new PayPalSandboxRecipient(
+                "snapshot:one",
+                "contributor:one",
+                "same@personal.example.com",
+                true));
         using var duplicate = new PayPalSandboxHttpAdapter(
             new ScriptedHandler((_, request, _) =>
                 Task.FromResult(Json(request, HttpStatusCode.OK, TokenResponse()))),
@@ -442,10 +528,19 @@ public sealed class PayPalSandboxHttpAdapterTests
             "batch:duplicate-recipient",
             PayoutExecutionMode.Sandbox,
             new DateOnly(2026, 4, 1),
-            [new PayoutItem("contributor:one", 100), new PayoutItem("contributor:two", 200)]);
+            [
+                new PayoutItem(
+                    "contributor:one",
+                    100,
+                    PayoutRecipientApproval.Create("snapshot:one", "same@personal.example.com")),
+                new PayoutItem(
+                    "contributor:two",
+                    200,
+                    PayoutRecipientApproval.Create("snapshot:two", "same@personal.example.com")),
+            ]);
         var duplicateException = await Assert.ThrowsAsync<PayPalSandboxException>(() =>
             duplicate.SendSandboxAsync(duplicatePreview, CancellationToken.None));
-        Assert.Equal("paypal_sandbox_recipient_ineligible", duplicateException.Code);
+        Assert.Equal("paypal_sandbox_recipient_snapshot_invalid", duplicateException.Code);
     }
 
     [Fact]
@@ -484,14 +579,20 @@ public sealed class PayPalSandboxHttpAdapterTests
             new StaticCredentialSource(),
             "WHDCXSANDBOX",
             directory ?? new StaticRecipientDirectory(new PayPalSandboxRecipient(
-                "contributor-one@personal.example.com", true)),
+                DefaultSnapshotId,
+                DefaultContributor,
+                DefaultEmail,
+                true)),
             store ?? new MemoryReferenceStore());
 
     private static PayoutBatchPreview Preview(string batchId, long cents) => new(
         batchId,
         PayoutExecutionMode.Sandbox,
         new DateOnly(2026, 4, 1),
-        [new PayoutItem("contributor:one", cents)]);
+        [new PayoutItem(
+            DefaultContributor,
+            cents,
+            PayoutRecipientApproval.Create(DefaultSnapshotId, DefaultEmail))]);
 
     private static PayPalSandboxWebhookVerificationEvidence Evidence() => new(
         "SHA256withRSA",
@@ -513,6 +614,11 @@ public sealed class PayPalSandboxHttpAdapterTests
         string transactionStatus,
         string amount) =>
         $"{{\"total_items\":1,\"total_pages\":1,\"batch_header\":{{\"payout_batch_id\":\"{providerId}\",\"batch_status\":\"{batchStatus}\",\"sender_batch_header\":{{\"sender_batch_id\":\"{senderId}\"}}}},\"items\":[{{\"payout_item_id\":\"PI-000001\",\"payout_batch_id\":\"{providerId}\",\"transaction_status\":\"{transactionStatus}\",\"payout_item\":{{\"amount\":{{\"currency\":\"USD\",\"value\":\"{amount}\"}},\"receiver\":\"contributor-one@personal.example.com\",\"sender_item_id\":\"dcx-000001\"}}}}]}}";
+
+    private static string MixedPayoutLookupResponse() =>
+        """
+        {"total_items":2,"total_pages":1,"batch_header":{"payout_batch_id":"PB-MIXED","batch_status":"SUCCESS","sender_batch_header":{"sender_batch_id":"batch:mixed-items"}},"items":[{"payout_item_id":"PI-000001","payout_batch_id":"PB-MIXED","transaction_status":"SUCCESS","payout_item":{"amount":{"currency":"USD","value":"5.00"},"receiver":"contributor-one@personal.example.com","sender_item_id":"dcx-000001"}},{"payout_item_id":"PI-000002","payout_batch_id":"PB-MIXED","transaction_status":"FAILED","payout_item":{"amount":{"currency":"USD","value":"7.00"},"receiver":"contributor-two@personal.example.com","sender_item_id":"dcx-000002"}}]}
+        """;
 
     private static async Task AssertTokenRequestAsync(
         HttpRequestMessage request,
@@ -552,7 +658,7 @@ public sealed class PayPalSandboxHttpAdapterTests
         : IPayPalSandboxRecipientDirectory
     {
         public ValueTask<PayPalSandboxRecipient?> ResolveAsync(
-            string contributorPseudonym,
+            string snapshotId,
             CancellationToken cancellationToken) =>
             ValueTask.FromResult<PayPalSandboxRecipient?>(recipient);
     }

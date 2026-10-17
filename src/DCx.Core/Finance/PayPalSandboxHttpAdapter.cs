@@ -74,12 +74,16 @@ public sealed record PayPalSandboxWebhookVerificationEvidence(
     string TransmissionSignature,
     string TransmissionTime);
 
-public sealed record PayPalSandboxRecipient(string Email, bool IsVerifiedAndEligible);
+public sealed record PayPalSandboxRecipient(
+    string SnapshotId,
+    string ContributorPseudonym,
+    string Email,
+    bool IsVerifiedAndEligible);
 
 public interface IPayPalSandboxRecipientDirectory
 {
     ValueTask<PayPalSandboxRecipient?> ResolveAsync(
-        string contributorPseudonym,
+        string snapshotId,
         CancellationToken cancellationToken);
 }
 
@@ -105,6 +109,9 @@ public static class PayPalSandboxValidation
 
     internal static void RequireContributorPseudonym(string value) =>
         RequireIdentifier(value, 128, "contributor pseudonym");
+
+    internal static void RequireRecipientSnapshotId(string value) =>
+        RequireIdentifier(value, 128, "recipient snapshot");
 
     private static void RequireIdentifier(string value, int maximumLength, string label)
     {
@@ -379,7 +386,7 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
                 throw new PayPalSandboxException("paypal_sandbox_payout_lookup_response_invalid");
             }
 
-            return LookupFromStatus(preview.BatchId, parsed.Status);
+            return LookupFromStatus(preview.BatchId, parsed);
         }
         finally
         {
@@ -547,7 +554,7 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
             try
             {
                 recipient = await recipientDirectory.ResolveAsync(
-                        item.ContributorPseudonym, cancellationToken)
+                        item.RecipientApproval.SnapshotId, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -560,9 +567,22 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
             }
 
             if (recipient is null || !recipient.IsVerifiedAndEligible ||
-                !IsValidEmail(recipient.Email) || !uniqueEmails.Add(recipient.Email))
+                !string.Equals(
+                    recipient.SnapshotId,
+                    item.RecipientApproval.SnapshotId,
+                    StringComparison.Ordinal) ||
+                !string.Equals(
+                    recipient.ContributorPseudonym,
+                    item.ContributorPseudonym,
+                    StringComparison.Ordinal) ||
+                !IsValidEmail(recipient.Email) ||
+                !string.Equals(
+                    DestinationSha256(recipient.Email),
+                    item.RecipientApproval.DestinationSha256,
+                    StringComparison.Ordinal) ||
+                !uniqueEmails.Add(recipient.Email))
             {
-                throw new PayPalSandboxException("paypal_sandbox_recipient_ineligible");
+                throw new PayPalSandboxException("paypal_sandbox_recipient_snapshot_invalid");
             }
 
             recipients.Add(recipient);
@@ -706,9 +726,11 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
         }
 
         var expectedItems = preview.Items
-            .Select((item, index) => new KeyValuePair<string, long>(
-                $"dcx-{index + 1:D6}", item.AmountCents))
+            .Select((item, index) => new KeyValuePair<string, ExpectedPayoutItem>(
+                $"dcx-{index + 1:D6}", new ExpectedPayoutItem(index, item)))
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        var itemResults = new PayoutItemResult[preview.Items.Count];
+        var hasPendingItem = false;
         var seenSenderItems = new HashSet<string>(StringComparer.Ordinal);
         var seenProviderItems = new HashSet<string>(StringComparer.Ordinal);
         foreach (var value in items.EnumerateArray())
@@ -730,19 +752,26 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
             var amount = RequireObject(RequireProperty(detail, "amount", errorCode), errorCode);
             var currency = RequireString(amount, "currency", 3, errorCode);
             var amountValue = RequireString(amount, "value", 64, errorCode);
-            if (!expectedItems.TryGetValue(senderItemId, out var expectedCents) ||
+            if (!expectedItems.TryGetValue(senderItemId, out var expected) ||
                 !seenSenderItems.Add(senderItemId) || !IsValidEmail(receiver) ||
                 !string.Equals(currency, "USD", StringComparison.Ordinal) ||
-                !TryParseUsdCents(amountValue, out var actualCents) || actualCents != expectedCents)
+                !TryParseUsdCents(amountValue, out var actualCents) ||
+                actualCents != expected.Item.AmountCents ||
+                !string.Equals(
+                    DestinationSha256(receiver),
+                    expected.Item.RecipientApproval.DestinationSha256,
+                    StringComparison.Ordinal))
             {
                 throw new PayPalSandboxException(errorCode);
             }
 
-            if (transactionStatus != "SUCCESS")
-            {
-                throw new PayPalSandboxException(
-                    "paypal_sandbox_partial_payout_requires_item_reconciliation");
-            }
+            var succeeded = transactionStatus == "SUCCESS";
+            hasPendingItem |= transactionStatus is "PENDING" or "UNCLAIMED" or "ONHOLD";
+            itemResults[expected.Index] = new PayoutItemResult(
+                expected.Item.ContributorPseudonym,
+                expected.Item.AmountCents,
+                succeeded,
+                transactionStatus);
         }
 
         if (seenSenderItems.Count != expectedItems.Count)
@@ -750,7 +779,11 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
             throw new PayPalSandboxException(errorCode);
         }
 
-        return response;
+        return response with
+        {
+            ItemResults = itemResults,
+            HasPendingItem = hasPendingItem,
+        };
     }
 
     private static PayoutResponse ParsePayoutHeader(
@@ -800,11 +833,28 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
         lookup.State switch
         {
             SandboxPayoutLookupState.Succeeded =>
-                new PayoutBatchResult(lookup.BatchId, true, lookup.ProviderStatus!, true),
+                new PayoutBatchResult(
+                    lookup.BatchId,
+                    PayoutBatchOutcome.Succeeded,
+                    lookup.ProviderStatus!,
+                    lookup.ItemResults),
             SandboxPayoutLookupState.Failed =>
-                new PayoutBatchResult(lookup.BatchId, false, lookup.ProviderStatus!, true),
+                new PayoutBatchResult(
+                    lookup.BatchId,
+                    PayoutBatchOutcome.Failed,
+                    lookup.ProviderStatus!,
+                    lookup.ItemResults),
+            SandboxPayoutLookupState.PartiallySucceeded =>
+                new PayoutBatchResult(
+                    lookup.BatchId,
+                    PayoutBatchOutcome.PartiallySucceeded,
+                    lookup.ProviderStatus!,
+                    lookup.ItemResults),
             SandboxPayoutLookupState.Pending =>
-                new PayoutBatchResult(lookup.BatchId, false, lookup.ProviderStatus!, false),
+                new PayoutBatchResult(
+                    lookup.BatchId,
+                    PayoutBatchOutcome.Pending,
+                    lookup.ProviderStatus!),
             _ => throw new PayPalSandboxException("paypal_sandbox_payout_lookup_state_invalid"),
         };
 
@@ -812,42 +862,87 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
         status switch
         {
             "SUCCESS" => new PayoutBatchResult(
-                localBatchId, false, "SUCCESS_AWAITING_ITEM_RECONCILIATION", false),
-            "DENIED" or "CANCELED" => new PayoutBatchResult(localBatchId, false, status, true),
-            "PENDING" or "PROCESSING" => new PayoutBatchResult(localBatchId, false, status, false),
+                localBatchId,
+                PayoutBatchOutcome.Pending,
+                "SUCCESS_AWAITING_ITEM_RECONCILIATION"),
+            "DENIED" or "CANCELED" => new PayoutBatchResult(
+                localBatchId, PayoutBatchOutcome.Failed, status),
+            "PENDING" or "PROCESSING" => new PayoutBatchResult(
+                localBatchId, PayoutBatchOutcome.Pending, status),
             _ => throw new PayPalSandboxException("paypal_sandbox_payout_status_invalid"),
         };
 
-    private static SandboxPayoutLookupResult LookupFromStatus(string localBatchId, string status) =>
-        status switch
+    private static SandboxPayoutLookupResult LookupFromStatus(
+        string localBatchId,
+        PayoutResponse response)
+    {
+        if (response.Status == "SUCCESS" && response.ItemResults is { Count: > 0 } itemResults)
         {
-            "SUCCESS" => new SandboxPayoutLookupResult(
-                localBatchId, SandboxPayoutLookupState.Succeeded, status),
+            if (response.HasPendingItem)
+            {
+                return new SandboxPayoutLookupResult(
+                    localBatchId,
+                    SandboxPayoutLookupState.Pending,
+                    "SUCCESS_WITH_PENDING_ITEMS");
+            }
+
+            var succeeded = itemResults.Count(item => item.Succeeded);
+            var state = succeeded switch
+            {
+                0 => SandboxPayoutLookupState.Failed,
+                var count when count == itemResults.Count => SandboxPayoutLookupState.Succeeded,
+                _ => SandboxPayoutLookupState.PartiallySucceeded,
+            };
+            return new SandboxPayoutLookupResult(
+                localBatchId,
+                state,
+                response.Status,
+                itemResults);
+        }
+
+        return response.Status switch
+        {
             "DENIED" or "CANCELED" => new SandboxPayoutLookupResult(
-                localBatchId, SandboxPayoutLookupState.Failed, status),
+                localBatchId, SandboxPayoutLookupState.Failed, response.Status),
             "PENDING" or "PROCESSING" => new SandboxPayoutLookupResult(
-                localBatchId, SandboxPayoutLookupState.Pending, status),
+                localBatchId, SandboxPayoutLookupState.Pending, response.Status),
             _ => throw new PayPalSandboxException("paypal_sandbox_payout_status_invalid"),
         };
+    }
 
     private static void ValidatePreview(PayoutBatchPreview preview)
     {
         ArgumentNullException.ThrowIfNull(preview);
         PayPalSandboxValidation.RequireLocalBatchId(preview.BatchId);
-        if (preview.Mode != PayoutExecutionMode.Sandbox || preview.Items.Count is < 1 or > MaximumPayoutItems)
+        if (preview.Mode != PayoutExecutionMode.Sandbox || preview.Items is null ||
+            preview.Items.Count is < 1 or > MaximumPayoutItems)
         {
             throw new PayPalSandboxException("paypal_sandbox_payout_preview_invalid");
         }
 
         long total = 0;
         var pseudonyms = new HashSet<string>(StringComparer.Ordinal);
+        var snapshots = new HashSet<string>(StringComparer.Ordinal);
         try
         {
             foreach (var item in preview.Items)
             {
+                if (item is null)
+                {
+                    throw new PayPalSandboxException("paypal_sandbox_payout_preview_invalid");
+                }
                 PayPalSandboxValidation.RequireContributorPseudonym(item.ContributorPseudonym);
+                if (item.RecipientApproval is null)
+                {
+                    throw new PayPalSandboxException("paypal_sandbox_payout_preview_invalid");
+                }
+                PayPalSandboxValidation.RequireRecipientSnapshotId(
+                    item.RecipientApproval.SnapshotId);
                 if (item.AmountCents is < 1 or > MaximumPayoutItemCents ||
-                    !pseudonyms.Add(item.ContributorPseudonym))
+                    !PayoutContractValidation.IsLowerSha256(
+                        item.RecipientApproval.DestinationSha256) ||
+                    !pseudonyms.Add(item.ContributorPseudonym) ||
+                    !snapshots.Add(item.RecipientApproval.SnapshotId))
                 {
                     throw new PayPalSandboxException("paypal_sandbox_payout_preview_invalid");
                 }
@@ -943,6 +1038,19 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
 
     private static string Cents(long value) =>
         string.Create(CultureInfo.InvariantCulture, $"{value / 100}.{value % 100:D2}");
+
+    private static string DestinationSha256(string value)
+    {
+        var bytes = Encoding.UTF8.GetBytes(value);
+        try
+        {
+            return Convert.ToHexStringLower(SHA256.HashData(bytes));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
 
     private static async Task<byte[]> ReadJsonBodyAsync(
         HttpResponseMessage response,
@@ -1097,5 +1205,11 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
         }
     }
 
-    private sealed record PayoutResponse(string ProviderBatchId, string Status);
+    private sealed record ExpectedPayoutItem(int Index, PayoutItem Item);
+
+    private sealed record PayoutResponse(
+        string ProviderBatchId,
+        string Status,
+        IReadOnlyList<PayoutItemResult>? ItemResults = null,
+        bool HasPendingItem = false);
 }

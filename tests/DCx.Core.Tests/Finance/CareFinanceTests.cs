@@ -117,7 +117,13 @@ public sealed class CareFinanceTests
         var care = CareAllocationCalculator.Calculate(
             new CarePeriodInput(2026, 1, 10_000, 500, 300, 1_000, 200, MinimumPayoutCents: 100),
             [new ContributorUsageWeight("contributor:a", 1m)]);
-        var preview = PayoutBatchPreviewFactory.CreateSandbox("batch:one", care);
+        var preview = PayoutBatchPreviewFactory.CreateSandbox(
+            "batch:one",
+            care,
+            new Dictionary<string, PayoutRecipientApproval>
+            {
+                ["contributor:a"] = Approval("contributor:a"),
+            });
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.ExecuteAsync(
             preview, true, false, new DateOnly(2026, 4, 1)));
@@ -142,7 +148,7 @@ public sealed class CareFinanceTests
             "batch:failure",
             PayoutExecutionMode.Sandbox,
             new DateOnly(2026, 4, 1),
-            [new PayoutItem("contributor:a", 1_000)]);
+            [new PayoutItem("contributor:a", 1_000, Approval("contributor:a"))]);
 
         var result = await new PayoutSafetyCoordinator(provider).ExecuteAsync(
             preview, true, true, new DateOnly(2026, 4, 2));
@@ -152,8 +158,39 @@ public sealed class CareFinanceTests
         Assert.Equal(1, provider.Calls);
     }
 
+    [Fact]
+    public void PayoutPreviewFactory_RequiresOneExactRecipientSnapshotPerPayableContributor()
+    {
+        var care = CareAllocationCalculator.Calculate(
+            new CarePeriodInput(2026, 1, 10_000, 0, 0, 0, 0, MinimumPayoutCents: 100),
+            [new ContributorUsageWeight("contributor:a", 1m)]);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            PayoutBatchPreviewFactory.CreateSandbox(
+                "batch:missing-recipient",
+                care,
+                new Dictionary<string, PayoutRecipientApproval>()));
+        var preview = PayoutBatchPreviewFactory.CreateSandbox(
+            "batch:bound-recipient",
+            care,
+            new Dictionary<string, PayoutRecipientApproval>
+            {
+                ["contributor:a"] = Approval("contributor:a"),
+            });
+
+        var item = Assert.Single(preview.Items);
+        Assert.Equal("snapshot:contributor-a", item.RecipientApproval.SnapshotId);
+        Assert.Equal(64, item.RecipientApproval.DestinationSha256.Length);
+        Assert.DoesNotContain("@", item.RecipientApproval.DestinationSha256, StringComparison.Ordinal);
+    }
+
     private PayPalSandboxWebhookEvent Event(string eventId, string transmissionId, string type, long amount) =>
         new(eventId, transmissionId, type, "subscription:one", amount, "USD", now);
+
+    private static PayoutRecipientApproval Approval(string contributor) =>
+        PayoutRecipientApproval.Create(
+            $"snapshot:{contributor.Replace(':', '-')}",
+            $"{contributor.Replace(':', '-')}@personal.example.com");
 
     private sealed class FixturePayoutProvider(bool succeeds) : IPayoutSandboxProvider
     {
@@ -162,10 +199,16 @@ public sealed class CareFinanceTests
         public Task<PayoutBatchResult> SendSandboxAsync(PayoutBatchPreview preview, CancellationToken cancellationToken)
         {
             Calls++;
+            var status = succeeds ? "SANDBOX_SUCCESS" : "SANDBOX_FAILED";
             return Task.FromResult(new PayoutBatchResult(
                 preview.BatchId,
-                succeeds,
-                succeeds ? "SANDBOX_SUCCESS" : "SANDBOX_FAILED"));
+                succeeds ? PayoutBatchOutcome.Succeeded : PayoutBatchOutcome.Failed,
+                status,
+                preview.Items.Select(item => new PayoutItemResult(
+                    item.ContributorPseudonym,
+                    item.AmountCents,
+                    succeeds,
+                    status)).ToArray()));
         }
     }
 }
