@@ -8,5 +8,6 @@
 | [0004](architecture/adr/0004-openai-auth-and-codex-boundary.md) | Isolate Codex runtime and keep API-key mode independent from gated ChatGPT-plan sign-in | Accepted | 2026-10-17 |
 | [0005](architecture/adr/0005-embedded-sqlite-private-store.md) | Use embedded SQLite FTS5 plus bounded managed vectors for private CKB/CCB | Accepted | 2026-10-17 |
 | [0006](architecture/adr/0006-signed-global-delta-chain.md) | Synchronize the global replica as a signed, checkpointed, atomically activated delta chain | Accepted | 2026-10-17 |
+| [0007](architecture/adr/0007-care-integer-ledger-and-live-disable.md) | Use integer-cent CARE accounting and structurally disable live payouts | Accepted for sandbox | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

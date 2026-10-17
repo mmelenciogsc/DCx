@@ -17,8 +17,8 @@ DCx is under construction. It is not a validated release, installer, production 
 | P08 Private CKB/CCB | Complete (automated local/native gate) | Embedded SQLite/FTS5 plus bounded vector retrieval, version/dependency schema, isolated profile stores, signed/digested artifacts, hostile ZIP rejection and tested BOSS CCB reuse pass in 79/79 full tests at `685ca5a`. |
 | P09 Global registry/sync | BLOCKED (partial implementation) | At `1be3f9e`, 7/7 signed-sync tests and an actual loopback Kestrel/SQLite client pass: two clients, wrong-signature denial, resume, atomic activation, rollback, lazy artifacts and private isolation. Required Compose run is blocked by absent native Docker and denied WSL daemon/no Compose plugin. |
 | P10 Contributions/governance | BLOCKED (partial implementation) | At `4016c2c`, 8/8 policy/governance tests and native UIA pass: unchecked consent, digest-bound approval, quarantine/scanners, CKB propagation/withdrawal, lineage and fraud exclusions. CCB review remains denied until a real untrusted-code sandbox exists. |
-| P11 PayPal/CARE | In progress (local mocks only) | Double-entry CARE/accounting and simulated provider contracts are active. No PayPal call, credential or payment is authorized. |
-| P12 Full vertical E2E | Not started | No validated implementation. |
+| P11 PayPal/CARE | BLOCKED (partial implementation) | At `2f97540`, 6/6 local finance tests and 100/100 full tests pass: $3 signed mocks, refunds, balanced ledger, aggregate ≤40% positive-net pool, splits, Net60 and sandbox-only payout gates. PayPal sandbox credentials/eligibility and durable ledger are absent. |
+| P12 Full vertical E2E | In progress (fixtures only) | Cross-phase local scenario harness and honest live-service blockers are active work; no live Facebook, QuickBooks, YouTube, PayPal or package installation is claimed. |
 | P13 Packaging/security/reliability | Not started | No installer or signing identity. |
 | P14 Pilot/release readiness | Not started | Production activation off. |
 

@@ -28,5 +28,10 @@ Checked 2026-10-17 from the development host.
 | SQLitePCLRaw transitive packages | https://api.nuget.org/v3-flatcontainer/sqlitepclraw.bundle_e_sqlite3/2.1.13/sqlitepclraw.bundle_e_sqlite3.nuspec | Bundled engine/core/provider packages resolve to 2.1.13; official NuGet metadata reports Apache-2.0. Exact package hashes are locked per project. |
 | Docker Compose | https://docs.docker.com/compose/ | HTTP 200. A hardened local simulation file is present, but neither native Windows Docker nor a WSL Compose plugin/authorized daemon is available, so it has not been executed. |
 | ASP.NET Core minimal APIs | https://learn.microsoft.com/en-us/aspnet/core/fundamentals/minimal-apis | HTTP 200; used for the loopback read-only global-registry simulation endpoint. |
+| PayPal Subscriptions | https://developer.paypal.com/subscriptions/about/ | HTTP 200. No account/product availability or DCx merchant eligibility was inferred. |
+| PayPal Subscriptions API | https://developer.paypal.com/docs/api/subscriptions/v1/ | HTTP 200. P11 uses local contracts only and made no API call. |
+| PayPal Webhooks API | https://developer.paypal.com/docs/api/webhooks/v1/ | HTTP 200. The implemented HMAC verifier is explicitly a deterministic mock, not PayPal's production verification flow. |
+| PayPal Payouts | https://developer.paypal.com/docs/payouts/ | HTTP 200. Merchant/region/recipient eligibility remains unverified. |
+| PayPal Payouts integration | https://developer.paypal.com/docs/payouts/standard/integrate-api/ | HTTP 200. Sandbox/idempotency guidance reviewed; no credential, sandbox request or payout was used. |
 
 The remaining supplied official references are verified immediately before their associated integration phase. An HTTP success alone never proves account entitlement, commercial authorization, licensing suitability, or API availability.

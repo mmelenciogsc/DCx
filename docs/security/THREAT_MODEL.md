@@ -83,6 +83,14 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - Credit lineage rejects cycles, duplicate parents, invalid weights and total parent credit above 100%.
 - Usage receipts contain identifiers, time and verification status only. Integrity, replay, entitlement, approved-resource, self-use, success, time and rate checks fail closed; client honesty is still treated as an untrusted signal.
 
+## Implemented finance controls through partial P11
+
+- Money uses checked integer cents. Journal entries must balance and conflicting event IDs fail closed.
+- The defined contributor pool is zero for nonpositive net and rejected above 40% aggregate; allocation conserves exact cents deterministically.
+- Sandbox webhooks require fixture integrity and unique transmission/event IDs. Refund/reversal suspends entitlement and posts a correcting balanced entry.
+- Payout execution requires sandbox mode, verified eligibility, explicit owner approval, Net 60 and a unique batch. Live mode has no provider path and always fails.
+- These controls are local mocks. Production webhook authenticity, durable idempotency, account/recipient eligibility, reconciliation, key custody and legal/accounting policy remain blockers.
+
 ## Security gate policy
 
 Security tests must cover denial paths as well as successful paths. A mock or sandbox pass proves only that path. Production OpenAI/PayPal eligibility, code signing, legal review, external penetration testing, and the Ubuntu production deployment remain explicit blockers until separately evidenced.
