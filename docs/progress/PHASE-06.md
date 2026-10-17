@@ -1,7 +1,7 @@
 # P06 — Local models and resource inventory
 
 - Status: BLOCKED (real vision passes; transcription/embedding contracts pass fixtures; actual backends remain absent)
-- Implementation commits: `463bfb6`, `b4aa4c9`, `a160435`, `21001d2`, `a41702b`
+- Implementation commits: `463bfb6`, `b4aa4c9`, `a160435`, `21001d2`, `a41702b`, `5cdf5ec`
 - Documentation commit: recorded by the commit containing this file
 
 No model or runtime was downloaded or installed. The real benchmark uses only software and models already present on this Windows machine.
@@ -33,33 +33,37 @@ No model or runtime was downloaded or installed. The real benchmark uses only so
 - Hardware-aware vision selection uses at most 70% of measured VRAM. Embedding selection prefers the smallest installed model within 25% of measured RAM; low-resource no-fit tests fail closed.
 - Fallback order is validated local GPU, bounded local CPU, then an explicitly approved reachable remote provider only for nonprivate input. Private input with no local backend becomes unavailable.
 - Hash-pinned `whisper-cli.exe` and `.bin`/`.gguf` model boundary. Verified executable/model files remain under read-only, no-write/no-delete leases for the entire child execution, closing the hash-check/use race. It accepts bounded signature-checked WAV only, uses argument arrays and a scrubbed environment, drains but never retains child diagnostics, enforces timeout/tree kill, bounds transcript output, records working set and removes its operation directory.
+- The accessible manager can now register an already-installed Whisper executable, model and two license files. It accepts only four distinct regular files on local drives, rejects reparse ancestors, bounds executable/model/license sizes, displays both complete UTF-8 licenses and all four exact byte digests, starts approval unchecked, invalidates review on any path edit, and rehashes all four files immediately before atomic persistence.
+- The Whisper registration actions expose stable UIA identifiers and distinct keyboard access keys. The manager has no Whisper download/install action. Clearing removes only the per-user binding and preserves every selected source file. Registration explicitly does not claim publisher authenticity, legal license approval or transcription accuracy.
+- Adapter creation revalidates both approved license-file digests. Each transcription revalidates bounded executable/model digests and holds the executable, model and WAV under no-write/no-delete read leases through child completion. UNC/device paths and reparse ancestors fail closed.
 - A native fake Whisper CLI validates process/argument/output/cancellation behavior. It does not count as speech-recognition accuracy evidence.
 
 ## Reproduction
 
 ```bash
 cd /mnt/d/DCx
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p06.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p06.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 ```
 
 ## Measured result
 
-- Locked Release build: 0 warnings, 0 errors; 2.76 seconds in the recorded P06 run.
-- P06 exact-namespace local-model tests: passed 32, failed 0, skipped 0; about 1 second, with counters parsed from retained TRX.
-- Current full suite: passed 261, failed 0, skipped 0; about 8 seconds.
+- Locked Release build: 0 warnings, 0 errors; 1.70 seconds in the recorded P06 run.
+- P06 exact-namespace local-model tests: passed 44, failed 0, skipped 0; about 1 second, with counters parsed from retained TRX.
+- Current full suite: passed 273, failed 0, skipped 0; about 9 seconds.
 - Vision response: `A blue square and a red circle are displayed above the text "DCX 42".`
 - Production-adapter prompt tokens: 1,100; output tokens: 20; total duration: 16,426,065,000 ns.
-- Separately measured Ollama duration: 16,626,554,500 ns; wall duration: 18,698 ms.
+- Separately measured Ollama duration: 17,126,521,400 ns; wall duration: 19,166 ms.
 - Ollama-reported loaded model and VRAM allocation: 3,527,545,978 bytes each.
 - Exact digest and license binding before/after inference, malformed inventory/digest rejection, duplicate/mutable selection denial, changed-binding denial and changed-license denial passed.
 - Explicit model unload verification by loaded-process digest: passed.
 - Hash-pinned fake Whisper happy path, model-tamper denial, invalid-WAV denial and timeout/tree-kill passed.
 - Whisper pinned-file write replacement was denied while the child fixture ran; the leases released after cancellation.
+- Native UIA proved the Whisper approval begins unchecked, saving without approval is denied, both complete licenses and all four digests are exposed, action access keys are unique, and no download/install action exists. The UI-persisted binding produced `DCx transcription fixture 42.` through the production adapter; clearing retained all four source files.
 - Ollama inspection/embed request shape, capability/license parsing, two-vector response and inconsistent-dimension denial passed.
 - Ollama redirect/cookie/proxy denial, exact response-origin enforcement, image-signature admission and mismatched/incomplete response denial passed.
 - The P07 native WebView2/UIA media test selected the installed model through the accessible manager, read the complete license through `ValuePattern`, proved approval initially and subsequently unchecked, persisted the binding, found no download action, and passed local MP4 pause/describe/resume with the real loopback VLM.
-- Hardware/TRX evidence: `artifacts/test-results/p06-731b153275134aebafbc779661eed96a/`; P07 UIA fixtures: `artifacts/test-results/p07-a86adb37eebb4f198b2e6d3b32184973/` (generated and intentionally not committed).
+- Hardware/TRX/native-registration evidence: `artifacts/test-results/p06-af443c5e68b94ea785eaf979432daf4f/`; P07 UIA fixtures: `artifacts/test-results/p07-2d99cd06835848e18b52d4804acf44f2/` (generated and intentionally not committed).
 
 ## Changed files in the latest milestone
 
@@ -68,6 +72,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - Production consumer and validation seam: `src/DCx.Desktop/Media/MediaFrameDescriptionService.cs`, `src/DCx.Desktop/ContentViewerWindow.xaml.cs`, `src/DCx.Desktop/MainWindow.xaml`, `src/DCx.Desktop/MainWindow.xaml.cs`, `scripts/validate-p07.ps1`.
 - Identity, mutation, malformed-inventory, state-store and selection denial coverage: `tests/DCx.Core.Tests/LocalModels/OllamaLocalClientTests.cs`, `tests/DCx.Core.Tests/LocalModels/LocalModelSelectorTests.cs`, `tests/DCx.Core.Tests/LocalModels/LocalModelSelectionStoreTests.cs`.
 - Exact-counter installed-hardware evidence: `scripts/validate-p06.ps1`.
+- Already-installed Whisper registration, full-license review and native UIA fixture: `src/DCx.Core/LocalModels/WhisperBackendRegistration.cs`, `src/DCx.Desktop/LocalModelsWindow.xaml`, `src/DCx.Desktop/LocalModelsWindow.xaml.cs`, `src/DCx.Desktop/MainWindow.xaml.cs`, `scripts/validate-p06-whisper-registration.ps1`, `tests/DCx.Core.Tests/LocalModels/WhisperBackendRegistrationTests.cs`.
+- Exact executable/model/WAV lease and local-path hardening: `src/DCx.Core/LocalModels/WhisperCliTranscriber.cs`, `tests/DCx.Core.Tests/LocalModels/WhisperCliTranscriberTests.cs`.
 - Decision, development and human-AT records: `docs/architecture/adr/0023-explicit-persisted-local-model-approval.md`, `docs/deployment/DEVELOPMENT.md`, `docs/accessibility/P06_LOCAL_MODELS_CHECKLIST.md`.
 
 ## Blockers and unblock condition
@@ -76,6 +82,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - The embedding mock proves the bounded loopback contract, not retrieval quality, actual dimensions, license suitability or real memory/latency. No installed model advertises embeddings.
 - The digest-qualified alias and before/after runtime checks bind the runtime-reported bytes and reviewed license text used for the measured call; they do not establish publisher authenticity, signed provenance, legal license approval or a production model install/update/revocation policy. The accessible manager selects only already-installed local models and deliberately performs no installation.
 - Automated UIA passed, but the dedicated JAWS/NVDA/Narrator checklist has not been run and cannot be inferred from automation.
-- Install/download of whisper.cpp and a suitable embedding model, with source, version, license and SHA-256 recorded, requires owner approval.
+- The registration path proves safe consent and execution for already-installed files, but this host has no approved real Whisper executable/model to select. Install/download of whisper.cpp and a suitable embedding model, with source, version, license and SHA-256 recorded, requires owner approval.
 - After approval, run fixed speech accuracy/word-error fixtures and retrieval recall/ranking fixtures, measure CPU/GPU/RAM/VRAM, latency, cancellation and unload under normal and low-resource emulation. P06 remains BLOCKED until those real gates pass.
 - No cloud Ollama endpoint, API key or network model call was used.

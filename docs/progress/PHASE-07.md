@@ -29,7 +29,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 ## Measured result
 
 - Locked native Release build: 0 warnings, 0 errors.
-- Original P07 content tests: passed 74, failed 0, skipped 0. New bounded-question policy tests: passed 5, failed 0, skipped 0. Current full native suite: passed 261, failed 0, skipped 0.
+- Original P07 content tests: passed 74, failed 0, skipped 0. New bounded-question policy tests: passed 5, failed 0, skipped 0. Current full native suite: passed 273, failed 0, skipped 0.
 - Real generated H.264 MP4: initial pause and Play/Pause passed.
 - Local frame description identified the fixture's solid blue content; video remained paused; explicit user resume passed.
 - Shared-viewport generated HTML5 video Q&A answered `Blue`; the video remained paused after narration and explicit same-page resume passed.
@@ -38,7 +38,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 - Windows OCR recognized the golden `DCX`/`42` content and returned normalized geometry.
 - Semantic repair, HTML export, real OPC DOCX export and DOCX viewer round-trip passed.
 - Native UIA script result: `P07 content viewer UIA validation=PASS`.
-- Latest evidence directory: `artifacts/test-results/p07-cab3608ef1d642bd9e11537fd3322633/` (generated and intentionally not committed).
+- Latest evidence directory: `artifacts/test-results/p07-2d99cd06835848e18b52d4804acf44f2/` (generated and intentionally not committed).
 
 ## Security, accessibility and limitations
 
