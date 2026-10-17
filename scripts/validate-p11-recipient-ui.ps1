@@ -179,6 +179,7 @@ try {
         if ($null -ne $status -and $status.Current.Name -like
             "Snapshot recipient:* saved in protected local storage.*not PayPal-verified*payout-eligible*No network request occurred.*") { $status }
     } "The approved protected recipient snapshot was not saved accessibly."
+    $savedStatusName = [string]$savedStatus.Current.Name
     if (-not [string]::IsNullOrEmpty((Get-Value $recipientWindow "CareRecipientDestination")) -or
         -not [string]::IsNullOrEmpty((Get-Value $recipientWindow "CareRecipientContributor"))) {
         throw "The exact recipient input was not cleared after approval."
@@ -231,6 +232,7 @@ try {
         if ($null -ne $status -and $status.Current.Name -like
             "Snapshot recipient:* revoked. Its protected email was deleted. No PayPal request occurred.*") { $status }
     } "The recipient snapshot was not revoked accessibly."
+    $revokedStatusName = [string]$revokedStatus.Current.Name
     if ($revokeToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
         throw "Recipient revocation approval was not reset."
     }
@@ -253,8 +255,8 @@ try {
         payout_attempts = 0
         snapshot_revoked_and_secret_deleted = $true
         keyboard_focusable_distinct_access_keys = $accessKeys.Count
-        status_after_save = $savedStatus.Current.Name
-        status_after_revocation = $revokedStatus.Current.Name
+        status_after_save = $savedStatusName
+        status_after_revocation = $revokedStatusName
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $evidencePath -Encoding utf8NoBOM
 
     "P11 recipient snapshot native UIA=$($heading.Current.Name)"
