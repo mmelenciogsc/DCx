@@ -1,0 +1,119 @@
+<Window x:Class="DCx.Desktop.ContributionsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Contribution review — DCx"
+        Width="760"
+        Height="760"
+        MinWidth="620"
+        MinHeight="560"
+        AutomationProperties.AutomationId="ContributionsWindow"
+        AutomationProperties.Name="Private contribution review">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18">
+        <StackPanel>
+            <TextBlock FontSize="22" FontWeight="SemiBold" Text="Contribution review" />
+            <TextBlock Margin="0,8,0,14"
+                       TextWrapping="Wrap"
+                       Text="Nothing in this window uploads automatically. Preparation is off by default. Every item requires a fresh review, explicit item approval, and all three attestations. Prepared items remain in local quarantine." />
+
+            <CheckBox x:Name="PreparationEnabledBox"
+                      Margin="0,0,0,14"
+                      Content="Enable local contribution preparation"
+                      IsChecked="False"
+                      AutomationProperties.AutomationId="ContributionOptInBox"
+                      AutomationProperties.Name="Enable local contribution preparation, initially unchecked"
+                      AutomationProperties.HelpText="This enables local preparation only. It does not upload or publish anything."
+                      Checked="OnGateChanged"
+                      Unchecked="OnGateChanged" />
+
+            <Label Target="{Binding ElementName=ResourceIdBox}" Content="Proposed resource identifier" Padding="0" />
+            <TextBox x:Name="ResourceIdBox"
+                     Margin="0,4,0,10"
+                     Padding="5"
+                     AutomationProperties.AutomationId="ContributionResourceIdBox"
+                     AutomationProperties.Name="Proposed resource identifier"
+                     TextChanged="OnCandidateChanged" />
+            <Label Target="{Binding ElementName=TitleBox}" Content="Title" Padding="0" />
+            <TextBox x:Name="TitleBox"
+                     Margin="0,4,0,10"
+                     Padding="5"
+                     AutomationProperties.AutomationId="ContributionTitleBox"
+                     AutomationProperties.Name="Contribution title"
+                     TextChanged="OnCandidateChanged" />
+            <Label Target="{Binding ElementName=BodyBox}" Content="Content to review" Padding="0" />
+            <TextBox x:Name="BodyBox"
+                     Height="130"
+                     Margin="0,4,0,10"
+                     Padding="5"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto"
+                     AutomationProperties.AutomationId="ContributionBodyBox"
+                     AutomationProperties.Name="Contribution content to review"
+                     TextChanged="OnCandidateChanged" />
+            <Label Target="{Binding ElementName=LicenseBox}" Content="License" Padding="0" />
+            <ComboBox x:Name="LicenseBox"
+                      Margin="0,4,0,12"
+                      AutomationProperties.AutomationId="ContributionLicenseBox"
+                      AutomationProperties.Name="Contribution license"
+                      SelectionChanged="OnCandidateChanged">
+                <ComboBoxItem Content="CC-BY-4.0" IsSelected="True" />
+                <ComboBoxItem Content="MIT" />
+                <ComboBoxItem Content="Apache-2.0" />
+                <ComboBoxItem Content="Unknown or other" />
+            </ComboBox>
+
+            <Button x:Name="ReviewButton"
+                    Width="180"
+                    HorizontalAlignment="Left"
+                    Content="Review and scan item"
+                    AutomationProperties.AutomationId="ReviewContributionButton"
+                    AutomationProperties.Name="Review and scan contribution item"
+                    Click="OnReviewClick" />
+            <ListBox x:Name="FindingsList"
+                     Height="90"
+                     Margin="0,8,0,12"
+                     AutomationProperties.AutomationId="ContributionFindingsList"
+                     AutomationProperties.Name="Privacy license security and quality findings" />
+
+            <CheckBox x:Name="RightsBox"
+                      Content="I own this item or have permission to share it"
+                      AutomationProperties.AutomationId="ContributionRightsBox"
+                      Checked="OnGateChanged"
+                      Unchecked="OnGateChanged" />
+            <CheckBox x:Name="LicenseConfirmedBox"
+                      Margin="0,6,0,0"
+                      Content="I confirmed the proposed license"
+                      AutomationProperties.AutomationId="ContributionLicenseAttestationBox"
+                      Checked="OnGateChanged"
+                      Unchecked="OnGateChanged" />
+            <CheckBox x:Name="SensitiveReviewedBox"
+                      Margin="0,6,0,0"
+                      Content="I reviewed this exact item for secrets, personal data, and private material"
+                      AutomationProperties.AutomationId="ContributionSensitiveReviewBox"
+                      Checked="OnGateChanged"
+                      Unchecked="OnGateChanged" />
+            <CheckBox x:Name="ItemApprovalBox"
+                      Margin="0,6,0,14"
+                      Content="Approve this exact reviewed item for local quarantine"
+                      AutomationProperties.AutomationId="ContributionItemApprovalBox"
+                      AutomationProperties.HelpText="Changing the item clears this approval."
+                      Checked="OnItemApprovalChecked"
+                      Unchecked="OnGateChanged" />
+
+            <Button x:Name="PrepareButton"
+                    Width="210"
+                    HorizontalAlignment="Left"
+                    Content="Prepare in local quarantine"
+                    IsEnabled="False"
+                    AutomationProperties.AutomationId="PrepareContributionButton"
+                    AutomationProperties.Name="Prepare approved item in local quarantine"
+                    Click="OnPrepareClick" />
+            <TextBlock x:Name="ContributionStatusText"
+                       Margin="0,12,0,0"
+                       Text="Preparation is off. No network upload is available."
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="ContributionStatusText"
+                       AutomationProperties.LiveSetting="Assertive" />
+        </StackPanel>
+    </ScrollViewer>
+</Window>

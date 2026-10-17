@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private NativeAppControlWindow? _nativeAppControlWindow;
     private OpenAiControlWindow? _openAiControlWindow;
     private ContentViewerWindow? _contentViewerWindow;
+    private ContributionsWindow? _contributionsWindow;
 
     public MainWindow()
     {
@@ -891,6 +892,20 @@ public partial class MainWindow : Window
         };
         _contentViewerWindow.Closed += (_, _) => _contentViewerWindow = null;
         _contentViewerWindow.Show();
+    }
+
+    private void OnContributionsClick(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Opening local contribution review. Nothing is uploaded automatically.");
+        if (_contributionsWindow is { IsVisible: true })
+        {
+            _contributionsWindow.Activate();
+            return;
+        }
+
+        _contributionsWindow = new ContributionsWindow { Owner = this };
+        _contributionsWindow.Closed += (_, _) => _contributionsWindow = null;
+        _contributionsWindow.Show();
     }
 
     private static string ResolveRepositoryRoot()

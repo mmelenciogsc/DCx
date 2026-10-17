@@ -142,10 +142,17 @@
                             Click="OnOpenAiClick" />
                     <Button x:Name="ContentViewerButton"
                             MinWidth="120"
+                            Margin="0,0,6,0"
                             Content="Files/media"
                             AutomationProperties.AutomationId="ContentViewerButton"
                             AutomationProperties.Name="Open files and media viewer"
                             Click="OnContentViewerClick" />
+                    <Button x:Name="ContributionsButton"
+                            MinWidth="120"
+                            Content="Contributions"
+                            AutomationProperties.AutomationId="ContributionsButton"
+                            AutomationProperties.Name="Open private contribution review"
+                            Click="OnContributionsClick" />
                 </StackPanel>
             </Grid>
         </Border>
