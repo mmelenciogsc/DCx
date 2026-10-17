@@ -1,10 +1,10 @@
 # P13 — Packaging, security and reliability
 
-- Status: BLOCKED (substantial local reliability/release-staging, Defender and dependency-advisory checks pass; signed installer, clean-VM, independent security and human-AT gates remain absent)
-- Implementation commits: `82452fe`, `3e9b172`, `1b32cdf`, `26da605`, `7b0a03b`, `a69f5bf`, `e20a7d3`
+- Status: BLOCKED (substantial local reliability, self-contained unsigned-MSIX staging, Defender and dependency-advisory checks pass; signed installer, clean-VM, independent security and human-AT gates remain absent)
+- Implementation commits: `82452fe`, `3e9b172`, `1b32cdf`, `26da605`, `7b0a03b`, `a69f5bf`, `e20a7d3`, `993149e`
 - Documentation commit: recorded by the commit containing this file
 
-The generated ZIP is an unsigned framework-dependent staging artifact. It is not an installer or production release.
+The generated ZIP and synthetic-identity MSIX are unsigned self-contained x64 local-validation artifacts. Neither is an installer or production release.
 
 ## Implemented
 
@@ -14,10 +14,12 @@ The generated ZIP is an unsigned framework-dependent staging artifact. It is not
 - Restore stages and verifies all entries before replacement, denies traversal/absolute/ADS/reparse paths and archives within the protected root, and restores prior directories if replacement fails.
 - The normal app holds an exclusive per-data-root runtime lease. `DCx.exe --recovery` provides a separate keyboard/UIA-accessible backup-and-recovery window; operations fail safely until the main app closes.
 - Restore requires a default-unchecked replacement acknowledgment. UI status is an assertive live region, and the main browser exposes an accessible recovery launcher.
-- Two framework-dependent Windows publish trees and fixed-timestamp ZIPs are compared by relative path, length and SHA-256.
-- CycloneDX 1.6 inventory for the seven shipped NuGet dependencies plus package license metadata.
-- Repository-source scan with two exact synthetic hostile-input fixtures allowlisted; every published file receives ASCII binary secret-pattern scanning with no allowlist.
-- Current Microsoft Defender state and signature freshness are required. The canonical, valid Microsoft-signed scanner is digest-recorded and runs no-remediation custom scans over both the exact publish tree and its reproducible ZIP under a minimal OS-derived, secret-free environment.
+- Two self-contained `win-x64` Windows publish trees and fixed-timestamp ZIPs are compared by relative path, length and SHA-256. The payload embeds .NET Core and Windows Desktop 10.0.12 plus the available license/notice files.
+- A synthetic per-user, medium-integrity packaged-classic manifest, deterministic generated assets and ordered mapping are packaged by the installed valid Microsoft-signed x64 MakeAppx. Paths/reparse points, child environment, output and time are bounded.
+- A strict ZIP/ZIP64 parser canonicalizes only package timestamps. The canonical package must then pass exact MakeAppx unpack comparison. Two independent packages must have identical length and SHA-256, remain `NotSigned`, contain no signature entry and be denied by the real Windows trust verifier.
+- CycloneDX 1.6 inventory and license records cover the seven shipped NuGet dependencies plus the two embedded Microsoft runtime frameworks.
+- Repository-source scan has two exact synthetic hostile-input fixtures allowlisted. Published scanning covers all DCx-owned executables/assemblies and text/configuration artifacts. Pinned Microsoft/runtime and NuGet binaries are covered by inventory, notices, official advisory audit and Defender rather than unreliable arbitrary-byte regex matches.
+- Current Microsoft Defender state and signature freshness are required. The canonical, valid Microsoft-signed scanner is digest-recorded and runs no-remediation custom scans over the exact publish tree, reproducible ZIP and unsigned MSIX under a minimal OS-derived, secret-free environment.
 - The official NuGet advisory source is queried for direct and transitive dependencies through a bounded, schema-checked JSON contract. Parser regression fixtures distinguish an absent zero-result section from real advisory entries, and any vulnerability fails the gate.
 - Authenticode state, startup time and working set are recorded without misrepresenting unsigned output.
 - Normal-mode unhandled UI, background-task and terminating-process hooks record only after explicit versioned opt-in and never mark an exception handled.
@@ -31,6 +33,7 @@ The generated ZIP is an unsigned framework-dependent staging artifact. It is not
 - A strict MSIX manifest inspector admits one bounded root `AppxManifest.xml` in the Windows 10 foundation namespace and one direct identity. It denies excessive/oversized/case-ambiguous entries, unsupported namespaces, malformed identity/version, DTD and XXE.
 - A real Windows read-only signature probe uses the absolute built-in Windows PowerShell 5.1 executable with a constant encoded command, scrubbed environment, package path outside arguments, strict JSON, ten-second deadline and 8 KiB output limits. Timeout and output flood kill the process tree.
 - Trust requires Windows status `Valid`, exact signer-subject/manifest-publisher equality and a lowercase signer-certificate SHA-256 that is bound into the approval proposal. The current synthetic package receives a real nonvalid Windows status and is denied; no real signed-positive package is claimed.
+- Whisper process telemetry now samples current and peak working set before exit checks and represents an unobservable ultra-short-process sample as unavailable rather than the fabricated value zero. The normal fixture has a bounded observation window; an instant fixture covers the race.
 - P13/P14 validators now emit TRX and fail unless exact selected counters prove every test passed. P14 uses its exact test namespace instead of a drifting substring match.
 
 ## Reproduction
@@ -43,20 +46,22 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 ## Measured result
 
-Recorded evidence directory: `artifacts/test-results/p13-cba58212dad84a1d8e0119e42c9bbba2/` (generated from committed source at `e20a7d3` and intentionally not committed).
+Recorded evidence directory: `artifacts/test-results/p13-7c9a954eef9c4bc7bcd2e46c6cf6b34e/` (generated from implementation source subsequently committed unchanged at `993149e` and intentionally not committed).
 
 - Locked Release build: 0 warnings, 0 errors.
 - Reliability tests: passed 23, failed 0, skipped 0; exact counters parsed from the retained TRX.
-- Package trust tests: passed 21, failed 0, skipped 0; exact counters parsed from the retained TRX. The native Windows probe denied the unsigned/incomplete fixture; positive `Valid` composition used an injected fixture only.
-- Current full suite: passed 261, failed 0, skipped 0; about 8 seconds.
-- Publish trees: 42 files, 63,180,707 bytes each; no path/length/SHA-256 differences.
-- Reproducible staging ZIP SHA-256: `db6c8cae1b4125e09c683407ad0a96c65957c16f3fc1a00e43e2d3160db94e8b` (25,271,721 bytes).
-- CycloneDX components: 7; third-party license records: 7.
-- Unexpected secret matches: 0; exact synthetic scanner-fixture matches: 2.
-- Microsoft Defender antivirus and real-time protection: enabled; signatures current at version `1.461.65.0`, updated `2026-10-16T23:06:12Z`; both publish-tree and ZIP no-remediation scans returned clean. Trusted scanner SHA-256: `a4291c5b4325895d13d32e232bf50c1b41356306803ac5dc75bba9aecb021141`; signer-certificate SHA-256: `06d10a20570d92f56d784ecf2e50b1277b855e55d19841633b107c27dd5ca778`.
+- Package trust tests: passed 21, failed 0, skipped 0; exact counters parsed from the retained TRX. The native Windows probe denied the complete unsigned local-validation package; positive `Valid` composition used an injected fixture only.
+- Current full suite: passed 262, failed 0, skipped 0; about 8 seconds. The five Whisper cases also passed in 25 consecutive isolated native runs (125/125 executions).
+- Publish trees: 419 files, 177,303,872 bytes each; no path/length/SHA-256 differences. They embed .NET Core and Windows Desktop 10.0.12.
+- Reproducible staging ZIP SHA-256: `68e5ef86823d7a4d419b0fc398a02e9e2d317b523fee56c3fd5bfab9c0ab3869` (74,055,833 bytes).
+- Reproducible unsigned MSIX: 72,911,556 bytes; SHA-256 `fedabdc8fee82c52915f38e8050f0d7853b9356d94e1300eefeb7c6ae48a3228`; synthetic identity `DCx.AgenticBrowser.LocalValidation`, publisher `CN=DCx Local Validation`, version `1.0.0.0`, x64. MakeAppx semantic pack and exact post-canonicalization unpack passed; real Windows trust returned `NotSigned` and denied it. Signing/install attempts and production actions: 0.
+- Trusted MakeAppx version `10.0.19041.5609 (WinBuild.160101.0800)`; executable SHA-256 `f6901ebd5818a623b08a2306499f09334c7dab14bf9c9381814506aa80475f78`; signer-certificate SHA-256 `da209e0fe8bf6363318b5a41e5b65f3391d17bcb8b99b91c320ad2d22ef3469f`.
+- CycloneDX components: 9; third-party license records: 9. Three embedded-runtime notice files were copied and hashed.
+- Unexpected secret matches: 0 across repository source and 12 selected DCx-owned/published-text files; exact synthetic scanner-fixture matches: 2.
+- Microsoft Defender antivirus and real-time protection: enabled; signatures current at version `1.461.65.0`, updated `2026-10-16T23:06:12Z`; publish-tree, ZIP and unsigned-MSIX no-remediation scans returned clean. Trusted scanner SHA-256: `a4291c5b4325895d13d32e232bf50c1b41356306803ac5dc75bba9aecb021141`; signer-certificate SHA-256: `06d10a20570d92f56d784ecf2e50b1277b855e55d19841633b107c27dd5ca778`.
 - Official NuGet direct/transitive vulnerability audit: 0 advisories; sole source `https://api.nuget.org/v3/index.json`.
 - Authenticode: `NotSigned`.
-- Offline UIA heading: `DCx is ready offline`; startup 2,256 ms; working set 464.3 MiB under the provisional 1 GiB ceiling.
+- Offline UIA heading: `DCx is ready offline`; startup 2,215 ms; working set 464.9 MiB under the provisional 1 GiB ceiling.
 - Crash-diagnostics UIA heading: `Privacy and crash diagnostics`; consent defaulted unchecked, explicit opt-in persisted notice version 1, purge preserved enabled consent, opt-out disabled and purged, and network transfers remained zero.
 - Recovery UIA heading: `DCx backup and recovery`; main-app launcher, path input, create, default-unchecked approval, restore and assertive status are exposed.
 - Backup while main DCx held the lease was denied and wrote no archive. After main exit, backup and approved restore passed; restore without approval was denied; excluded synthetic WebView2 cookie data remained unchanged.
@@ -72,17 +77,19 @@ Recorded evidence directory: `artifacts/test-results/p13-cba58212dad84a1d8e0119e
 - Exact-counter release gates: `scripts/validate-p13.ps1`, `scripts/validate-p14.ps1`.
 - Bounded manifest/signature trust and denial coverage: `src/DCx.Core/Deployment/MsixPackageTrustVerifier.cs`, `tests/DCx.Core.Tests/Deployment/MsixPackageTrustVerifierTests.cs`.
 - Trusted no-remediation malware and official dependency-advisory release gates: `scripts/validate-p13.ps1`, `docs/architecture/adr/0031-no-remediation-release-scanning.md`.
+- Reproducible self-contained package builder and synthetic manifest: `scripts/build-unsigned-msix.ps1`, `packaging/msix/AppxManifest.xml`, `packaging/msix/README.md`, `docs/architecture/adr/0032-reproducible-unsigned-self-contained-msix.md`.
+- Truthful fast-process Whisper resource telemetry: `src/DCx.Core/LocalModels/WhisperCliTranscriber.cs`, `tests/DCx.Core.Tests/LocalModels/WhisperCliTranscriberTests.cs`, `tests/DCx.FakeWhisperCli/Program.cs`.
 
 ## Blockers and limits
 
-- `makeappx.exe`, `signtool.exe`, MSIXMgr and WiX are absent. No code-signing identity is available. Installing tooling or acquiring a certificate requires approval.
-- The staging ZIP requires the pinned .NET desktop runtime and WebView2 runtime and provides no install, update activation, uninstall or runtime bootstrap behavior.
+- The installed x64 MakeAppx and SignTool pass Microsoft publisher validation, but SignTool was not invoked. No production package identity, code-signing certificate/custody or signing approval is available. MSIXMgr and WiX were not required for the local-validation package.
+- The self-contained payload removes the external .NET Desktop Runtime dependency but still requires WebView2 Evergreen. It provides no missing-runtime detection/bootstrap, install, update activation, uninstall or rollback behavior.
 - Controlled-update admission is an unwired core boundary. A real read-only Windows Authenticode denial path now exists, but there is no owner-authorized signed-positive MSIX, production update origin/signing-root custody or rotation, accessible update UI, scheduler, activation, restart coordination, installer integration or rollback. The package must be signature/digest/identity/certificate reverified again immediately before a future install; admission is not installation authority.
 - P12's accessible package-review window is likewise inert. Its synthetic trust adapter and non-executable approval receipt do not close any installer, signing, activation or clean-VM requirement.
-- Microsoft Defender and the official NuGet advisory audit now pass for the exact staging output and managed dependency closure. They do not provide independent penetration testing, SAST/DAST, native-binary CVE analysis, a second malware engine or signed-installer assessment.
+- Microsoft Defender and the official NuGet advisory audit now pass for the exact publish, ZIP, unsigned MSIX and managed dependency closure. They do not provide independent penetration testing, SAST/DAST, native-binary CVE analysis, a second malware engine or signed-installer assessment.
 - No clean Windows 11 VM installation/uninstallation/upgrade/rollback run occurred.
 - Live SQLite/WAL snapshotting is not claimed; the exclusive lease deliberately requires main DCx to be closed during backup and restore.
 - No human JAWS, NVDA or Narrator signoff occurred.
 - Crash diagnostics deliberately sacrifice message/stack detail for privacy. They have no export, upload, symbolication or support-ingestion path; any future transfer requires a new reviewed notice, item preview and explicit approval boundary.
 - Recovery/readiness utility processes do not initialize this store because they intentionally run outside the normal app's exclusive data lease. Their failures are not represented as covered by the current hooks.
-- P13 remains BLOCKED until signed MSIX install/update/uninstall/rollback on a clean VM, the remaining independent security assessment, WebView2/.NET prerequisite handling and human AT acceptance all pass.
+- P13 remains BLOCKED until an authorized production identity/certificate, signed MSIX install/update/uninstall/rollback on a clean VM, the remaining independent security assessment, accessible WebView2 prerequisite handling and human AT acceptance all pass.

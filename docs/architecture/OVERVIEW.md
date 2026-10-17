@@ -32,5 +32,7 @@ UI and adapters depend on stable contracts. Security policy is evaluated before 
 - `src/DCx.Core` — provider-neutral policies and domain contracts.
 - `tests` — deterministic unit/integration/UI/security/accessibility tests.
 - `server/DCx.GlobalService` — P09 SQLite/Kestrel authoritative-service simulation; production deployment remains disabled.
+- `packaging/msix` — synthetic local-validation MSIX manifest/source only; no production identity or signature.
+- `scripts/build-unsigned-msix.ps1` — bounded reproducible MakeAppx staging; never signs or installs.
 - `docs/progress` — phase evidence and blockers.
 - `DCx_Codex_Handoff_Kit` — authoritative product and gate definitions.

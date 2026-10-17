@@ -20,7 +20,7 @@ Inspect the exact leased `.msix` through two independent, fail-closed views:
 
 ## Consequences
 
-- Windows now performs a real read-only signature check against the synthetic package and returns a nonvalid state (`UnknownError` on the current incomplete container); DCx denies it.
+- Windows performs a real read-only signature check and DCx denies every nonvalid state. The original incomplete fixture returned `UnknownError`; the subsequent complete MakeAppx local-validation package returns `NotSigned` and is likewise denied.
 - Fixture probes validate the composition logic for a matching `Valid` result, but are not real positive signature evidence.
 - The approval preview now exposes and binds the signer-certificate SHA-256 in addition to identity, publisher, version, package digest and proposal digest.
 - No package is installed, registered, staged with Windows, elevated or activated. The process broker still has no install operation.
