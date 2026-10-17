@@ -21,6 +21,7 @@
 | Usage receipts | Local journal + server minimal record | Policy-defined | Qualified event fields only |
 | CARE ledger | Authoritative service | Accounting/legal policy | PayPal and contributor views as required |
 | Recovery archive | User-chosen local path | User-controlled | Never by default |
+| Pilot metric aggregates | Local SQLite, default off | Purged on local opt-out; final policy pending | No transport implemented |
 
 Retention periods, export/deletion behavior, telemetry consent, regional requirements, and a production privacy notice remain P10/P14 legal-review gates.
 
@@ -32,4 +33,4 @@ P10 adds local contribution preparation but keeps it off by default and provides
 
 P13 recovery archives include browser history/bookmarks and private CKB/CCB only. WebView2 profiles, cookies, authenticated sessions, global replicas and Windows Credential Manager secrets are excluded. Archives are not encrypted by the current implementation, so the user-selected destination must be protected appropriately; encryption, retention UI and secure deletion remain release blockers.
 
-P14's proposed pilot metrics are aggregate counts, ratios, durations, token totals, byte totals and reconciliation variance. Their schema has no prompt/output body, URL, local path, keystroke, field value, private artifact body or provider account identifier. This schema is not authorization to collect metrics: enrollment, consent, retention, deletion and privacy notice remain blocked.
+P14's pilot metric store persists aggregate counts, sums, minimums and maximums by UTC day, reviewed metric key and closed enum dimension. Its schema has no raw-event timestamp, prompt/output body, URL, local path, keystroke, field value, private artifact body, provider account identifier or user identifier. Recording defaults off; consent notice versions cannot roll back; local opt-out purges aggregates. No product event source or network transport is connected. This implementation is not authorization to collect metrics: an approved notice, accessible enrollment/withdrawal, final retention/deletion policy and explicit pilot approval remain blocked.

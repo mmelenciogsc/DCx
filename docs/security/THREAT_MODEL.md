@@ -119,7 +119,8 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 
 - A `GO` decision requires zero nonvalidated critical/major issues and a separate explicit production-activation approval. Approval cannot override a blocker.
 - Readiness entries fail closed without a unique ID, owner role, next action and evidence reference. The current report assigns all seven critical/major blockers and remains `NO_GO`.
-- Proposed pilot metrics are content-minimized typed aggregates. Collection is not active and still requires approved consent, retention and incident procedures.
+- Pilot metric storage defaults off and accepts only the 12 reviewed keys, closed enum dimensions and bounded numeric samples. SQLite stores daily count/sum/min/max aggregates, not raw events or user/content fields.
+- Versioned consent cannot roll back. Opt-out atomically disables recording and purges the local aggregates. No product event source or network transport is wired; collection still requires an approved notice, accessible enrollment/withdrawal, retention and incident procedures.
 - Incident stop conditions include credential/private-data exposure, unauthorized side effects, reconciliation variance, signing failure, inaccessible critical flows and user-control safety failures.
 
 ## Security gate policy

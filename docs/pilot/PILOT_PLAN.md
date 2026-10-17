@@ -21,7 +21,7 @@ Each participant receives an accessible scope statement, data disclosure, stop/w
 
 ## Metrics
 
-The implementation defines 12 aggregate metrics: completion rate, duration, input/output token totals, tested CCB reuse ratio, retrieval success, crashes, user-control revocations, false agent claims, accessibility failures, global-sync bytes and CARE reconciliation variance. Metrics contain no prompt, output body, URL, local path, keystroke, field value or provider account identifier.
+The implementation defines 12 aggregate metrics: completion rate, duration, input/output token totals, tested CCB reuse ratio, retrieval success, crashes, user-control revocations, false agent claims, accessibility failures, global-sync bytes and CARE reconciliation variance. A default-off local store accepts only these keys and closed enum dimensions, aggregates immediately by UTC day, and purges on opt-out. It has no product event or network wiring. Metrics contain no prompt, output body, URL, local path, keystroke, field value, provider account identifier or user identifier.
 
 ## Stop conditions
 
