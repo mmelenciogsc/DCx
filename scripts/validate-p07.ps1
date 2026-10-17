@@ -190,14 +190,18 @@ try {
 
     (Find-ById $wizard "ExportHtmlButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $htmlExport = Join-Path $exportRoot "scanned-source-accessible.html"
-    $null = Wait-For { Test-Path $htmlExport } "Semantic HTML export was not created."
+    $null = Wait-For {
+        (Test-Path $htmlExport) -and $wizardStatus.Current.Name -like "Semantic HTML exported:*"
+    } "Semantic HTML export did not finish."
     $htmlContents = Get-Content -LiteralPath $htmlExport -Raw
     if ($htmlContents -notmatch "<main><h1>scanned-source</h1>") { throw "HTML export lacks semantic main/title structure." }
     if ($htmlContents -notmatch '<figure role="img" aria-label="Document title graphic">') { throw "HTML export lacks the reviewed image semantic repair." }
 
     (Find-ById $wizard "ExportDocxButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $docxExport = Join-Path $exportRoot "scanned-source-accessible.docx"
-    $null = Wait-For { Test-Path $docxExport } "Structured DOCX export was not created."
+    $null = Wait-For {
+        (Test-Path $docxExport) -and $wizardStatus.Current.Name -like "Structured DOCX exported:*"
+    } "Structured DOCX export did not finish."
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($docxExport)
     try {
