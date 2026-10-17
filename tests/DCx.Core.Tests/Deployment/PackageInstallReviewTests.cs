@@ -41,6 +41,7 @@ public sealed class PackageInstallReviewTests : IDisposable
         Assert.Equal(Path.GetFileName(packagePath), proposal.PackageFileName);
         Assert.Equal(64, proposal.PackageSha256.Length);
         Assert.Equal(64, proposal.ProposalSha256.Length);
+        Assert.Equal(new string('a', 64), proposal.SignerCertificateSha256);
         Assert.Equal(Now.AddMinutes(10), proposal.ExpiresUtc);
         Assert.Equal(PackageInstallReviewState.Pending, session.State);
         Assert.Equal(1, verifier.CallCount);
@@ -90,7 +91,8 @@ public sealed class PackageInstallReviewTests : IDisposable
                 true,
                 "DCx.AgenticBrowser",
                 "CN=Different Publisher",
-                "1.2.3.4"),
+                "1.2.3.4",
+                new string('a', 64)),
         };
         await using var session = await PackageInstallReviewService.BeginAsync(
             packagePath,
@@ -171,7 +173,12 @@ public sealed class PackageInstallReviewTests : IDisposable
     {
         var verifier = new FixtureTrustVerifier
         {
-            FirstEvidence = new(false, "DCx.AgenticBrowser", "CN=DCx Fixture", "1.2.3.4"),
+            FirstEvidence = new(
+                false,
+                "DCx.AgenticBrowser",
+                "CN=DCx Fixture",
+                "1.2.3.4",
+                new string('a', 64)),
         };
 
         await AssertCodeAsync(
@@ -224,7 +231,12 @@ public sealed class PackageInstallReviewTests : IDisposable
     private sealed class FixtureTrustVerifier : IPackageInstallTrustVerifier
     {
         public PackageInstallTrustEvidence FirstEvidence { get; set; } =
-            new(true, "DCx.AgenticBrowser", "CN=DCx Fixture", "1.2.3.4");
+            new(
+                true,
+                "DCx.AgenticBrowser",
+                "CN=DCx Fixture",
+                "1.2.3.4",
+                new string('a', 64));
 
         public PackageInstallTrustEvidence? EvidenceAfterFirstCall { get; set; }
 

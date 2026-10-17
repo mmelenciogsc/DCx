@@ -218,7 +218,8 @@ public partial class App : Application
                 SignatureValid: true,
                 PackageIdentityName: "DCx.AgenticBrowser.ValidationFixture",
                 PublisherId: "CN=DCx Synthetic Validation Fixture",
-                Version: "1.2.3.4"));
+                Version: "1.2.3.4",
+                SignerCertificateSha256: new string('a', 64)));
         }
     }
 }

@@ -80,6 +80,7 @@ function Assert-RequestDetails($window) {
         "Requests elevation: no",
         "DCx.AgenticBrowser.ValidationFixture",
         "CN=DCx Synthetic Validation Fixture",
+        "Signer certificate SHA-256:",
         "Package SHA-256:",
         "Proposal SHA-256:",
         "Review expires UTC:")) {

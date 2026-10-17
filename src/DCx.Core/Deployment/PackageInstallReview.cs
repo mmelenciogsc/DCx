@@ -12,7 +12,8 @@ public sealed record PackageInstallTrustEvidence(
     bool SignatureValid,
     string PackageIdentityName,
     string PublisherId,
-    string Version);
+    string Version,
+    string SignerCertificateSha256);
 
 public interface IPackageInstallTrustVerifier
 {
@@ -44,6 +45,7 @@ public sealed record PackageInstallProposal(
     string PackageSha256,
     string PackageIdentityName,
     string PublisherId,
+    string SignerCertificateSha256,
     string Version,
     DateTimeOffset CreatedUtc,
     DateTimeOffset ExpiresUtc,
@@ -123,6 +125,7 @@ public static class PackageInstallReviewService
                 packageSha256,
                 evidence.PackageIdentityName,
                 evidence.PublisherId,
+                evidence.SignerCertificateSha256,
                 evidence.Version,
                 now,
                 expiresUtc,
@@ -251,7 +254,8 @@ public static class PackageInstallReviewService
     {
         if (evidence is null || !evidence.SignatureValid ||
             !IsIdentifier(evidence.PackageIdentityName, 128) ||
-            !IsPublisher(evidence.PublisherId))
+            !IsPublisher(evidence.PublisherId) ||
+            !IsLowerSha256(evidence.SignerCertificateSha256))
         {
             throw new PackageInstallReviewException("package_review_trust_invalid");
         }
@@ -293,6 +297,7 @@ public static class PackageInstallReviewService
             writer.WriteString("packageSha256", packageSha256);
             writer.WriteString("packageIdentityName", evidence.PackageIdentityName);
             writer.WriteString("publisherId", evidence.PublisherId);
+            writer.WriteString("signerCertificateSha256", evidence.SignerCertificateSha256);
             writer.WriteString("version", evidence.Version);
             writer.WriteString("createdUtc", createdUtc.ToString("O"));
             writer.WriteString("expiresUtc", expiresUtc.ToString("O"));
@@ -309,6 +314,10 @@ public static class PackageInstallReviewService
     private static bool IsPublisher(string? value) =>
         !string.IsNullOrWhiteSpace(value) && value.Length <= 512 &&
         value == value.Trim() && !value.Any(char.IsControl);
+
+    private static bool IsLowerSha256(string? value) =>
+        value is { Length: 64 } && value.All(character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
 }
 
 public sealed class PackageInstallReviewSession : IAsyncDisposable

@@ -123,6 +123,7 @@ public partial class PackageInstallReviewWindow : Window
         $"Package URI: {proposal.PackageUri}",
         $"Package identity: {proposal.PackageIdentityName}",
         $"Publisher: {proposal.PublisherId}",
+        $"Signer certificate SHA-256: {proposal.SignerCertificateSha256}",
         $"Version: {proposal.Version}",
         $"Size in bytes: {proposal.PackageLength.ToString(CultureInfo.InvariantCulture)}",
         $"Package SHA-256: {proposal.PackageSha256}",

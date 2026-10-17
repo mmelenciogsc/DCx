@@ -10,6 +10,7 @@ $runRoot = Join-Path $repoRoot "artifacts\test-results\p13-$([Guid]::NewGuid().T
 $publishOne = Join-Path $runRoot "publish-a"
 $publishTwo = Join-Path $runRoot "publish-b"
 $reliabilityTrx = Join-Path $runRoot "p13-reliability.trx"
+$packageTrustTrx = Join-Path $runRoot "p13-package-trust.trx"
 $previousDataRoot = $env:DCX_DATA_ROOT
 $previousOfflineStartup = $env:DCX_OFFLINE_STARTUP
 $process = $null
@@ -177,6 +178,23 @@ try {
         [int]$reliabilityCounters.timeout -ne 0 -or
         [int]$reliabilityCounters.aborted -ne 0) {
         throw "P13 TRX counters did not prove that every selected reliability test passed."
+    }
+
+    dotnet test $tests --configuration Release --no-build --no-restore `
+        --filter "FullyQualifiedName~Deployment.MsixPackageTrustVerifierTests" `
+        --logger "trx;LogFileName=p13-package-trust.trx" --results-directory $runRoot
+    if ($LASTEXITCODE -ne 0) { throw "P13 package trust tests failed with exit code $LASTEXITCODE." }
+    [xml]$packageTrustReport = Get-Content -LiteralPath $packageTrustTrx -Raw
+    $packageTrustCounters = $packageTrustReport.TestRun.ResultSummary.Counters
+    $packageTrustTestsPassed = [int]$packageTrustCounters.passed
+    if ($packageTrustTestsPassed -ne 21 -or
+        [int]$packageTrustCounters.total -ne $packageTrustTestsPassed -or
+        [int]$packageTrustCounters.executed -ne $packageTrustTestsPassed -or
+        [int]$packageTrustCounters.failed -ne 0 -or
+        [int]$packageTrustCounters.error -ne 0 -or
+        [int]$packageTrustCounters.timeout -ne 0 -or
+        [int]$packageTrustCounters.aborted -ne 0) {
+        throw "P13 package-trust TRX counters were not exactly 21 passed and zero failed or unexecuted."
     }
 
     dotnet publish $desktopProject --configuration Release --no-build --no-restore --self-contained false --output $publishOne
@@ -401,6 +419,7 @@ try {
         release_build_warnings = 0
         release_build_errors = 0
         reliability_tests_passed = $reliabilityTestsPassed
+        package_trust_tests_passed = $packageTrustTestsPassed
         publish_file_count = $manifestOne.Count
         publish_bytes = [long](($manifestOne | Measure-Object length -Sum).Sum)
         reproducible_publish = $true
@@ -431,6 +450,8 @@ try {
     $result | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runRoot "validation.json") -Encoding utf8
 
     "P13 reliability tests=PASS ($reliabilityTestsPassed/$reliabilityTestsPassed)"
+    "P13 bounded MSIX manifest and Windows Authenticode tests=PASS ($packageTrustTestsPassed/$packageTrustTestsPassed)"
+    "P13 unsigned or incomplete synthetic MSIX trust denial=PASS"
     "Reproducible framework-dependent publish files=$($manifestOne.Count)"
     "Reproducible portable staging ZIP SHA-256=$zipHashOne"
     "CycloneDX components=$($components.Count)"
