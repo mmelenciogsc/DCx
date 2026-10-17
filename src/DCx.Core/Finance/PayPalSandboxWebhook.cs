@@ -14,6 +14,54 @@ public sealed record PayPalSandboxWebhookEvent(
 
 public sealed record SubscriptionEntitlement(string SubscriptionId, bool Active, DateTimeOffset UpdatedUtc);
 
+public static class PayPalSandboxWebhookIntegrity
+{
+    public static string Sign(PayPalSandboxWebhookEvent webhook, ReadOnlySpan<byte> verificationKey)
+    {
+        if (verificationKey.Length < 32)
+        {
+            throw new ArgumentException("The sandbox webhook key is too short.", nameof(verificationKey));
+        }
+
+        return Convert.ToBase64String(HMACSHA256.HashData(verificationKey, CanonicalBytes(webhook)));
+    }
+
+    public static bool Verify(
+        PayPalSandboxWebhookEvent webhook,
+        string signatureBase64,
+        ReadOnlySpan<byte> verificationKey)
+    {
+        if (verificationKey.Length < 32)
+        {
+            return false;
+        }
+
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(
+                HMACSHA256.HashData(verificationKey, CanonicalBytes(webhook)),
+                Convert.FromBase64String(signatureBase64));
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    public static byte[] CanonicalBytes(PayPalSandboxWebhookEvent webhook) =>
+        JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schema = 1,
+            webhook.EventId,
+            webhook.TransmissionId,
+            webhook.EventType,
+            webhook.SubscriptionId,
+            webhook.AmountCents,
+            webhook.Currency,
+            occurredUtc = webhook.OccurredUtc.ToUniversalTime().ToString("O"),
+        });
+}
+
 public sealed class PayPalSandboxWebhookProcessor(DoubleEntryLedger ledger, byte[] verificationKey)
 {
     public const long MonthlyPlanCents = 300;
@@ -23,12 +71,12 @@ public sealed class PayPalSandboxWebhookProcessor(DoubleEntryLedger ledger, byte
     private readonly HashSet<string> eventIds = new(StringComparer.Ordinal);
 
     public string Sign(PayPalSandboxWebhookEvent webhook) =>
-        Convert.ToBase64String(HMACSHA256.HashData(verificationKey, CanonicalBytes(webhook)));
+        PayPalSandboxWebhookIntegrity.Sign(webhook, verificationKey);
 
     public bool Process(PayPalSandboxWebhookEvent webhook, string signatureBase64)
     {
         ArgumentNullException.ThrowIfNull(webhook);
-        if (verificationKey.Length < 32 || !Verify(webhook, signatureBase64))
+        if (!PayPalSandboxWebhookIntegrity.Verify(webhook, signatureBase64, verificationKey))
         {
             throw new InvalidOperationException("The sandbox webhook signature is invalid.");
         }
@@ -82,36 +130,10 @@ public sealed class PayPalSandboxWebhookProcessor(DoubleEntryLedger ledger, byte
     public SubscriptionEntitlement? GetEntitlement(string subscriptionId) =>
         entitlements.GetValueOrDefault(subscriptionId);
 
-    private bool Verify(PayPalSandboxWebhookEvent webhook, string signatureBase64)
-    {
-        try
-        {
-            return CryptographicOperations.FixedTimeEquals(
-                HMACSHA256.HashData(verificationKey, CanonicalBytes(webhook)),
-                Convert.FromBase64String(signatureBase64));
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
-    }
-
     private static LedgerJournalEntry Entry(
         PayPalSandboxWebhookEvent webhook,
         string description,
         params LedgerPosting[] postings) =>
         new(webhook.EventId, webhook.OccurredUtc, description, postings);
 
-    private static byte[] CanonicalBytes(PayPalSandboxWebhookEvent webhook) =>
-        JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            schema = 1,
-            webhook.EventId,
-            webhook.TransmissionId,
-            webhook.EventType,
-            webhook.SubscriptionId,
-            webhook.AmountCents,
-            webhook.Currency,
-            occurredUtc = webhook.OccurredUtc.ToUniversalTime().ToString("O"),
-        });
 }

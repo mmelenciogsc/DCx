@@ -17,12 +17,15 @@ try {
 
     "US`$3 monthly subscription fixture=PASS"
     "Signed webhook replay and idempotency=PASS"
+    "SQLite webhook and entitlement state survives reopen=PASS"
     "Refund and chargeback entitlement handling=PASS"
     "Double-entry reconciliation=PASS"
+    "Immutable ledger event conflict after restart=PASS"
     "Positive distributable net pool capped at aggregate 40 percent=PASS"
     "Zero or negative net payout exclusion=PASS"
     "Qualified attribution split and Net 60=PASS"
     "Owner approval duplicate payout and live-disable gates=PASS"
+    "Durable payout reservation terminal state and restart reconciliation=PASS"
     "Real PayPal network calls=0"
     "P11 local CARE and PayPal mock validation=PASS"
 }
