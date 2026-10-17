@@ -129,15 +129,36 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
 
         ValidateWebhook(webhook);
         var payloadSha = Convert.ToHexStringLower(SHA256.HashData(PayPalSandboxWebhookIntegrity.CanonicalBytes(webhook)));
-        return await ProcessWebhookAsync(webhook, payloadSha, null, null, cancellationToken)
+        return await ProcessWebhookAsync(
+                webhook,
+                payloadSha,
+                null,
+                null,
+                DateTimeOffset.UtcNow,
+                cancellationToken)
             .ConfigureAwait(false);
     }
+
+    public Task<bool> ProcessOfficialSandboxWebhookAsync(
+        PayPalSandboxHttpAdapter adapter,
+        PayPalSandboxWebhookVerificationEvidence evidence,
+        ReadOnlyMemory<byte> webhookEventJson,
+        string expectedPlanId,
+        CancellationToken cancellationToken = default) =>
+        ProcessOfficialSandboxWebhookAsync(
+            adapter,
+            evidence,
+            webhookEventJson,
+            expectedPlanId,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
 
     public async Task<bool> ProcessOfficialSandboxWebhookAsync(
         PayPalSandboxHttpAdapter adapter,
         PayPalSandboxWebhookVerificationEvidence evidence,
         ReadOnlyMemory<byte> webhookEventJson,
         string expectedPlanId,
+        DateTimeOffset receivedUtc,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(adapter);
@@ -150,6 +171,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                 verified.PayloadSha256,
                 verified,
                 expectedPlanId,
+                receivedUtc,
                 cancellationToken)
             .ConfigureAwait(false);
     }
@@ -159,6 +181,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         string payloadSha,
         PayPalSandboxVerifiedWebhook? verifiedWebhook,
         string? expectedPlanId,
+        DateTimeOffset receivedUtc,
         CancellationToken cancellationToken)
     {
         var eventId = verifiedWebhook?.EventId ?? fixtureWebhook!.EventId;
@@ -186,84 +209,61 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                 throw new InvalidOperationException("A webhook event or transmission identifier conflicts with prior data.");
             }
 
-            var webhook = fixtureWebhook ?? await NormalizeOfficialWebhookAsync(
+            var quarantined = await ReadWebhookQuarantineIdentityAsync(
                     connection,
                     (SqliteTransaction)transaction,
-                    verifiedWebhook!,
-                    expectedPlanId!,
+                    eventId,
+                    transmissionId,
                     cancellationToken)
                 .ConfigureAwait(false);
-            ValidateWebhook(webhook);
-
-            SubscriptionEntitlementTransition? entitlementTransition = null;
-            var decisionCode = PayPalSandboxWebhookPolicy.LedgerOnly;
-            if (PayPalSandboxWebhookPolicy.TryGetEntitlementTarget(
-                    webhook.EventType, out var targetActive))
+            if (quarantined is not null)
             {
-                var current = await ReadEntitlementAsync(
+                if (verifiedWebhook is not null &&
+                    quarantined.EventId == eventId &&
+                    quarantined.TransmissionId == transmissionId &&
+                    string.Equals(quarantined.PayloadSha256, payloadSha, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                throw new InvalidOperationException(
+                    "A quarantined webhook event or transmission identifier conflicts with prior data.");
+            }
+
+            PayPalSandboxWebhookEvent webhook;
+            try
+            {
+                webhook = fixtureWebhook ?? await NormalizeOfficialWebhookAsync(
                         connection,
                         (SqliteTransaction)transaction,
-                        webhook.SubscriptionId,
+                        verifiedWebhook!,
+                        expectedPlanId!,
                         cancellationToken)
                     .ConfigureAwait(false);
-                entitlementTransition = PayPalSandboxWebhookPolicy.ReduceEntitlement(
-                    current, targetActive, webhook.OccurredUtc);
-                decisionCode = entitlementTransition.DecisionCode;
             }
-
-            var subscriptionSha = Convert.ToHexStringLower(
-                SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(webhook.SubscriptionId)));
-            var command = connection.CreateCommand();
-            command.Transaction = (SqliteTransaction)transaction;
-            command.CommandText = """
-                INSERT INTO webhook_events(
-                    event_id, transmission_id, event_type, subscription_sha256,
-                    payload_sha256, occurred_utc, decision_code)
-                VALUES($event, $transmission, $type, $subscription_sha,
-                    $payload_sha, $occurred, $decision);
-                """;
-            command.Parameters.AddWithValue("$event", webhook.EventId);
-            command.Parameters.AddWithValue("$transmission", webhook.TransmissionId);
-            command.Parameters.AddWithValue("$type", webhook.EventType);
-            command.Parameters.AddWithValue("$subscription_sha", subscriptionSha);
-            command.Parameters.AddWithValue("$payload_sha", payloadSha);
-            command.Parameters.AddWithValue("$occurred", webhook.OccurredUtc.ToUniversalTime().ToString("O"));
-            command.Parameters.AddWithValue("$decision", decisionCode);
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-            if (entitlementTransition is { Applies: true } transition)
+            catch (PayPalSandboxException exception) when (
+                verifiedWebhook is not null && IsQuarantinableWebhookDependency(exception.Code))
             {
-                command.Parameters.Clear();
-                command.CommandText = """
-                    INSERT INTO entitlements(
-                        subscription_id, active, updated_utc, source_event_id, source_event_type)
-                    VALUES($subscription, $active, $updated, $source_event, $source_type)
-                    ON CONFLICT(subscription_id) DO UPDATE SET
-                        active = excluded.active,
-                        updated_utc = excluded.updated_utc,
-                        source_event_id = excluded.source_event_id,
-                        source_event_type = excluded.source_event_type;
-                    """;
-                command.Parameters.AddWithValue("$subscription", webhook.SubscriptionId);
-                command.Parameters.AddWithValue("$active", transition.Active ? 1 : 0);
-                command.Parameters.AddWithValue("$updated", webhook.OccurredUtc.ToUniversalTime().ToString("O"));
-                command.Parameters.AddWithValue("$source_event", webhook.EventId);
-                command.Parameters.AddWithValue("$source_type", webhook.EventType);
-                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                await InsertWebhookQuarantineAsync(
+                        connection,
+                        (SqliteTransaction)transaction,
+                        verifiedWebhook,
+                        expectedPlanId!,
+                        exception.Code,
+                        receivedUtc,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return true;
             }
 
-            await ApplySubscriptionFinancialInvariantAsync(
+            await ApplyNormalizedWebhookAsync(
                     connection,
                     (SqliteTransaction)transaction,
                     webhook,
+                    payloadSha,
                     cancellationToken)
                 .ConfigureAwait(false);
-            var journalEntry = CreateWebhookEntry(webhook);
-            if (journalEntry is not null)
-            {
-                await PostInternalAsync(connection, (SqliteTransaction)transaction, journalEntry, cancellationToken)
-                    .ConfigureAwait(false);
-            }
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return true;
@@ -1033,7 +1033,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         command.CommandText = "PRAGMA user_version;";
         var schemaVersion = Convert.ToInt32(
             await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
-        if (schemaVersion > 7)
+        if (schemaVersion > 8)
         {
             throw new InvalidOperationException("The CARE ledger schema is newer than this application.");
         }
@@ -1224,15 +1224,52 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                 FOREIGN KEY(remediation_batch_id)
                     REFERENCES payout_batches(batch_id)
             );
+            CREATE TABLE IF NOT EXISTS webhook_event_quarantine(
+                event_id TEXT PRIMARY KEY,
+                transmission_id TEXT NOT NULL UNIQUE,
+                event_type TEXT NOT NULL CHECK(event_type IN (
+                    'PAYMENT.SALE.COMPLETED',
+                    'PAYMENT.SALE.REFUNDED',
+                    'PAYMENT.SALE.REVERSED')),
+                provider_object_id TEXT NOT NULL,
+                subscription_id TEXT,
+                plan_id TEXT,
+                related_sale_id TEXT,
+                amount_cents INTEGER NOT NULL CHECK(amount_cents BETWEEN 1 AND 300),
+                currency TEXT NOT NULL CHECK(currency = 'USD'),
+                occurred_utc TEXT NOT NULL,
+                payload_sha256 TEXT NOT NULL CHECK(
+                    length(payload_sha256) = 64 AND
+                    payload_sha256 = lower(payload_sha256) AND
+                    payload_sha256 NOT GLOB '*[^0-9a-f]*'),
+                expected_plan_id TEXT NOT NULL,
+                verified_event_sha256 TEXT NOT NULL CHECK(
+                    length(verified_event_sha256) = 64 AND
+                    verified_event_sha256 = lower(verified_event_sha256) AND
+                    verified_event_sha256 NOT GLOB '*[^0-9a-f]*'),
+                reason_code TEXT NOT NULL,
+                state TEXT NOT NULL CHECK(state IN ('pending', 'completed', 'blocked')),
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                first_received_utc TEXT NOT NULL,
+                last_attempt_utc TEXT,
+                next_attempt_utc TEXT,
+                completed_utc TEXT,
+                CHECK(
+                    (state = 'pending' AND next_attempt_utc IS NOT NULL AND completed_utc IS NULL) OR
+                    (state = 'completed' AND next_attempt_utc IS NULL AND completed_utc IS NOT NULL) OR
+                    (state = 'blocked' AND next_attempt_utc IS NULL AND completed_utc IS NULL))
+            );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         command.CommandText = """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_payout_batches_provider_batch_id
             ON payout_batches(provider_batch_id)
             WHERE provider_batch_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS ix_webhook_event_quarantine_due
+            ON webhook_event_quarantine(state, next_attempt_utc, occurred_utc, event_id);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        command.CommandText = "PRAGMA user_version = 7;";
+        command.CommandText = "PRAGMA user_version = 8;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 

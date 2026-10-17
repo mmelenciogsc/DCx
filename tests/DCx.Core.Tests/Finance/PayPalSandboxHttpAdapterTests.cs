@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using DCx.Core.Finance;
 using DCx.GlobalService;
+using Microsoft.Data.Sqlite;
 
 namespace DCx.Core.Tests.Finance;
 
@@ -144,7 +145,275 @@ public sealed class PayPalSandboxHttpAdapterTests
                     adapter, Evidence("transmission:wrong-plan"), wrongPlan, planId));
             Assert.Equal("paypal_sandbox_subscription_plan_mismatch", planError.Code);
             Assert.Null(await repository.GetEntitlementAsync("I-DCX-WRONG"));
+            Assert.Null(await repository.GetOfficialWebhookQuarantineAsync("WH-WRONG-PLAN"));
             Assert.Equal(14, handler.Calls);
+        }
+        finally
+        {
+            TestDirectory.DeleteIfExists(root);
+        }
+    }
+
+    [Fact]
+    public async Task VerifiedOutOfOrderWebhooks_QuarantineThenRecoverLocallyInCausalOrder()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"dcx-paypal-quarantine-{Guid.NewGuid():N}");
+        try
+        {
+            var handler = VerifiedWebhookHandler();
+            using var adapter = Adapter(handler);
+            var repository = await DurableCareRepository.OpenAsync(root);
+            const string planId = "P-DCX300";
+            var received = DateTimeOffset.Parse("2026-10-17T02:00:00Z");
+            var payment = OfficialWebhook(
+                "WH-OUT-OF-ORDER-PAYMENT",
+                "PAYMENT.SALE.COMPLETED",
+                "sale",
+                "{\"id\":\"SALE-OUT-OF-ORDER\",\"state\":\"completed\",\"billing_agreement_id\":\"I-OUT-OF-ORDER\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}",
+                "2026-10-17T01:03:00Z");
+            var refund = OfficialWebhook(
+                "WH-OUT-OF-ORDER-REFUND",
+                "PAYMENT.SALE.REFUNDED",
+                "refund",
+                "{\"id\":\"REFUND-OUT-OF-ORDER\",\"state\":\"completed\",\"sale_id\":\"SALE-OUT-OF-ORDER\",\"amount\":{\"total\":\"1.00\",\"currency\":\"USD\"}}",
+                "2026-10-17T01:04:00Z");
+            var activation = OfficialWebhook(
+                "WH-OUT-OF-ORDER-ACTIVE",
+                "BILLING.SUBSCRIPTION.ACTIVATED",
+                "subscription",
+                "{\"id\":\"I-OUT-OF-ORDER\",\"plan_id\":\"P-DCX300\",\"status\":\"ACTIVE\"}",
+                "2026-10-17T01:02:00Z");
+
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:out-of-order-payment"), payment, planId, received));
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:out-of-order-refund"), refund, planId, received));
+            Assert.Equal("pending", (await repository.GetOfficialWebhookQuarantineAsync(
+                "WH-OUT-OF-ORDER-PAYMENT"))!.State);
+            Assert.Equal("pending", (await repository.GetOfficialWebhookQuarantineAsync(
+                "WH-OUT-OF-ORDER-REFUND"))!.State);
+            Assert.Null(await repository.GetWebhookAuditAsync("WH-OUT-OF-ORDER-PAYMENT"));
+            Assert.Null(await repository.GetWebhookAuditAsync("WH-OUT-OF-ORDER-REFUND"));
+            repository = await DurableCareRepository.OpenAsync(root);
+
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:out-of-order-active"), activation, planId, received));
+            Assert.Equal(6, handler.Calls);
+            var summary = await repository.ReprocessQuarantinedOfficialWebhooksAsync(received);
+            Assert.Equal(new WebhookQuarantineReprocessSummary(2, 2, 0, 0), summary);
+            Assert.Equal(6, handler.Calls);
+            Assert.NotNull(await repository.GetWebhookAuditAsync("WH-OUT-OF-ORDER-PAYMENT"));
+            Assert.NotNull(await repository.GetWebhookAuditAsync("WH-OUT-OF-ORDER-REFUND"));
+            Assert.Equal("completed", (await repository.GetOfficialWebhookQuarantineAsync(
+                "WH-OUT-OF-ORDER-PAYMENT"))!.State);
+            Assert.Equal("completed", (await repository.GetOfficialWebhookQuarantineAsync(
+                "WH-OUT-OF-ORDER-REFUND"))!.State);
+            Assert.Equal(200, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.False((await repository.GetEntitlementAsync("I-OUT-OF-ORDER"))!.Active);
+            Assert.True(await repository.ReconcilesAsync());
+
+            Assert.False(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:out-of-order-refund"), refund, planId, received));
+            Assert.Equal(8, handler.Calls);
+        }
+        finally
+        {
+            TestDirectory.DeleteIfExists(root);
+        }
+    }
+
+    [Fact]
+    public async Task MissingDependencyRetry_UsesBoundedBackoffAndNoProviderCalls()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"dcx-paypal-backoff-{Guid.NewGuid():N}");
+        try
+        {
+            var handler = VerifiedWebhookHandler();
+            using var adapter = Adapter(handler);
+            var repository = await DurableCareRepository.OpenAsync(root);
+            const string planId = "P-DCX300";
+            var received = DateTimeOffset.Parse("2026-10-17T03:00:00Z");
+            var payment = OfficialWebhook(
+                "WH-BACKOFF-PAYMENT",
+                "PAYMENT.SALE.COMPLETED",
+                "sale",
+                "{\"id\":\"SALE-BACKOFF\",\"state\":\"completed\",\"billing_agreement_id\":\"I-BACKOFF\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}");
+            var activation = OfficialWebhook(
+                "WH-BACKOFF-ACTIVE",
+                "BILLING.SUBSCRIPTION.ACTIVATED",
+                "subscription",
+                "{\"id\":\"I-BACKOFF\",\"plan_id\":\"P-DCX300\",\"status\":\"ACTIVE\"}");
+
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:backoff-payment"), payment, planId, received));
+            Assert.Equal(
+                new WebhookQuarantineReprocessSummary(1, 0, 1, 0),
+                await repository.ReprocessQuarantinedOfficialWebhooksAsync(received));
+            var pending = (await repository.GetOfficialWebhookQuarantineAsync(
+                "WH-BACKOFF-PAYMENT"))!;
+            Assert.Equal(1, pending.AttemptCount);
+            Assert.Equal(received.AddSeconds(2), pending.NextAttemptUtc);
+            Assert.Equal(
+                new WebhookQuarantineReprocessSummary(0, 0, 0, 0),
+                await repository.ReprocessQuarantinedOfficialWebhooksAsync(received.AddSeconds(1)));
+            Assert.Equal(2, handler.Calls);
+
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter,
+                Evidence("transmission:backoff-active"),
+                activation,
+                planId,
+                received.AddSeconds(1)));
+            Assert.Equal(4, handler.Calls);
+            Assert.Equal(
+                new WebhookQuarantineReprocessSummary(1, 1, 0, 0),
+                await repository.ReprocessQuarantinedOfficialWebhooksAsync(received.AddSeconds(2)));
+            Assert.Equal(4, handler.Calls);
+            Assert.Equal(300, await repository.BalanceAsync(LedgerAccount.Cash));
+        }
+        finally
+        {
+            TestDirectory.DeleteIfExists(root);
+        }
+    }
+
+    [Fact]
+    public async Task QuarantinedCorrection_BlocksWhenLaterStateMakesItInvalid()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"dcx-paypal-quarantine-blocked-{Guid.NewGuid():N}");
+        try
+        {
+            var handler = VerifiedWebhookHandler();
+            using var adapter = Adapter(handler);
+            var repository = await DurableCareRepository.OpenAsync(root);
+            const string planId = "P-DCX300";
+            var received = DateTimeOffset.Parse("2026-10-17T03:30:00Z");
+            var delayedRefund = OfficialWebhook(
+                "WH-BLOCKED-REFUND",
+                "PAYMENT.SALE.REFUNDED",
+                "refund",
+                "{\"id\":\"REFUND-BLOCKED\",\"state\":\"completed\",\"sale_id\":\"SALE-BLOCKED\",\"amount\":{\"total\":\"2.50\",\"currency\":\"USD\"}}",
+                "2026-10-17T01:05:00Z");
+            var activation = OfficialWebhook(
+                "WH-BLOCKED-ACTIVE",
+                "BILLING.SUBSCRIPTION.ACTIVATED",
+                "subscription",
+                "{\"id\":\"I-BLOCKED\",\"plan_id\":\"P-DCX300\",\"status\":\"ACTIVE\"}");
+            var payment = OfficialWebhook(
+                "WH-BLOCKED-PAYMENT",
+                "PAYMENT.SALE.COMPLETED",
+                "sale",
+                "{\"id\":\"SALE-BLOCKED\",\"state\":\"completed\",\"billing_agreement_id\":\"I-BLOCKED\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}");
+            var acceptedRefund = OfficialWebhook(
+                "WH-BLOCKED-ACCEPTED-REFUND",
+                "PAYMENT.SALE.REFUNDED",
+                "refund",
+                "{\"id\":\"REFUND-ACCEPTED\",\"state\":\"completed\",\"sale_id\":\"SALE-BLOCKED\",\"amount\":{\"total\":\"1.00\",\"currency\":\"USD\"}}");
+
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:blocked-refund"), delayedRefund, planId, received));
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:blocked-active"), activation, planId, received));
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:blocked-payment"), payment, planId, received));
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter,
+                Evidence("transmission:blocked-accepted-refund"),
+                acceptedRefund,
+                planId,
+                received));
+            Assert.Equal(8, handler.Calls);
+
+            Assert.Equal(
+                new WebhookQuarantineReprocessSummary(1, 0, 0, 1),
+                await repository.ReprocessQuarantinedOfficialWebhooksAsync(received));
+            Assert.Equal(8, handler.Calls);
+            var blocked = (await repository.GetOfficialWebhookQuarantineAsync(
+                "WH-BLOCKED-REFUND"))!;
+            Assert.Equal("blocked", blocked.State);
+            Assert.Equal("paypal_sandbox_quarantine_reprocess_blocked", blocked.ReasonCode);
+            Assert.Equal(1, blocked.AttemptCount);
+            Assert.Null(blocked.NextAttemptUtc);
+            Assert.Null(await repository.GetWebhookAuditAsync("WH-BLOCKED-REFUND"));
+            Assert.Equal(200, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.Equal(
+                new WebhookQuarantineReprocessSummary(0, 0, 0, 0),
+                await repository.ReprocessQuarantinedOfficialWebhooksAsync(received.AddDays(1)));
+        }
+        finally
+        {
+            TestDirectory.DeleteIfExists(root);
+        }
+    }
+
+    [Fact]
+    public async Task QuarantinedWebhook_ReplayConflictsAndStoredTamperFailClosed()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"dcx-paypal-quarantine-tamper-{Guid.NewGuid():N}");
+        try
+        {
+            var handler = VerifiedWebhookHandler();
+            using var adapter = Adapter(handler);
+            var repository = await DurableCareRepository.OpenAsync(root);
+            const string planId = "P-DCX300";
+            var received = DateTimeOffset.Parse("2026-10-17T04:00:00Z");
+            var payment = OfficialWebhook(
+                "WH-TAMPER-PAYMENT",
+                "PAYMENT.SALE.COMPLETED",
+                "sale",
+                "{\"id\":\"SALE-TAMPER\",\"state\":\"completed\",\"billing_agreement_id\":\"I-TAMPER\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}");
+
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:tamper-payment"), payment, planId, received));
+            var localFixtureKey = Enumerable.Repeat((byte)19, 32).ToArray();
+            var crossPathFixture = new PayPalSandboxWebhookEvent(
+                "WH-TAMPER-PAYMENT",
+                "transmission:tamper-payment",
+                "PAYMENT.SALE.COMPLETED",
+                "I-TAMPER",
+                300,
+                "USD",
+                DateTimeOffset.Parse("2026-10-17T01:02:03Z"));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                repository.ProcessSandboxWebhookAsync(
+                    crossPathFixture,
+                    PayPalSandboxWebhookIntegrity.Sign(crossPathFixture, localFixtureKey),
+                    localFixtureKey));
+            Assert.False(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:tamper-payment"), payment, planId, received));
+            var conflicting = OfficialWebhook(
+                "WH-TAMPER-PAYMENT",
+                "PAYMENT.SALE.COMPLETED",
+                "sale",
+                "{\"id\":\"SALE-TAMPER\",\"state\":\"completed\",\"billing_agreement_id\":\"I-TAMPER\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}",
+                "2026-10-17T01:02:04Z");
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                repository.ProcessOfficialSandboxWebhookAsync(
+                    adapter, Evidence("transmission:tamper-payment"), conflicting, planId, received));
+
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = Path.Combine(root, "care-ledger.sqlite3"),
+                Pooling = false,
+            }.ToString()))
+            {
+                await connection.OpenAsync();
+                var command = connection.CreateCommand();
+                command.CommandText = """
+                    UPDATE webhook_event_quarantine
+                    SET verified_event_sha256 = $tampered
+                    WHERE event_id = 'WH-TAMPER-PAYMENT';
+                    """;
+                command.Parameters.AddWithValue("$tampered", new string('0', 64));
+                Assert.Equal(1, await command.ExecuteNonQueryAsync());
+            }
+
+            var tamperError = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                repository.ReprocessQuarantinedOfficialWebhooksAsync(received));
+            Assert.Contains("failed its stored digest", tamperError.Message, StringComparison.Ordinal);
+            Assert.Null(await repository.GetWebhookAuditAsync("WH-TAMPER-PAYMENT"));
+            Assert.Equal(0, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.Equal(6, handler.Calls);
         }
         finally
         {
@@ -744,8 +1013,24 @@ public sealed class PayPalSandboxHttpAdapterTests
         string eventId,
         string eventType,
         string resourceType,
-        string resourceJson) => Encoding.UTF8.GetBytes(
-            $"{{\"id\":\"{eventId}\",\"create_time\":\"2026-10-17T01:02:03Z\",\"resource_type\":\"{resourceType}\",\"event_type\":\"{eventType}\",\"resource\":{resourceJson}}}");
+        string resourceJson,
+        string createTime = "2026-10-17T01:02:03Z") => Encoding.UTF8.GetBytes(
+            $"{{\"id\":\"{eventId}\",\"create_time\":\"{createTime}\",\"resource_type\":\"{resourceType}\",\"event_type\":\"{eventType}\",\"resource\":{resourceJson}}}");
+
+    private static ScriptedHandler VerifiedWebhookHandler() => new(
+        async (index, request, cancellationToken) =>
+        {
+            if (index % 2 == 0)
+            {
+                await AssertTokenRequestAsync(request, cancellationToken);
+                return Json(request, HttpStatusCode.OK, TokenResponse());
+            }
+
+            Assert.Equal(
+                "/v1/notifications/verify-webhook-signature",
+                request.RequestUri!.AbsolutePath);
+            return Json(request, HttpStatusCode.OK, "{\"verification_status\":\"SUCCESS\"}");
+        });
 
     private static string TokenResponse() =>
         $"{{\"access_token\":\"{AccessToken}\",\"token_type\":\"Bearer\",\"expires_in\":3600}}";

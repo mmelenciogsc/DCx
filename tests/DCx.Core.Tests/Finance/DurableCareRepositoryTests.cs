@@ -159,7 +159,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(7L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(8L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -176,7 +176,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         {
             await connection.OpenAsync();
             var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 8;";
+            command.CommandText = "PRAGMA user_version = 9;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -188,11 +188,11 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(8L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(9L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
-    public async Task SchemaSix_AddsFailedItemRemediationLineageWithoutReplacingPriorState()
+    public async Task SchemaSix_AddsRemediationAndWebhookQuarantineWithoutReplacingPriorState()
     {
         var repository = await DurableCareRepository.OpenAsync(root);
         var preview = Preview("batch:schema-six-source");
@@ -209,7 +209,11 @@ public sealed class DurableCareRepositoryTests : IDisposable
         {
             await connection.OpenAsync();
             var command = connection.CreateCommand();
-            command.CommandText = "DROP TABLE payout_item_remediations; PRAGMA user_version = 6;";
+            command.CommandText = """
+                DROP TABLE payout_item_remediations;
+                DROP TABLE webhook_event_quarantine;
+                PRAGMA user_version = 6;
+                """;
             await command.ExecuteNonQueryAsync();
         }
 
@@ -221,9 +225,11 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await verified.OpenAsync();
         var version = verified.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(7L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(8L, (long)(await version.ExecuteScalarAsync())!);
         var table = verified.CreateCommand();
         table.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'payout_item_remediations';";
+        Assert.Equal(1L, (long)(await table.ExecuteScalarAsync())!);
+        table.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'webhook_event_quarantine';";
         Assert.Equal(1L, (long)(await table.ExecuteScalarAsync())!);
     }
 
@@ -866,7 +872,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var version = reopened.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(7L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(8L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     public void Dispose()
