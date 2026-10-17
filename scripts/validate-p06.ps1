@@ -61,6 +61,7 @@ try {
         $whisperRegistrationEvidence.benchmark_path_change_revoked_approval -ne $true -or
         $whisperRegistrationEvidence.benchmark_cancellation_preserved_evidence -ne $true -or
         $whisperRegistrationEvidence.benchmark_missing_backend_unavailable -ne $true -or
+        $whisperRegistrationEvidence.embedding_benchmark_missing_model_unavailable -ne $true -or
         $whisperRegistrationEvidence.accessible_viewer_cancellation -ne $true -or
         $whisperRegistrationEvidence.canceled_partial_transcript_retained -ne $false -or
         $whisperRegistrationEvidence.cleared_backend_consumer_denied -ne $true -or

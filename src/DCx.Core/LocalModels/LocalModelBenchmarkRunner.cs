@@ -110,6 +110,96 @@ public sealed class WhisperTranscriptionBenchmarkBackend : ITranscriptionBenchma
     }
 }
 
+public sealed class OllamaEmbeddingBenchmarkBackend : IEmbeddingBenchmarkBackend, IDisposable
+{
+    private readonly ApprovedLocalModelBinding binding;
+    private readonly OllamaLocalClient client;
+    private bool disposed;
+
+    private OllamaEmbeddingBenchmarkBackend(
+        ApprovedLocalModelBinding binding,
+        OllamaLocalClient client,
+        string runtimeVersion)
+    {
+        ArgumentNullException.ThrowIfNull(binding);
+        this.client = client ?? throw new ArgumentNullException(nameof(client));
+        ArgumentException.ThrowIfNullOrWhiteSpace(runtimeVersion);
+        this.binding = binding;
+        RuntimeVersion = runtimeVersion;
+        BindingSha256 = LocalModelBenchmarkRunner.ComputeBackendBindingSha256(
+            LocalModelBenchmarkKind.EmbeddingRetrieval,
+            [
+                new("model", binding.Digest),
+                new("model_license", binding.LicenseSha256),
+                new("model_name", Sha256(binding.Name)),
+                new("runtime_version", Sha256(runtimeVersion)),
+            ]);
+    }
+
+    public string BindingSha256 { get; }
+    public string RuntimeVersion { get; }
+
+    public static async Task<OllamaEmbeddingBenchmarkBackend> CreateAsync(
+        ApprovedLocalModelBinding binding,
+        Uri origin,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(binding);
+        var client = new OllamaLocalClient(origin, timeout);
+        try
+        {
+            return await CreateAsync(binding, client, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            client.Dispose();
+            throw;
+        }
+    }
+
+    internal static async Task<OllamaEmbeddingBenchmarkBackend> CreateAsync(
+        ApprovedLocalModelBinding binding,
+        OllamaLocalClient client,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(binding);
+        ArgumentNullException.ThrowIfNull(client);
+        await client.ValidatePinnedEmbeddingBindingAsync(
+            binding.Name,
+            binding.Digest,
+            binding.LicenseSha256,
+            cancellationToken).ConfigureAwait(false);
+        var version = await client.GetVersionAsync(cancellationToken).ConfigureAwait(false);
+        return new OllamaEmbeddingBenchmarkBackend(binding, client, version);
+    }
+
+    public async Task<EmbeddingBenchmarkBackendResult> EmbedAsync(
+        IReadOnlyList<string> inputs,
+        CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        var result = await client.EmbedPinnedForBenchmarkAsync(
+            binding.Name,
+            binding.Digest,
+            binding.LicenseSha256,
+            RuntimeVersion,
+            inputs,
+            cancellationToken).ConfigureAwait(false);
+        return new EmbeddingBenchmarkBackendResult(result.Embedding.Embeddings, result.Resources);
+    }
+
+    public void Dispose()
+    {
+        if (disposed) return;
+        disposed = true;
+        client.Dispose();
+    }
+
+    private static string Sha256(string value) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+}
+
 public sealed record TranscriptionBenchmarkEvidence(
     int SchemaVersion,
     string ApprovalSha256,

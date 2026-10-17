@@ -10,20 +10,26 @@ namespace DCx.Desktop;
 
 public partial class LocalModelBenchmarkWindow : Window
 {
+    private static readonly Uri OllamaOrigin = new("http://localhost:11434/");
+    private readonly LocalModelSelectionStore localModelStore;
     private readonly WhisperBackendSelectionStore whisperStore;
     private readonly string applicationDataRoot;
     private readonly CancellationTokenSource lifetime = new();
     private ILocalModelBenchmarkManifestReview? reviewedManifest;
     private ApprovedWhisperBackendBinding? reviewedWhisperBinding;
+    private ApprovedLocalModelBinding? reviewedEmbeddingBinding;
+    private string? reviewedEmbeddingRuntimeVersion;
     private string? reviewedBackendSha256;
     private DateTimeOffset reviewedAtUtc;
     private CancellationTokenSource? activeRun;
     private bool busy;
 
     public LocalModelBenchmarkWindow(
+        LocalModelSelectionStore localModelStore,
         WhisperBackendSelectionStore whisperStore,
         string applicationDataRoot)
     {
+        this.localModelStore = localModelStore ?? throw new ArgumentNullException(nameof(localModelStore));
         this.whisperStore = whisperStore ?? throw new ArgumentNullException(nameof(whisperStore));
         ArgumentException.ThrowIfNullOrWhiteSpace(applicationDataRoot);
         this.applicationDataRoot = Path.GetFullPath(applicationDataRoot);
@@ -88,8 +94,29 @@ public partial class LocalModelBenchmarkWindow : Window
             }
             else if (review is EmbeddingBenchmarkManifestReview embedding)
             {
-                SetReviewDetails(DescribeEmbeddingReview(embedding));
-                SetStatus("The exact embedding suite was reviewed. Running is unavailable because no approved production embedding benchmark adapter and resource probe is implemented yet.");
+                var binding = (await localModelStore.GetStateAsync(lifetime.Token)).Embedding;
+                if (binding is null)
+                {
+                    SetReviewDetails(DescribeEmbeddingReview(
+                        embedding,
+                        "No approved digest-bound Ollama embedding model is selected."));
+                    SetStatus("The exact embedding suite was reviewed, but running is unavailable until an installed digest-bound embedding model is explicitly selected.");
+                    return;
+                }
+
+                using var backend = await OllamaEmbeddingBenchmarkBackend.CreateAsync(
+                    binding,
+                    OllamaOrigin,
+                    OllamaTimeout(embedding),
+                    lifetime.Token);
+                reviewedEmbeddingBinding = binding;
+                reviewedEmbeddingRuntimeVersion = backend.RuntimeVersion;
+                reviewedBackendSha256 = backend.BindingSha256;
+                SetReviewDetails(DescribeEmbeddingReview(
+                    embedding,
+                    $"Approved embedding backend binding SHA-256: {backend.BindingSha256}. Reviewed Ollama runtime version: {backend.RuntimeVersion}."));
+                ApprovalBox.IsEnabled = true;
+                SetStatus("Exact embedding backend, runtime version, suite, policy, thresholds, provenance, and license are ready for review. Approval remains unchecked.");
             }
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
@@ -111,8 +138,9 @@ public partial class LocalModelBenchmarkWindow : Window
     private async void OnRunClick(object sender, RoutedEventArgs e)
     {
         if (ApprovalBox.IsChecked != true ||
-            reviewedManifest is not TranscriptionBenchmarkManifestReview reviewed ||
-            reviewedWhisperBinding is null || reviewedBackendSha256 is null)
+            reviewedManifest is null || reviewedBackendSha256 is null ||
+            reviewedManifest is TranscriptionBenchmarkManifestReview && reviewedWhisperBinding is null ||
+            reviewedManifest is EmbeddingBenchmarkManifestReview && reviewedEmbeddingBinding is null)
         {
             SetStatus("No benchmark ran. Review an available backend and exact manifest, then check the explicit approval box.");
             ApprovalBox.Focus();
@@ -122,46 +150,24 @@ public partial class LocalModelBenchmarkWindow : Window
         activeRun = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         SetBusy(true, running: true);
         SetResult("Benchmark running. No evidence has been saved yet.");
-        SetStatus("Running the explicitly approved local transcription benchmark. Cancel remains available.");
+        var kindLabel = reviewedManifest.Kind == LocalModelBenchmarkKind.Transcription
+            ? "transcription"
+            : "embedding retrieval";
+        SetStatus($"Running the explicitly approved local {kindLabel} benchmark. Cancel remains available.");
         try
         {
-            var current = Assert.IsTranscription(await LocalModelBenchmarkManifestLoader
-                .LoadAsync(ManifestPathBox.Text, activeRun.Token));
-            RequireSameReview(reviewed, current);
-            var currentBinding = (await whisperStore.GetStateAsync(activeRun.Token)).Backend;
-            if (currentBinding is null || !reviewedWhisperBinding.HasSameIdentity(currentBinding))
+            var passed = reviewedManifest switch
             {
-                throw new InvalidOperationException("The approved transcription backend changed after review.");
-            }
-            var backend = new WhisperTranscriptionBenchmarkBackend(currentBinding, BenchmarkTimeout(current));
-            if (!string.Equals(backend.BindingSha256, reviewedBackendSha256, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("The exact benchmark backend binding changed after review.");
-            }
-
-            var approval = new LocalModelBenchmarkApproval(
-                LocalModelBenchmarkKind.Transcription,
-                reviewedBackendSha256,
-                reviewed.FixtureSuiteSha256,
-                reviewed.PolicySha256,
-                reviewedAtUtc,
-                reviewedAtUtc.AddMinutes(20));
-            var evidence = await LocalModelBenchmarkRunner.RunTranscriptionAsync(
-                approval,
-                explicitlyApproved: true,
-                current.Fixtures,
-                current.Limits,
-                backend,
-                activeRun.Token);
-            var evidenceStore = await LocalModelBenchmarkEvidenceStore.OpenAsync(
-                applicationDataRoot,
-                activeRun.Token);
-            await evidenceStore.SaveTranscriptionAsync(evidence, activeRun.Token);
-            SetResult(DescribeEvidence(evidence));
+                TranscriptionBenchmarkManifestReview transcription =>
+                    await RunTranscriptionAsync(transcription, activeRun.Token),
+                EmbeddingBenchmarkManifestReview embedding =>
+                    await RunEmbeddingAsync(embedding, activeRun.Token),
+                _ => throw new InvalidOperationException("The reviewed benchmark kind is unsupported."),
+            };
             ResultText.Focus();
-            SetStatus(evidence.Result.Passed
-                ? "Benchmark passed. Aggregate-only evidence replaced the previous local transcription benchmark evidence. The production selection was not changed."
-                : "Benchmark failed its reviewed thresholds. Aggregate-only evidence was saved, and the production selection was not changed.");
+            SetStatus(passed
+                ? $"Benchmark passed. Aggregate-only evidence replaced the previous local {kindLabel} benchmark evidence. The production selection was not changed."
+                : $"Benchmark failed its reviewed {kindLabel} thresholds. Aggregate-only evidence was saved, and the production selection was not changed.");
         }
         catch (OperationCanceledException) when (activeRun?.IsCancellationRequested == true)
         {
@@ -180,12 +186,111 @@ public partial class LocalModelBenchmarkWindow : Window
             ApprovalBox.IsChecked = false;
             reviewedManifest = null;
             reviewedWhisperBinding = null;
+            reviewedEmbeddingBinding = null;
+            reviewedEmbeddingRuntimeVersion = null;
             reviewedBackendSha256 = null;
             activeRun?.Dispose();
             activeRun = null;
             SetBusy(false, running: false);
             ApprovalBox.IsEnabled = false;
             RunButton.IsEnabled = false;
+        }
+    }
+
+    private async Task<bool> RunTranscriptionAsync(
+        TranscriptionBenchmarkManifestReview reviewed,
+        CancellationToken cancellationToken)
+    {
+        var current = Assert.IsTranscription(await LocalModelBenchmarkManifestLoader
+            .LoadAsync(ManifestPathBox.Text, cancellationToken));
+        RequireSameReview(reviewed, current);
+        var currentBinding = (await whisperStore.GetStateAsync(cancellationToken)).Backend;
+        if (currentBinding is null || reviewedWhisperBinding is null ||
+            !reviewedWhisperBinding.HasSameIdentity(currentBinding))
+        {
+            throw new InvalidOperationException("The approved transcription backend changed after review.");
+        }
+        var backend = new WhisperTranscriptionBenchmarkBackend(currentBinding, BenchmarkTimeout(current));
+        RequireBackendBinding(backend.BindingSha256);
+        var approval = CreateApproval(
+            LocalModelBenchmarkKind.Transcription,
+            reviewed.FixtureSuiteSha256,
+            reviewed.PolicySha256);
+        var evidence = await LocalModelBenchmarkRunner.RunTranscriptionAsync(
+            approval,
+            explicitlyApproved: true,
+            current.Fixtures,
+            current.Limits,
+            backend,
+            cancellationToken);
+        var evidenceStore = await LocalModelBenchmarkEvidenceStore.OpenAsync(
+            applicationDataRoot,
+            cancellationToken);
+        await evidenceStore.SaveTranscriptionAsync(evidence, cancellationToken);
+        SetResult(DescribeEvidence(evidence));
+        return evidence.Result.Passed;
+    }
+
+    private async Task<bool> RunEmbeddingAsync(
+        EmbeddingBenchmarkManifestReview reviewed,
+        CancellationToken cancellationToken)
+    {
+        var current = Assert.IsEmbedding(await LocalModelBenchmarkManifestLoader
+            .LoadAsync(ManifestPathBox.Text, cancellationToken));
+        RequireSameReview(reviewed, current);
+        var currentBinding = (await localModelStore.GetStateAsync(cancellationToken)).Embedding;
+        if (currentBinding is null || reviewedEmbeddingBinding is null ||
+            !HasSameIdentity(reviewedEmbeddingBinding, currentBinding))
+        {
+            throw new InvalidOperationException("The approved embedding model changed after review.");
+        }
+        using var backend = await OllamaEmbeddingBenchmarkBackend.CreateAsync(
+            currentBinding,
+            OllamaOrigin,
+            OllamaTimeout(current),
+            cancellationToken);
+        RequireBackendBinding(backend.BindingSha256);
+        if (!string.Equals(backend.RuntimeVersion, reviewedEmbeddingRuntimeVersion, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The reviewed Ollama runtime version changed.");
+        }
+        var approval = CreateApproval(
+            LocalModelBenchmarkKind.EmbeddingRetrieval,
+            reviewed.FixtureSuiteSha256,
+            reviewed.PolicySha256);
+        var evidence = await LocalModelBenchmarkRunner.RunEmbeddingAsync(
+            approval,
+            explicitlyApproved: true,
+            current.Documents,
+            current.Queries,
+            current.Limits,
+            backend,
+            cancellationToken);
+        var evidenceStore = await LocalModelBenchmarkEvidenceStore.OpenAsync(
+            applicationDataRoot,
+            cancellationToken);
+        await evidenceStore.SaveEmbeddingAsync(evidence, cancellationToken);
+        SetResult(DescribeEvidence(evidence));
+        return evidence.Result.Passed;
+    }
+
+    private LocalModelBenchmarkApproval CreateApproval(
+        LocalModelBenchmarkKind kind,
+        string suiteSha256,
+        string policySha256) =>
+        new(
+            kind,
+            reviewedBackendSha256!,
+            suiteSha256,
+            policySha256,
+            reviewedAtUtc,
+            reviewedAtUtc.AddMinutes(20));
+
+    private void RequireBackendBinding(string current)
+    {
+        if (!string.Equals(current, reviewedBackendSha256, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The exact benchmark backend binding changed after review.");
         }
     }
 
@@ -202,10 +307,15 @@ public partial class LocalModelBenchmarkWindow : Window
     {
         try
         {
-            var binding = (await whisperStore.GetStateAsync(lifetime.Token)).Backend;
-            SetBackend(binding is null
-                ? "Transcription benchmark unavailable: no explicitly approved local Whisper backend is registered. Embedding benchmark unavailable: no approved production adapter and resource probe is implemented."
-                : $"Transcription benchmark available through the approved {Path.GetFileName(binding.ExecutablePath)} and {Path.GetFileName(binding.ModelPath)} binding. Embedding benchmark unavailable: no approved production adapter and resource probe is implemented.");
+            var whisper = (await whisperStore.GetStateAsync(lifetime.Token)).Backend;
+            var embedding = (await localModelStore.GetStateAsync(lifetime.Token)).Embedding;
+            var transcriptionStatus = whisper is null
+                ? "Transcription benchmark unavailable: no explicitly approved local Whisper backend is registered."
+                : $"Transcription benchmark available through the approved {Path.GetFileName(whisper.ExecutablePath)} and {Path.GetFileName(whisper.ModelPath)} binding.";
+            var embeddingStatus = embedding is null
+                ? "Embedding benchmark unavailable: no approved digest-bound Ollama embedding model is selected."
+                : $"Embedding benchmark available for exact review through the approved {embedding.Name} binding; runtime version and loaded resources are revalidated before execution.";
+            SetBackend(transcriptionStatus + " " + embeddingStatus);
             SetStatus("Choose a strict local benchmark manifest to begin exact review. Approval is unchecked by default.");
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
@@ -223,6 +333,8 @@ public partial class LocalModelBenchmarkWindow : Window
     {
         reviewedManifest = null;
         reviewedWhisperBinding = null;
+        reviewedEmbeddingBinding = null;
+        reviewedEmbeddingRuntimeVersion = null;
         reviewedBackendSha256 = null;
         reviewedAtUtc = default;
         ApprovalBox.IsChecked = false;
@@ -237,21 +349,24 @@ public partial class LocalModelBenchmarkWindow : Window
         ManifestPathBox.IsEnabled = !value;
         BrowseManifestButton.IsEnabled = !value;
         ReviewManifestButton.IsEnabled = !value;
-        ApprovalBox.IsEnabled = !value && reviewedWhisperBinding is not null;
+        ApprovalBox.IsEnabled = !value &&
+                                (reviewedWhisperBinding is not null || reviewedEmbeddingBinding is not null);
         RunButton.IsEnabled = false;
         CancelButton.IsEnabled = value && running;
         if (!value) UpdateRunAvailability();
     }
 
     private void UpdateRunAvailability() =>
-        RunButton.IsEnabled = !busy && reviewedManifest is TranscriptionBenchmarkManifestReview &&
-                              reviewedWhisperBinding is not null && ApprovalBox.IsChecked == true;
+        RunButton.IsEnabled = !busy && ApprovalBox.IsChecked == true &&
+                              (reviewedManifest is TranscriptionBenchmarkManifestReview && reviewedWhisperBinding is not null ||
+                               reviewedManifest is EmbeddingBenchmarkManifestReview && reviewedEmbeddingBinding is not null);
 
     private static void RequireSameReview(
-        TranscriptionBenchmarkManifestReview expected,
-        TranscriptionBenchmarkManifestReview actual)
+        ILocalModelBenchmarkManifestReview expected,
+        ILocalModelBenchmarkManifestReview actual)
     {
-        if (!string.Equals(expected.ManifestSha256, actual.ManifestSha256, StringComparison.Ordinal) ||
+        if (expected.Kind != actual.Kind ||
+            !string.Equals(expected.ManifestSha256, actual.ManifestSha256, StringComparison.Ordinal) ||
             !string.Equals(expected.FixtureSuiteSha256, actual.FixtureSuiteSha256, StringComparison.Ordinal) ||
             !string.Equals(expected.PolicySha256, actual.PolicySha256, StringComparison.Ordinal))
         {
@@ -268,6 +383,20 @@ public partial class LocalModelBenchmarkWindow : Window
         return TimeSpan.FromMilliseconds(milliseconds);
     }
 
+    private static TimeSpan OllamaTimeout(EmbeddingBenchmarkManifestReview review)
+    {
+        var milliseconds = Math.Clamp(
+            review.Limits.Resources.MaximumElapsed.TotalMilliseconds,
+            TimeSpan.FromSeconds(1).TotalMilliseconds,
+            TimeSpan.FromMinutes(5).TotalMilliseconds);
+        return TimeSpan.FromMilliseconds(milliseconds);
+    }
+
+    private static bool HasSameIdentity(ApprovedLocalModelBinding expected, ApprovedLocalModelBinding actual) =>
+        string.Equals(expected.Name, actual.Name, StringComparison.Ordinal) &&
+        string.Equals(expected.Digest, actual.Digest, StringComparison.Ordinal) &&
+        string.Equals(expected.LicenseSha256, actual.LicenseSha256, StringComparison.Ordinal);
+
     private static string DescribeTranscriptionReview(
         TranscriptionBenchmarkManifestReview review,
         string backend) =>
@@ -283,7 +412,9 @@ public partial class LocalModelBenchmarkWindow : Window
         $"maximum GPU {(review.Limits.Resources.MaximumPeakGpuBytes is long gpu ? $"{gpu:N0} bytes" : "not required")}; unload confirmation required.{Environment.NewLine}" +
         backend;
 
-    private static string DescribeEmbeddingReview(EmbeddingBenchmarkManifestReview review) =>
+    private static string DescribeEmbeddingReview(
+        EmbeddingBenchmarkManifestReview review,
+        string backend) =>
         $"Name: {review.Name}.{Environment.NewLine}" +
         $"Type: embedding retrieval. Documents: {review.Documents.Count}. Queries: {review.Queries.Count}.{Environment.NewLine}" +
         $"Provenance: {review.Provenance.Source}. License: {review.Provenance.License}.{Environment.NewLine}" +
@@ -291,8 +422,11 @@ public partial class LocalModelBenchmarkWindow : Window
         $"Fixture-suite SHA-256: {review.FixtureSuiteSha256}.{Environment.NewLine}" +
         $"Policy SHA-256: {review.PolicySha256}.{Environment.NewLine}" +
         $"Thresholds: K {review.Limits.K}; minimum recall {Percent(review.Limits.MinimumRecallAtK)}; " +
-        $"minimum mean reciprocal rank {Percent(review.Limits.MinimumMeanReciprocalRank)}.{Environment.NewLine}" +
-        "Unavailable: no approved production embedding benchmark adapter and resource probe is implemented.";
+        $"minimum mean reciprocal rank {Percent(review.Limits.MinimumMeanReciprocalRank)}; " +
+        $"maximum elapsed {review.Limits.Resources.MaximumElapsed.TotalMilliseconds:N0} milliseconds; " +
+        $"maximum loaded memory {review.Limits.Resources.MaximumPeakWorkingSetBytes:N0} bytes; " +
+        $"maximum GPU {(review.Limits.Resources.MaximumPeakGpuBytes is long gpu ? $"{gpu:N0} bytes" : "not required")}; unload confirmation required.{Environment.NewLine}" +
+        backend;
 
     private static string DescribeEvidence(TranscriptionBenchmarkEvidence evidence)
     {
@@ -306,6 +440,21 @@ public partial class LocalModelBenchmarkWindow : Window
                $"CER: {Percent(result.CharacterErrorRate)}. Character errors: {result.CharacterErrors}.{Environment.NewLine}" +
                $"Elapsed: {result.Resources.ElapsedMilliseconds:N0} milliseconds. Peak working set: {result.Resources.PeakWorkingSetBytes?.ToString("N0", CultureInfo.CurrentCulture) ?? "missing"} bytes. " +
                $"Peak GPU: {result.Resources.PeakGpuBytes?.ToString("N0", CultureInfo.CurrentCulture) ?? "not measured"} bytes. Unload confirmed: {result.Resources.UnloadConfirmed}.{Environment.NewLine}" +
+               $"Failure codes: {failures}.{Environment.NewLine}" +
+               $"Approval SHA-256: {evidence.ApprovalSha256}. Aggregate-only evidence schema: {evidence.SchemaVersion}.";
+    }
+
+    private static string DescribeEvidence(EmbeddingBenchmarkEvidence evidence)
+    {
+        var result = evidence.Result;
+        var failures = result.FailureCodes.Count == 0
+            ? "none"
+            : string.Join(", ", result.FailureCodes);
+        return $"{(result.Passed ? "PASS" : "FAIL")}.{Environment.NewLine}" +
+               $"Documents: {result.DocumentCount}. Queries: {result.QueryCount}. K: {result.K}.{Environment.NewLine}" +
+               $"Recall at K: {Percent(result.RecallAtK)}. Mean reciprocal rank: {Percent(result.MeanReciprocalRank)}. Relevant documents retrieved: {result.RelevantDocumentsRetrieved} of {result.RelevantDocuments}.{Environment.NewLine}" +
+               $"Elapsed: {result.Resources.ElapsedMilliseconds:N0} milliseconds. Loaded memory: {result.Resources.PeakWorkingSetBytes?.ToString("N0", CultureInfo.CurrentCulture) ?? "missing"} bytes. " +
+               $"Loaded GPU memory: {result.Resources.PeakGpuBytes?.ToString("N0", CultureInfo.CurrentCulture) ?? "not measured"} bytes. Unload confirmed: {result.Resources.UnloadConfirmed}.{Environment.NewLine}" +
                $"Failure codes: {failures}.{Environment.NewLine}" +
                $"Approval SHA-256: {evidence.ApprovalSha256}. Aggregate-only evidence schema: {evidence.SchemaVersion}.";
     }
@@ -341,6 +490,11 @@ public partial class LocalModelBenchmarkWindow : Window
         public static TranscriptionBenchmarkManifestReview IsTranscription(
             ILocalModelBenchmarkManifestReview review) =>
             review as TranscriptionBenchmarkManifestReview
+            ?? throw new InvalidOperationException("The reviewed benchmark kind changed.");
+
+        public static EmbeddingBenchmarkManifestReview IsEmbedding(
+            ILocalModelBenchmarkManifestReview review) =>
+            review as EmbeddingBenchmarkManifestReview
             ?? throw new InvalidOperationException("The reviewed benchmark kind changed.");
     }
 }

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -158,6 +159,76 @@ public sealed class OllamaLocalClient : IDisposable
             details.ValueKind == JsonValueKind.Object && details.TryGetProperty("quantization_level", out var quantization) ? quantization.GetString() : null);
     }
 
+    public async Task<string> GetVersionAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.GetAsync("api/version", cancellationToken).ConfigureAwait(false);
+        EnsureLoopbackResponse(response);
+        response.EnsureSuccessStatusCode();
+        using var document = await ReadBoundedJsonAsync(response.Content, cancellationToken).ConfigureAwait(false);
+        if (document.RootElement.ValueKind != JsonValueKind.Object ||
+            !document.RootElement.TryGetProperty("version", out var versionElement) ||
+            versionElement.ValueKind != JsonValueKind.String ||
+            versionElement.GetString() is not { Length: > 0 and <= 64 } version ||
+            version.Any(character => character > 0x7f || char.IsControl(character) || char.IsWhiteSpace(character)))
+        {
+            throw new InvalidOperationException("The Ollama runtime version response is invalid.");
+        }
+        return version;
+    }
+
+    public async Task<IReadOnlyList<OllamaRunningModel>> ListRunningModelsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.GetAsync("api/ps", cancellationToken).ConfigureAwait(false);
+        EnsureLoopbackResponse(response);
+        response.EnsureSuccessStatusCode();
+        using var document = await ReadBoundedJsonAsync(response.Content, cancellationToken).ConfigureAwait(false);
+        if (document.RootElement.ValueKind != JsonValueKind.Object ||
+            !document.RootElement.TryGetProperty("models", out var modelsElement) ||
+            modelsElement.ValueKind != JsonValueKind.Array || modelsElement.GetArrayLength() > 64)
+        {
+            throw new InvalidOperationException("The Ollama running-model response is invalid or exceeds its limit.");
+        }
+
+        var models = new List<OllamaRunningModel>(modelsElement.GetArrayLength());
+        var identities = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in modelsElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object ||
+                !item.TryGetProperty("name", out var nameElement) || nameElement.ValueKind != JsonValueKind.String ||
+                !item.TryGetProperty("digest", out var digestElement) || digestElement.ValueKind != JsonValueKind.String ||
+                !item.TryGetProperty("size", out var sizeElement) || !sizeElement.TryGetInt64(out var size) || size <= 0 ||
+                !item.TryGetProperty("size_vram", out var vramElement) ||
+                !vramElement.TryGetInt64(out var sizeVram) || sizeVram < 0 || sizeVram > size ||
+                !item.TryGetProperty("expires_at", out var expiresElement) ||
+                expiresElement.ValueKind != JsonValueKind.String ||
+                !DateTimeOffset.TryParse(
+                    expiresElement.GetString(),
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                    out var expiresAtUtc))
+            {
+                throw new InvalidOperationException("The Ollama running-model response contains an invalid entry.");
+            }
+            var name = nameElement.GetString()!;
+            var digest = digestElement.GetString()!;
+            ValidateModelName(name);
+            ValidateDigest(digest, nameof(digest));
+            var identity = name + "\n" + digest.ToLowerInvariant();
+            if (!identities.Add(identity))
+            {
+                throw new InvalidOperationException("The Ollama running-model response contains a duplicate identity.");
+            }
+            models.Add(new OllamaRunningModel(
+                name,
+                digest.ToLowerInvariant(),
+                size,
+                sizeVram,
+                expiresAtUtc));
+        }
+        return models;
+    }
+
     public async Task<OllamaEmbeddingResult> EmbedPinnedAsync(
         string model,
         string expectedDigest,
@@ -165,71 +236,84 @@ public sealed class OllamaLocalClient : IDisposable
         IReadOnlyList<string> inputs,
         CancellationToken cancellationToken = default)
     {
-        ValidateModelName(model);
-        ValidateDigest(expectedDigest, nameof(expectedDigest));
-        ValidateDigest(expectedLicenseSha256, nameof(expectedLicenseSha256));
-        ArgumentNullException.ThrowIfNull(inputs);
-        if (inputs.Count is 0 or > MaximumEmbeddingInputs || inputs.Any(input =>
-                string.IsNullOrWhiteSpace(input) || input.Length > MaximumEmbeddingInputCharacters || input.Contains('\0')))
-        {
-            throw new ArgumentException("Embedding input must contain 1 to 32 bounded nonempty strings.", nameof(inputs));
-        }
+        return await EmbedPinnedCoreAsync(
+            model, expectedDigest, expectedLicenseSha256, inputs, keepAlive: 0, cancellationToken)
+            .ConfigureAwait(false);
+    }
 
-        await RequireBoundModelAsync(
-            model, expectedDigest, expectedLicenseSha256,
-            requireVision: false, requireEmbedding: true, cancellationToken).ConfigureAwait(false);
-
-        using var response = await _httpClient.PostAsJsonAsync(
-            "api/embed",
-            new { model, input = inputs, truncate = false, keep_alive = 0 },
-            cancellationToken).ConfigureAwait(false);
-        EnsureLoopbackResponse(response);
-        response.EnsureSuccessStatusCode();
-        using var document = await ReadBoundedJsonAsync(response.Content, cancellationToken).ConfigureAwait(false);
-        var root = document.RootElement;
-        if (!root.TryGetProperty("model", out var responseModel) ||
-            !string.Equals(responseModel.GetString(), model, StringComparison.Ordinal) ||
-            !root.TryGetProperty("embeddings", out var embeddingsElement) ||
-            embeddingsElement.ValueKind != JsonValueKind.Array || embeddingsElement.GetArrayLength() != inputs.Count)
-        {
-            throw new InvalidOperationException("The Ollama embedding response does not match the request.");
-        }
-
-        var embeddings = new List<float[]>(inputs.Count);
-        int? dimensions = null;
-        foreach (var embeddingElement in embeddingsElement.EnumerateArray())
-        {
-            if (embeddingElement.ValueKind != JsonValueKind.Array ||
-                embeddingElement.GetArrayLength() is <= 0 or > MaximumEmbeddingDimensions)
-            {
-                throw new InvalidOperationException("An Ollama embedding has an invalid dimension count.");
-            }
-
-            dimensions ??= embeddingElement.GetArrayLength();
-            if (embeddingElement.GetArrayLength() != dimensions)
-            {
-                throw new InvalidOperationException("Ollama returned inconsistent embedding dimensions.");
-            }
-
-            var vector = embeddingElement.EnumerateArray().Select(value => value.GetSingle()).ToArray();
-            if (vector.Any(value => !float.IsFinite(value)))
-            {
-                throw new InvalidOperationException("Ollama returned a non-finite embedding value.");
-            }
-
-            embeddings.Add(vector);
-        }
-
-        var result = new OllamaEmbeddingResult(
+    public Task ValidatePinnedEmbeddingBindingAsync(
+        string model,
+        string expectedDigest,
+        string expectedLicenseSha256,
+        CancellationToken cancellationToken = default) =>
+        RequireBoundModelAsync(
             model,
-            embeddings,
-            root.TryGetProperty("prompt_eval_count", out var promptTokens) ? promptTokens.GetInt32() : 0,
-            root.TryGetProperty("total_duration", out var duration) ? duration.GetInt64() : 0,
-            root.TryGetProperty("load_duration", out var loadDuration) ? loadDuration.GetInt64() : 0);
-        await RequireBoundModelAsync(
-            model, expectedDigest, expectedLicenseSha256,
-            requireVision: false, requireEmbedding: true, cancellationToken).ConfigureAwait(false);
-        return result;
+            expectedDigest,
+            expectedLicenseSha256,
+            requireVision: false,
+            requireEmbedding: true,
+            cancellationToken);
+
+    public async Task<OllamaEmbeddingBenchmarkResult> EmbedPinnedForBenchmarkAsync(
+        string model,
+        string expectedDigest,
+        string expectedLicenseSha256,
+        string expectedRuntimeVersion,
+        IReadOnlyList<string> inputs,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateRuntimeVersion(expectedRuntimeVersion);
+        if (!string.Equals(
+                await GetVersionAsync(cancellationToken).ConfigureAwait(false),
+                expectedRuntimeVersion,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The reviewed Ollama runtime version changed.");
+        }
+        var alreadyLoaded = await ListRunningModelsAsync(cancellationToken).ConfigureAwait(false);
+        if (alreadyLoaded.Any(item => string.Equals(item.Digest, expectedDigest, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException("The benchmark model was already loaded, so isolated resource measurement is unavailable.");
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        OllamaEmbeddingResult? result = null;
+        OllamaRunningModel? loaded = null;
+        try
+        {
+            result = await EmbedPinnedCoreAsync(
+                model, expectedDigest, expectedLicenseSha256, inputs, keepAlive: "1m", cancellationToken)
+                .ConfigureAwait(false);
+            var matches = (await ListRunningModelsAsync(cancellationToken).ConfigureAwait(false))
+                .Where(item => string.Equals(item.Digest, expectedDigest, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (matches.Length != 1 || !string.Equals(matches[0].Name, model, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Ollama did not expose one exact loaded model for resource measurement.");
+            }
+            loaded = matches[0];
+        }
+        finally
+        {
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await UnloadPinnedAsync(model, expectedDigest, cleanup.Token).ConfigureAwait(false);
+        }
+        stopwatch.Stop();
+        if (result is null || loaded is null ||
+            !string.Equals(
+                await GetVersionAsync(cancellationToken).ConfigureAwait(false),
+                expectedRuntimeVersion,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The reviewed Ollama runtime changed or returned no benchmark result.");
+        }
+        return new OllamaEmbeddingBenchmarkResult(
+            result,
+            new LocalBenchmarkResourceObservation(
+                stopwatch.Elapsed,
+                loaded.SizeBytes,
+                loaded.SizeVramBytes > 0 ? loaded.SizeVramBytes : null,
+                UnloadConfirmed: true));
     }
 
     public async Task<OllamaVisionResult> DescribeImagePinnedAsync(
@@ -326,6 +410,123 @@ public sealed class OllamaLocalClient : IDisposable
         return result;
     }
 
+    private async Task<OllamaEmbeddingResult> EmbedPinnedCoreAsync(
+        string model,
+        string expectedDigest,
+        string expectedLicenseSha256,
+        IReadOnlyList<string> inputs,
+        object keepAlive,
+        CancellationToken cancellationToken)
+    {
+        ValidateModelName(model);
+        ValidateDigest(expectedDigest, nameof(expectedDigest));
+        ValidateDigest(expectedLicenseSha256, nameof(expectedLicenseSha256));
+        ArgumentNullException.ThrowIfNull(inputs);
+        if (inputs.Count is 0 or > MaximumEmbeddingInputs || inputs.Any(input =>
+                string.IsNullOrWhiteSpace(input) || input.Length > MaximumEmbeddingInputCharacters || input.Contains('\0')) ||
+            keepAlive is not 0 && !string.Equals(keepAlive as string, "1m", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Embedding input or keep-alive policy is outside its safety bounds.", nameof(inputs));
+        }
+
+        await RequireBoundModelAsync(
+            model, expectedDigest, expectedLicenseSha256,
+            requireVision: false, requireEmbedding: true, cancellationToken).ConfigureAwait(false);
+        using var response = await _httpClient.PostAsJsonAsync(
+            "api/embed",
+            new { model, input = inputs, truncate = false, keep_alive = keepAlive },
+            cancellationToken).ConfigureAwait(false);
+        EnsureLoopbackResponse(response);
+        response.EnsureSuccessStatusCode();
+        using var document = await ReadBoundedJsonAsync(response.Content, cancellationToken).ConfigureAwait(false);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("model", out var responseModel) ||
+            !string.Equals(responseModel.GetString(), model, StringComparison.Ordinal) ||
+            !root.TryGetProperty("embeddings", out var embeddingsElement) ||
+            embeddingsElement.ValueKind != JsonValueKind.Array || embeddingsElement.GetArrayLength() != inputs.Count)
+        {
+            throw new InvalidOperationException("The Ollama embedding response does not match the request.");
+        }
+
+        var embeddings = new List<float[]>(inputs.Count);
+        int? dimensions = null;
+        foreach (var embeddingElement in embeddingsElement.EnumerateArray())
+        {
+            if (embeddingElement.ValueKind != JsonValueKind.Array ||
+                embeddingElement.GetArrayLength() is <= 0 or > MaximumEmbeddingDimensions)
+            {
+                throw new InvalidOperationException("An Ollama embedding has an invalid dimension count.");
+            }
+            dimensions ??= embeddingElement.GetArrayLength();
+            if (embeddingElement.GetArrayLength() != dimensions)
+            {
+                throw new InvalidOperationException("Ollama returned inconsistent embedding dimensions.");
+            }
+            var vector = embeddingElement.EnumerateArray().Select(value => value.GetSingle()).ToArray();
+            if (vector.Any(value => !float.IsFinite(value)))
+            {
+                throw new InvalidOperationException("Ollama returned a non-finite embedding value.");
+            }
+            embeddings.Add(vector);
+        }
+
+        var result = new OllamaEmbeddingResult(
+            model,
+            embeddings,
+            root.TryGetProperty("prompt_eval_count", out var promptTokens) ? promptTokens.GetInt32() : 0,
+            root.TryGetProperty("total_duration", out var duration) ? duration.GetInt64() : 0,
+            root.TryGetProperty("load_duration", out var loadDuration) ? loadDuration.GetInt64() : 0);
+        if (result.PromptTokens < 0 || result.TotalDurationNanoseconds <= 0 || result.LoadDurationNanoseconds < 0)
+        {
+            throw new InvalidOperationException("The Ollama embedding response contains invalid resource counters.");
+        }
+        await RequireBoundModelAsync(
+            model, expectedDigest, expectedLicenseSha256,
+            requireVision: false, requireEmbedding: true, cancellationToken).ConfigureAwait(false);
+        return result;
+    }
+
+    private async Task UnloadPinnedAsync(
+        string model,
+        string expectedDigest,
+        CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            "api/generate",
+            new { model, keep_alive = 0 },
+            cancellationToken).ConfigureAwait(false);
+        EnsureLoopbackResponse(response);
+        response.EnsureSuccessStatusCode();
+        using var document = await ReadBoundedJsonAsync(response.Content, cancellationToken).ConfigureAwait(false);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("model", out var modelElement) ||
+            !string.Equals(modelElement.GetString(), model, StringComparison.Ordinal) ||
+            !root.TryGetProperty("done", out var doneElement) || doneElement.ValueKind != JsonValueKind.True ||
+            !root.TryGetProperty("done_reason", out var reasonElement) ||
+            !string.Equals(reasonElement.GetString(), "unload", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Ollama did not confirm the exact model unload request.");
+        }
+
+        var consecutiveAbsent = 0;
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            var remaining = await ListRunningModelsAsync(cancellationToken).ConfigureAwait(false);
+            if (!remaining.Any(item => string.Equals(item.Digest, expectedDigest, StringComparison.OrdinalIgnoreCase)))
+            {
+                consecutiveAbsent++;
+                if (consecutiveAbsent >= 3) return;
+            }
+            else
+            {
+                consecutiveAbsent = 0;
+            }
+            await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken).ConfigureAwait(false);
+        }
+        throw new InvalidOperationException("The exact Ollama benchmark model did not unload within its bounded window.");
+    }
+
     public void Dispose() => _httpClient.Dispose();
 
     private static void ValidateModelName(string model)
@@ -344,6 +545,16 @@ public sealed class OllamaLocalClient : IDisposable
         {
             throw new ArgumentException(
                 "An Ollama model binding requires a 64-character SHA-256 digest.", parameterName);
+        }
+    }
+
+    private static void ValidateRuntimeVersion(string version)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(version);
+        if (version.Length > 64 ||
+            version.Any(character => character > 0x7f || char.IsControl(character) || char.IsWhiteSpace(character)))
+        {
+            throw new ArgumentException("The Ollama runtime version is invalid.", nameof(version));
         }
     }
 
@@ -444,3 +655,14 @@ public sealed record OllamaEmbeddingResult(
     int PromptTokens,
     long TotalDurationNanoseconds,
     long LoadDurationNanoseconds);
+
+public sealed record OllamaRunningModel(
+    string Name,
+    string Digest,
+    long SizeBytes,
+    long SizeVramBytes,
+    DateTimeOffset ExpiresAtUtc);
+
+public sealed record OllamaEmbeddingBenchmarkResult(
+    OllamaEmbeddingResult Embedding,
+    LocalBenchmarkResourceObservation Resources);

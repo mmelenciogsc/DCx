@@ -196,22 +196,205 @@ public sealed class OllamaLocalClientTests
         }
     }
 
+    [Fact]
+    public async Task EmbeddingBenchmark_BindsRuntimeMeasuresLoadedModelAndConfirmsUnload()
+    {
+        var handler = new FixtureHandler();
+        using var client = new OllamaLocalClient(handler, new Uri("http://localhost:11434/"));
+        var binding = new ApprovedLocalModelBinding(
+            EmbeddingModel,
+            EmbeddingDigest,
+            LicenseDigest,
+            new DateTimeOffset(2026, 10, 18, 3, 0, 0, TimeSpan.Zero));
+        using var backend = await OllamaEmbeddingBenchmarkBackend.CreateAsync(binding, client);
+
+        var result = await backend.EmbedAsync(["first", "second"], CancellationToken.None);
+
+        Assert.Equal("0.40.0", backend.RuntimeVersion);
+        Assert.Equal(64, backend.BindingSha256.Length);
+        Assert.Equal(2, result.Vectors.Count);
+        Assert.Equal(400_000_000, result.Resources.PeakWorkingSetBytes);
+        Assert.Equal(300_000_000, result.Resources.PeakGpuBytes);
+        Assert.True(result.Resources.UnloadConfirmed);
+        Assert.True(result.Resources.Elapsed > TimeSpan.Zero);
+        Assert.Contains("\"keep_alive\":\"1m\"", handler.EmbeddingRequest, StringComparison.Ordinal);
+        Assert.Contains("\"keep_alive\":0", handler.UnloadRequest, StringComparison.Ordinal);
+        Assert.True(handler.UnloadRequested);
+        Assert.False(handler.Loaded);
+        Assert.True(handler.RunningModelRequests >= 5);
+    }
+
+    [Fact]
+    public async Task RuntimeAndRunningModelInventory_RejectMalformedResourceEvidence()
+    {
+        using (var invalidVersion = new OllamaLocalClient(
+                   new FixtureHandler { ReturnInvalidRuntimeVersion = true },
+                   new Uri("http://localhost:11434/")))
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => invalidVersion.GetVersionAsync());
+        }
+
+        using var invalidResources = new OllamaLocalClient(
+            new FixtureHandler { InitiallyLoaded = true, ReturnInvalidRunningResources = true },
+            new Uri("http://localhost:11434/"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => invalidResources.ListRunningModelsAsync());
+    }
+
+    [Fact]
+    public async Task EmbeddingBenchmark_DeniesPreloadedChangedRuntimeAndUnconfirmedUnload()
+    {
+        var binding = new ApprovedLocalModelBinding(
+            EmbeddingModel,
+            EmbeddingDigest,
+            LicenseDigest,
+            new DateTimeOffset(2026, 10, 18, 3, 0, 0, TimeSpan.Zero));
+
+        var preloadedHandler = new FixtureHandler { InitiallyLoaded = true };
+        using (var client = new OllamaLocalClient(preloadedHandler, new Uri("http://localhost:11434/")))
+        using (var backend = await OllamaEmbeddingBenchmarkBackend.CreateAsync(binding, client))
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                backend.EmbedAsync(["first", "second"], CancellationToken.None));
+            Assert.False(preloadedHandler.UnloadRequested);
+        }
+
+        var changedHandler = new FixtureHandler { ChangeRuntimeAfterEmbedding = true };
+        using (var client = new OllamaLocalClient(changedHandler, new Uri("http://localhost:11434/")))
+        using (var backend = await OllamaEmbeddingBenchmarkBackend.CreateAsync(binding, client))
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                backend.EmbedAsync(["first", "second"], CancellationToken.None));
+            Assert.True(changedHandler.UnloadRequested);
+            Assert.False(changedHandler.Loaded);
+        }
+
+        var unloadHandler = new FixtureHandler { RefuseUnload = true };
+        using (var client = new OllamaLocalClient(unloadHandler, new Uri("http://localhost:11434/")))
+        using (var backend = await OllamaEmbeddingBenchmarkBackend.CreateAsync(binding, client))
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                backend.EmbedAsync(["first", "second"], CancellationToken.None));
+            Assert.True(unloadHandler.UnloadRequested);
+            Assert.True(unloadHandler.Loaded);
+        }
+    }
+
+    [Fact]
+    public async Task EmbeddingBenchmark_CancellationStillAttemptsBoundedUnload()
+    {
+        var handler = new FixtureHandler { DelayEmbedding = true };
+        using var client = new OllamaLocalClient(handler, new Uri("http://localhost:11434/"));
+        var binding = new ApprovedLocalModelBinding(
+            EmbeddingModel,
+            EmbeddingDigest,
+            LicenseDigest,
+            new DateTimeOffset(2026, 10, 18, 3, 0, 0, TimeSpan.Zero));
+        using var backend = await OllamaEmbeddingBenchmarkBackend.CreateAsync(binding, client);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            backend.EmbedAsync(["first", "second"], cancellation.Token));
+
+        Assert.True(handler.UnloadRequested);
+        Assert.False(handler.Loaded);
+    }
+
+    [Fact]
+    public async Task EmbeddingBenchmark_ComposesPinnedOllamaAdapterWithAggregateRunner()
+    {
+        var handler = new FixtureHandler();
+        using var client = new OllamaLocalClient(handler, new Uri("http://localhost:11434/"));
+        var binding = new ApprovedLocalModelBinding(
+            EmbeddingModel,
+            EmbeddingDigest,
+            LicenseDigest,
+            new DateTimeOffset(2026, 10, 18, 3, 0, 0, TimeSpan.Zero));
+        using var backend = await OllamaEmbeddingBenchmarkBackend.CreateAsync(binding, client);
+        var documents = new[] { new EmbeddingBenchmarkDocument("private-document", "private corpus text") };
+        var queries = new[]
+        {
+            new EmbeddingBenchmarkQuery("private-query", "private query text", ["private-document"]),
+        };
+        var limits = new EmbeddingRetrievalLimits(
+            1,
+            1,
+            1,
+            new LocalBenchmarkResourceLimits(
+                TimeSpan.FromSeconds(5),
+                500_000_000,
+                400_000_000));
+        var reviewedAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        var approval = new LocalModelBenchmarkApproval(
+            LocalModelBenchmarkKind.EmbeddingRetrieval,
+            backend.BindingSha256,
+            LocalModelBenchmarkRunner.ComputeEmbeddingSuiteSha256(documents, queries),
+            LocalModelBenchmarkRunner.ComputeEmbeddingPolicySha256(limits),
+            reviewedAt,
+            reviewedAt.AddMinutes(10));
+
+        var evidence = await LocalModelBenchmarkRunner.RunEmbeddingAsync(
+            approval, true, documents, queries, limits, backend);
+
+        Assert.True(evidence.Result.Passed);
+        Assert.Equal(400_000_000, evidence.Result.Resources.PeakWorkingSetBytes);
+        Assert.Equal(300_000_000, evidence.Result.Resources.PeakGpuBytes);
+        var json = System.Text.Json.JsonSerializer.Serialize(evidence);
+        Assert.DoesNotContain("private corpus", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-document", json, StringComparison.Ordinal);
+    }
+
     private sealed class FixtureHandler : HttpMessageHandler
     {
         public string ChatRequest { get; private set; } = string.Empty;
         public string EmbeddingRequest { get; private set; } = string.Empty;
+        public string UnloadRequest { get; private set; } = string.Empty;
         public bool ReturnInconsistentEmbeddings { get; init; }
         public bool ReturnIncompleteVision { get; init; }
         public bool DuplicateVisionBinding { get; init; }
         public bool ChangeVisionBindingAfterInference { get; init; }
         public bool ChangeLicenseAfterInference { get; init; }
         public bool ReturnMalformedInventory { get; init; }
+        public bool InitiallyLoaded
+        {
+            get => initiallyLoaded;
+            init
+            {
+                initiallyLoaded = value;
+                Loaded = value;
+            }
+        }
+        public bool ChangeRuntimeAfterEmbedding { get; init; }
+        public bool RefuseUnload { get; init; }
+        public bool DelayEmbedding { get; init; }
+        public bool ReturnInvalidRuntimeVersion { get; init; }
+        public bool ReturnInvalidRunningResources { get; init; }
         public Uri? ResponseUri { get; init; }
+        public bool Loaded { get; private set; }
+        public bool UnloadRequested { get; private set; }
+        public int RunningModelRequests { get; private set; }
         private int inventoryCalls;
         private int inspectionCalls;
+        private bool embedded;
+        private bool initiallyLoaded;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (request.RequestUri?.AbsolutePath == "/api/version")
+            {
+                var version = ReturnInvalidRuntimeVersion
+                    ? "0.40.0 invalid"
+                    : ChangeRuntimeAfterEmbedding && embedded ? "0.41.0" : "0.40.0";
+                return Json($"{{\"version\":\"{version}\"}}", request);
+            }
+
+            if (request.RequestUri?.AbsolutePath == "/api/ps")
+            {
+                RunningModelRequests++;
+                return Json(Loaded
+                    ? $"{{\"models\":[{{\"name\":\"{EmbeddingModel}\",\"digest\":\"{EmbeddingDigest}\",\"size\":400000000,\"size_vram\":{(ReturnInvalidRunningResources ? 500000000 : 300000000)},\"expires_at\":\"2026-10-18T04:00:00Z\"}}]}}"
+                    : "{\"models\":[]}", request);
+            }
+
             if (request.RequestUri?.AbsolutePath == "/api/tags")
             {
                 if (ReturnMalformedInventory)
@@ -248,9 +431,22 @@ public sealed class OllamaLocalClientTests
             if (request.RequestUri?.AbsolutePath == "/api/embed")
             {
                 EmbeddingRequest = await request.Content!.ReadAsStringAsync(cancellationToken);
+                embedded = true;
+                if (EmbeddingRequest.Contains("\"keep_alive\":\"1m\"", StringComparison.Ordinal)) Loaded = true;
+                if (DelayEmbedding) await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
                 return Json(ReturnInconsistentEmbeddings
                     ? $"{{\"model\":\"{EmbeddingModel}\",\"embeddings\":[[0.1,0.2],[0.3]],\"prompt_eval_count\":7,\"total_duration\":100}}"
                     : $"{{\"model\":\"{EmbeddingModel}\",\"embeddings\":[[0.1,0.2,0.3],[0.4,0.5,0.6]],\"prompt_eval_count\":7,\"total_duration\":100,\"load_duration\":20}}", request);
+            }
+
+            if (request.RequestUri?.AbsolutePath == "/api/generate")
+            {
+                UnloadRequest = await request.Content!.ReadAsStringAsync(cancellationToken);
+                UnloadRequested = true;
+                if (!RefuseUnload) Loaded = false;
+                return Json(RefuseUnload
+                    ? $"{{\"model\":\"{EmbeddingModel}\",\"response\":\"\",\"done\":true,\"done_reason\":\"stop\"}}"
+                    : $"{{\"model\":\"{EmbeddingModel}\",\"response\":\"\",\"done\":true,\"done_reason\":\"unload\"}}", request);
             }
 
             ChatRequest = await request.Content!.ReadAsStringAsync(cancellationToken);

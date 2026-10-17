@@ -30,6 +30,7 @@ $timeoutAudio = Join-Path $runRoot "timeout.wav"
 $mp3Audio = Join-Path $runRoot "fixture.mp3"
 $benchmarkManifest = Join-Path $runRoot "transcription-benchmark.json"
 $slowBenchmarkManifest = Join-Path $runRoot "transcription-benchmark-slow.json"
+$embeddingBenchmarkManifest = Join-Path $runRoot "embedding-benchmark.json"
 $benchmarkEvidencePath = Join-Path $dataRoot "local-models\benchmark-evidence\transcription-latest.json"
 $evidencePath = Join-Path $runRoot "whisper-registration-evidence.json"
 $previousDataRoot = $env:DCX_DATA_ROOT
@@ -113,6 +114,30 @@ $benchmarkJson = @'
 [IO.File]::WriteAllText(
     $slowBenchmarkManifest,
     $benchmarkJson.Replace('"fixture.wav"', '"timeout.wav"'))
+$embeddingBenchmarkJson = @'
+{
+  "schemaVersion": 1,
+  "kind": "embeddingRetrieval",
+  "name": "DCx native UIA embedding fixture",
+  "provenance": { "source": "DCx synthetic validation fixture", "license": "CC0-1.0" },
+  "limits": {
+    "k": 1,
+    "minimumRecallAtK": 1.0,
+    "minimumMeanReciprocalRank": 1.0,
+    "resources": {
+      "maximumElapsedMilliseconds": 5000,
+      "maximumPeakWorkingSetBytes": 536870912,
+      "maximumPeakGpuBytes": 536870912,
+      "requireUnloadConfirmation": true
+    }
+  },
+  "documents": [ { "id": "uia-document", "text": "Synthetic retrieval document." } ],
+  "queries": [
+    { "id": "uia-query", "text": "Synthetic retrieval query.", "relevantDocumentIds": ["uia-document"] }
+  ]
+}
+'@
+[IO.File]::WriteAllText($embeddingBenchmarkManifest, $embeddingBenchmarkJson)
 
 $executableDigest = (Get-FileHash -LiteralPath $fakeWhisper -Algorithm SHA256).Hash.ToLowerInvariant()
 $modelDigest = (Get-FileHash -LiteralPath $model -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -453,6 +478,21 @@ try {
     if ($unavailableApproval.Current.IsEnabled -or $unavailableRun.Current.IsEnabled) {
         throw "Benchmark approval or execution was enabled without an approved backend."
     }
+    Set-Value $unavailableBenchmarkWindow "BenchmarkManifestPath" $embeddingBenchmarkManifest
+    Invoke-ById $unavailableBenchmarkWindow "ReviewBenchmarkManifestButton" | Out-Null
+    $null = Wait-For {
+        $status = Find-ById $unavailableBenchmarkWindow "LocalModelBenchmarkStatus"
+        if ($null -ne $status -and
+            $status.Current.Name -like "The exact embedding suite was reviewed, but running is unavailable*") { $status }
+    } "A reviewed embedding suite did not remain unavailable without an approved model."
+    $embeddingDetails = Find-ById $unavailableBenchmarkWindow "BenchmarkReviewDetails"
+    if ($null -eq $embeddingDetails -or
+        $embeddingDetails.Current.Name -notlike "*Type: embedding retrieval. Documents: 1. Queries: 1.*" -or
+        $embeddingDetails.Current.Name -notlike "*minimum recall 100.00%*minimum mean reciprocal rank 100.00%*" -or
+        $embeddingDetails.Current.Name -notlike "*No approved digest-bound Ollama embedding model is selected.*" -or
+        $unavailableApproval.Current.IsEnabled -or $unavailableRun.Current.IsEnabled) {
+        throw "Embedding review did not expose exact unavailable thresholds and deny execution."
+    }
     Invoke-ById $unavailableBenchmarkWindow "CloseBenchmarkWindowButton" | Out-Null
     $transcribeButton = Wait-For {
         $candidate = Find-ById $contentViewer "TranscribeWavButton"
@@ -588,6 +628,7 @@ try {
         benchmark_path_change_revoked_approval = $true
         benchmark_cancellation_preserved_evidence = $true
         benchmark_missing_backend_unavailable = $true
+        embedding_benchmark_missing_model_unavailable = $true
         executable_sha256 = $executableDigest
         model_sha256 = $modelDigest
         runtime_license_sha256 = $runtimeLicenseDigest

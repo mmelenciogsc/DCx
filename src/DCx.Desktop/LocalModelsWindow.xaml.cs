@@ -40,7 +40,7 @@ public partial class LocalModelsWindow : Window
 
     private void OnOpenBenchmarkReviewClick(object sender, RoutedEventArgs e)
     {
-        var window = new LocalModelBenchmarkWindow(whisperStore, ApplicationDataRoot.Resolve())
+        var window = new LocalModelBenchmarkWindow(store, whisperStore, ApplicationDataRoot.Resolve())
         {
             Owner = this,
         };
