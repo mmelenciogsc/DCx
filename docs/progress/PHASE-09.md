@@ -34,7 +34,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 - Locked restore and native Release build passed with 0 warnings/errors.
 - P09 filtered tests: passed 9, failed 0, skipped 0; about 1 second in the recorded validation.
-- Current full suite after local crash-diagnostics hardening: passed 172, failed 0, skipped 0; about 2 seconds.
+- Current full suite after publication-lease hardening: passed 176, failed 0, skipped 0; about 3 seconds.
 - A real child Kestrel process served three chained trust-policy revisions and a signed SQLite-backed release over loopback HTTP; a fresh production client transport caught up all revisions, synchronized and searched it.
 - Two distinct client roots synchronized the same chain; the P08 private sentinel remained present and absent from global results.
 - Wrong-key release activation was rejected with no active pointer.
@@ -43,7 +43,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - A transfer interrupted after its first 64 KiB chunk resumed at a nonzero offset and downloaded fewer bytes on retry than the full release.
 - Lazy 150,000-byte artifact retrieval, deprecation, offline search and explicit rollback passed.
 - Publication retry used reordered equivalent changes and a later timestamp after repository reopen, returned the byte-identical original descriptor and kept the chain at sequence 1; a changed request under the same operation ID was rejected.
-- Latest storage evidence: `artifacts/test-results/p09-80e87f9b9da74329ac4bac7c8c0bbdd8/storage-forecast.json` (generated and intentionally not committed).
+- Latest storage evidence: `artifacts/test-results/p09-956f3d52abc541a290911bce2453eb7b/storage-forecast.json` (generated and intentionally not committed).
 
 ## Measured storage/bandwidth fixture
 

@@ -16,5 +16,6 @@
 | [0012](architecture/adr/0012-read-only-shared-readiness-policy.md) | Share one immutable readiness policy between reports and a read-only native dashboard | Accepted for local controls | 2026-10-17 |
 | [0013](architecture/adr/0013-rootless-server-ccb-sandbox.md) | Isolate contributed code on the authoritative Linux service with a digest-bound rootless sandbox policy | Provisional; local hostile gate only | 2026-10-17 |
 | [0014](architecture/adr/0014-private-local-crash-diagnostics.md) | Keep crash diagnostics default-off, content-free, bounded and local with accessible consent/purge | Accepted for local controls | 2026-10-17 |
+| [0015](architecture/adr/0015-publication-intent-fencing-leases.md) | Coordinate authorized publication intents with expiring ownership-fenced leases | Accepted for same-SQLite local orchestration | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

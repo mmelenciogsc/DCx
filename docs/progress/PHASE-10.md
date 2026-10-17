@@ -1,7 +1,7 @@
 # P10 — Contributions, governance and provenance
 
 - Status: BLOCKED (local server-side CCB orchestration and hostile-code policy pass; production publication remains unavailable)
-- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`
+- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`
 - Documentation commit: recorded by the commit containing this file
 
 No contribution was sent externally or published to a production catalog.
@@ -31,6 +31,9 @@ No contribution was sent externally or published to a production catalog.
 - Approval and withdrawal use digest-derived stable publication-operation IDs. The registry atomically binds each ID to the canonical change set and release; a retry after the registry commit but before governance-state update returns the original release instead of appending a duplicate.
 - Reviewer-authorized approval/withdrawal intents are now persisted before registry mutation. Startup validates and processes a bounded batch, then commits the contribution transition and intent completion together. Recovery reuses the original reviewer, timestamp and change digest; no new consent or publication scope is inferred.
 - Candidate JSON is rehashed against its intake digest before approval, withdrawal and recovery. CCB recovery rehashes both quarantine and authoritative artifact bytes and can complete from already-persisted evidence without rerunning untrusted code.
+- A separate SQLite row atomically claims each pending intent with a random per-process owner, random fencing token, acquisition/expiry times and bounded attempt count. The lease coordinates execution only; the immutable reviewer intent remains the sole publication authority.
+- Five-minute leases are renewed before and after registry work. Completion rechecks owner, token and unexpired time inside the same transaction as the contribution/intent transition; an expired worker cannot complete after another process reclaims the intent.
+- Successful completion clears the active lease but retains its attempt count. Crashes leave it to expire, ordinary failures release it, malformed rows fail closed, and the twentieth failed claim produces a stable attempt-limit error rather than an unbounded loop.
 
 ## Reproduction
 
@@ -42,9 +45,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 ## Measured result
 
-- Locked native Release build: 0 warnings, 0 errors; 1.23 seconds in the recorded dedicated run.
-- P10 tests: passed 24, failed 0, skipped 0; about 1 second in the recorded native gate.
-- Current full suite after local crash-diagnostics hardening: passed 172, failed 0, skipped 0; about 2 seconds.
+- Locked native Release build: 0 warnings, 0 errors; 1.12 seconds in the recorded dedicated run.
+- P10 tests: passed 28, failed 0, skipped 0; about 2 seconds in the recorded native gate.
+- Current full suite after publication-lease hardening: passed 176, failed 0, skipped 0; about 3 seconds.
 - Eligible CKB item: quarantined, absent from catalog before review, approved into a signed release, synchronized by a client, then withdrawn/deprecated.
 - Secret/PII/dummy item: remained quarantined and reviewer publication failed closed.
 - Receipt: one qualified event; replay, contributor self-use and invalid integrity excluded.
@@ -52,20 +55,18 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - WSL-hosted Ubuntu local simulation: Bubblewrap 0.6.1 SHA-256 `bf6cf3d4456665f5d80c14eb79a76e0ce87b39a0883e614a161658b4ec33492c`; static BusyBox SHA-256 `b3c1009e1b5c927e537487c80639cdf404f69e3eb49371d9be5d841672be3ff9`.
 - Benign transformation passed. Host/repository and `/etc`/`/usr` reads, an external network request, root write, inherited secret environment, outside-quarantine workspace, symlink, workspace-digest substitution, timeout and output overflow were denied.
 - Evidence: `artifacts/test-results/p10-dd1f4845e5854d1bb060280d6a66ffa0/sandbox-evidence.json` (generated and intentionally not committed).
-- Latest orchestration-era hostile evidence: `artifacts/test-results/p10-bf164c6e85a94c2e96ba14cdbff638ce/sandbox-evidence.json` (generated and intentionally not committed).
+- Latest orchestration-era hostile evidence: `artifacts/test-results/p10-e00d104c84be478e9a7b3652d161ee55/sandbox-evidence.json` (generated and intentionally not committed).
 - Schema-v2 success path executed two declared tests, persisted two passing evidence rows, published the exact artifact into a signed release, synchronized it to a separate global replica and lazily retrieved byte-identical content.
 - Denial coverage includes missing executor, package/digest/metadata mismatch, undeclared files/fields, invalid UTF-8/base64/null input, malicious entrypoint or test-input text, expected-output mismatch and post-intake quarantine tampering.
 - Cross-database crash simulations pre-commit approval and withdrawal releases, then verify governance retries reuse sequences 1 and 2 and synchronize one correctly deprecated resource rather than producing duplicate releases.
 - Deliberate crash checkpoints now cover intent-before-registry and registry-before-local-completion windows. Reopen automatically completes approval and withdrawal, while CCB recovery executes zero additional sandbox tests. Changed intent digests, changed post-review candidate JSON and same-length authoritative artifact substitution all fail closed.
+- Two concurrent governance/repository instances claimed one pending approval exactly once. An unexpired lease blocked takeover; after forced expiry a second worker reused the idempotent sequence-1 registry operation and completed once, while the original worker was fenced with `publication_lease_lost`.
+- Expired malformed lease data failed closed before overwrite. Attempt 20 stopped with `publication_lease_attempt_limit`. Successful completion retained attempt audit count and cleared every active lease token.
 
 ## Changed files in the latest milestone
 
-- Contracts/evidence: `src/DCx.Core/Contributions/CcbSandboxContracts.cs`.
-- Linux executor/policy: `server/DCx.GlobalService/BubblewrapCcbSandboxExecutor.cs`, `server/sandbox/run-ccb-bubblewrap.sh`.
-- Hostile fixtures and gates: `tests/DCx.Core.Tests/Contributions/CcbSandboxEvidenceTests.cs`, `tests/fixtures/ccb-sandbox/`, `scripts/validate-p10-sandbox.sh`, `scripts/validate-p10.ps1`.
-- Package and publication boundary: `src/DCx.Core/Knowledge/CcbPackageValidator.cs`, `server/DCx.GlobalService/ContributionGovernanceService.cs`.
-- Durable recovery and test-only crash seam: `server/DCx.GlobalService/ContributionPublicationRecovery.cs`, `server/DCx.GlobalService/DCx.GlobalService.csproj`.
-- Orchestration and denial tests: `tests/DCx.Core.Tests/Contributions/CcbContributionPackageTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionGovernanceTests.cs`.
+- Durable atomic claim, renewal, bounded attempts and ownership-fenced completion: `server/DCx.GlobalService/ContributionGovernanceService.cs`.
+- Concurrent-instance, expiry/takeover, stale-worker, malformed-state and attempt-limit coverage: `tests/DCx.Core.Tests/Contributions/ContributionGovernanceTests.cs`.
 
 ## Blocker and limits
 
@@ -76,6 +77,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - Docker/Compose remains unavailable as recorded in P09. Production CCB publication must remain unavailable until approved Ubuntu 24.04 deployment, authenticated intake/reviewer APIs, the remaining isolation controls and external security gates pass.
 - Regex scanners are defense-in-depth, not a guarantee that content lacks secrets/PII or that the contributor owns it. Human/policy review remains mandatory.
 - An HMAC proves receipt integrity/installation association, not that an untrusted customer device reported honest usage. Server anomaly analysis, audit sampling and entitlement/account correlation remain required.
-- Startup processes at most 100 pending intents per bounded pass; an explicit method can process subsequent batches. The current lock is process-local and recovery is synchronous. Production multi-instance deployment requires a durable distributed lease/queue, backoff and operator-visible dead-letter workflow.
-- The current approval lock is held while tests execute, serializing governance mutations; production requires a durable queued worker/lease model before concurrent hostile workloads.
+- Startup processes at most 100 pending intents per bounded synchronous pass; an explicit method can process subsequent batches. Same-SQLite local processes now coordinate each intent, but there is no continuous worker, wakeup, retry backoff, operator-visible dead-letter/remediation workflow or supported multi-node/network-filesystem lease.
+- The approval lock remains process-local and is held while CCB tests execute. Two processes can therefore duplicate expensive hostile-package validation before the publication intent exists; production still requires a durable queued worker claim before concurrent hostile workloads.
 - Human JAWS/NVDA/Narrator testing remains unverified; see `docs/accessibility/P10_CONTRIBUTION_CHECKLIST.md`.
