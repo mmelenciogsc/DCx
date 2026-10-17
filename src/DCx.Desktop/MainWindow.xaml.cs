@@ -11,6 +11,7 @@ using DCx.Core.Control;
 using DCx.Core.Downloads;
 using DCx.Core.Navigation;
 using DCx.Core.Profiles;
+using DCx.Core.Reliability;
 using DCx.Desktop.Automation;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
@@ -33,6 +34,8 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<BrowserBookmark> _bookmarkItems = [];
     private readonly ObservableCollection<string> _downloadItems = [];
     private readonly ObservableCollection<string> _agentLogItems = [];
+    private readonly bool _offlineStartup = OfflineStartupPolicy.IsEnabled(
+        Environment.GetEnvironmentVariable(OfflineStartupPolicy.EnvironmentVariable));
     private int _focusRegion;
     private AgentDemoStage _agentDemoStage;
     private AgentControlRequest? _agentRequest;
@@ -71,7 +74,7 @@ public partial class MainWindow : Window
         {
             ReplaceItems(_historyItems, await _historyStore.ReadAsync());
             ReplaceItems(_bookmarkItems, await _bookmarkStore.ReadAsync());
-            await CreateTabAsync(GetSelectedProfile(), StartPage);
+            await CreateTabAsync(GetSelectedProfile(), GetNewTabAddress());
         }
         catch (Exception exception)
         {
@@ -132,7 +135,14 @@ public partial class MainWindow : Window
             var environment = await GetEnvironmentAsync(profileName);
             await browser.EnsureCoreWebView2Async(environment);
             await ConfigureBrowserAsync(state);
-            browser.CoreWebView2.Navigate((address ?? StartPage).AbsoluteUri);
+            if (address is null && _offlineStartup)
+            {
+                browser.NavigateToString(OfflineStartupPolicy.DocumentHtml);
+            }
+            else
+            {
+                browser.CoreWebView2.Navigate((address ?? StartPage).AbsoluteUri);
+            }
         }
         catch
         {
@@ -181,7 +191,11 @@ public partial class MainWindow : Window
             _controlCoordinator.NotifyPhysicalUserInput("Unexpected navigation revoked the active agent lease.");
         }
 
-        var decision = _navigationPolicy.Evaluate(args.Uri);
+        var isOfflineDocument = _offlineStartup && tab.NavigationGeneration == 1 &&
+                                OfflineStartupPolicy.IsInitialInternalNavigation(args.Uri);
+        var decision = isOfflineDocument
+            ? new NavigationDecision(true, new Uri(OfflineStartupPolicy.DocumentAddress), null)
+            : _navigationPolicy.Evaluate(args.Uri);
         if (!decision.IsAllowed)
         {
             args.Cancel = true;
@@ -215,6 +229,16 @@ public partial class MainWindow : Window
             if (CurrentTab == tab)
             {
                 SetStatus($"Page load failed. Web error {args.WebErrorStatus}.");
+            }
+
+            return;
+        }
+
+        if (_offlineStartup && OfflineStartupPolicy.IsOfflineDocument(tab.Browser.Source.AbsoluteUri))
+        {
+            if (CurrentTab == tab)
+            {
+                SetStatus("DCx is ready offline. No website was contacted during startup.");
             }
 
             return;
@@ -356,7 +380,7 @@ public partial class MainWindow : Window
 
         if (BrowserTabs.Items.Count == 0)
         {
-            _ = CreateTabAsync(GetSelectedProfile(), StartPage);
+            _ = CreateTabAsync(GetSelectedProfile(), GetNewTabAddress());
         }
         else
         {
@@ -441,7 +465,7 @@ public partial class MainWindow : Window
     }
 
     private async void OnNewTabClick(object sender, RoutedEventArgs e) =>
-        await CreateTabAsync(GetSelectedProfile(), StartPage);
+        await CreateTabAsync(GetSelectedProfile(), GetNewTabAddress());
 
     private void OnBackClick(object sender, RoutedEventArgs e)
     {
@@ -920,6 +944,8 @@ public partial class MainWindow : Window
         return File.Exists(Path.Combine(candidate, "DCx.slnx")) ? candidate : AppContext.BaseDirectory;
     }
 
+    private Uri? GetNewTabAddress() => _offlineStartup ? null : StartPage;
+
     private async void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         RegisterPhysicalUserInput("Keyboard input revoked the agent lease.");
@@ -932,7 +958,7 @@ public partial class MainWindow : Window
         }
         else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.T)
         {
-            await CreateTabAsync(GetSelectedProfile(), StartPage);
+            await CreateTabAsync(GetSelectedProfile(), GetNewTabAddress());
             e.Handled = true;
         }
         else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.W && CurrentTab is not null)
