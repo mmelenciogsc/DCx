@@ -89,29 +89,30 @@ public sealed partial class GlobalReplicaClient
             throw new GlobalReplicaException($"The global trust root is invalid: {exception.GetType().Name}.");
         }
 
+        var applicationRoot = GlobalStoragePathGuard.EnsureDirectory(
+            applicationDataRoot,
+            "application-data root");
         var trustId = GlobalReleaseCodec.Sha256(trustRootSubjectPublicKeyInfo);
-        var root = Path.GetFullPath(Path.Combine(applicationDataRoot, "global", trustId));
-        Directory.CreateDirectory(root);
-        if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0)
-        {
-            throw new GlobalReplicaException("The global replica root cannot be a reparse point.");
-        }
+        var root = GlobalStoragePathGuard.EnsureDirectory(
+            Path.Combine(applicationRoot, "global", trustId),
+            "global replica root");
 
         var client = new GlobalReplicaClient(
             root,
             trustRootSubjectPublicKeyInfo.ToArray(),
             trustId,
             trustPolicyAnchorStore);
-        Directory.CreateDirectory(client.releasesRoot);
-        Directory.CreateDirectory(client.catalogsRoot);
-        Directory.CreateDirectory(client.stagingRoot);
-        Directory.CreateDirectory(client.artifactsRoot);
+        GlobalStoragePathGuard.EnsureDirectory(client.releasesRoot, "global release store");
+        GlobalStoragePathGuard.EnsureDirectory(client.catalogsRoot, "global catalog store");
+        GlobalStoragePathGuard.EnsureDirectory(client.stagingRoot, "global staging store");
+        GlobalStoragePathGuard.EnsureDirectory(client.artifactsRoot, "global artifact store");
         _ = await client.LoadActiveAsync(cancellationToken).ConfigureAwait(false);
         return client;
     }
 
     public async Task<GlobalReplicaStatus> GetStatusAsync(CancellationToken cancellationToken = default)
     {
+        ValidateStorageLayout();
         var state = await LoadActiveAsync(cancellationToken).ConfigureAwait(false);
         return new GlobalReplicaStatus(state.Sequence, state.ReleaseSha256, state.Resources.Count);
     }
@@ -119,6 +120,7 @@ public sealed partial class GlobalReplicaClient
     public async Task<GlobalTrustPolicyStatus?> GetTrustPolicyStatusAsync(
         CancellationToken cancellationToken = default)
     {
+        ValidateStorageLayout();
         var state = await LoadTrustPolicyAsync(cancellationToken).ConfigureAwait(false);
         return state is null
             ? null
@@ -140,6 +142,7 @@ public sealed partial class GlobalReplicaClient
         await syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ValidateStorageLayout();
             return await ApplyTrustPolicyUnderLockAsync(policyEnvelope, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -156,6 +159,7 @@ public sealed partial class GlobalReplicaClient
         await syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ValidateStorageLayout();
             var trustPolicy = await SynchronizeTrustPolicyAsync(transport, cancellationToken).ConfigureAwait(false);
             var current = await LoadActiveAsync(trustPolicy, cancellationToken).ConfigureAwait(false);
             var latest = await transport.GetLatestReleaseAsync(cancellationToken).ConfigureAwait(false);
@@ -250,6 +254,7 @@ public sealed partial class GlobalReplicaClient
         await syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ValidateStorageLayout();
             var matches = Directory.GetFiles(releasesRoot, $"{sequence:D12}-*.release.json");
             if (matches.Length != 1)
             {
@@ -276,6 +281,7 @@ public sealed partial class GlobalReplicaClient
         int limit = 10,
         CancellationToken cancellationToken = default)
     {
+        ValidateStorageLayout();
         if (limit is < 1 or > 50 || embedding is { Length: > GlobalReleaseCodec.MaximumEmbeddingDimensions } ||
             embedding?.Any(value => !float.IsFinite(value)) == true)
         {
@@ -313,6 +319,7 @@ public sealed partial class GlobalReplicaClient
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transport);
+        ValidateStorageLayout();
         if (!IsSha256(sha256))
         {
             throw new GlobalReplicaException("The requested global artifact digest is invalid.");
@@ -324,8 +331,9 @@ public sealed partial class GlobalReplicaClient
             ?? throw new GlobalReplicaException("The artifact is not referenced by the active signed catalog.");
         var normalized = sha256.ToLowerInvariant();
         var destinationDirectory = Path.Combine(artifactsRoot, normalized[..2]);
-        Directory.CreateDirectory(destinationDirectory);
+        GlobalStoragePathGuard.EnsureDirectory(destinationDirectory, "global artifact digest store");
         var destination = Path.Combine(destinationDirectory, normalized);
+        GlobalStoragePathGuard.ValidateFile(destination, mustExist: false, "global artifact");
         if (File.Exists(destination))
         {
             await VerifyFileAsync(destination, normalized, reference.SizeBytes, cancellationToken).ConfigureAwait(false);
@@ -353,6 +361,7 @@ public sealed partial class GlobalReplicaClient
         TrustPolicyState? trustPolicy,
         CancellationToken cancellationToken)
     {
+        GlobalStoragePathGuard.ValidateFile(activePath, mustExist: false, "active global pointer");
         if (!File.Exists(activePath))
         {
             return new ActiveState(0, null, []);
@@ -413,6 +422,10 @@ public sealed partial class GlobalReplicaClient
         TrustPolicyState? state = null;
         try
         {
+            GlobalStoragePathGuard.ValidateFile(
+                trustPolicyPath,
+                mustExist: false,
+                "persisted global trust policy");
             if (File.Exists(trustPolicyPath))
             {
                 var information = new FileInfo(trustPolicyPath);
@@ -675,6 +688,7 @@ public sealed partial class GlobalReplicaClient
             throw new GlobalReplicaException("The registry object size is invalid.");
         }
 
+        GlobalStoragePathGuard.ValidateFile(partialPath, mustExist: false, "global transfer checkpoint");
         var existing = File.Exists(partialPath) ? new FileInfo(partialPath).Length : 0;
         if (existing > expectedBytes)
         {
@@ -718,6 +732,7 @@ public sealed partial class GlobalReplicaClient
         ReadOnlyMemory<byte> content,
         CancellationToken cancellationToken)
     {
+        GlobalStoragePathGuard.ValidateFile(destination, mustExist: false, "global replica destination");
         var temporary = $"{destination}.{Guid.NewGuid():N}.tmp";
         try
         {
@@ -750,10 +765,7 @@ public sealed partial class GlobalReplicaClient
         long? expectedBytes,
         CancellationToken cancellationToken)
     {
-        if (!File.Exists(path))
-        {
-            throw new GlobalReplicaException("A required global replica file is missing.");
-        }
+        GlobalStoragePathGuard.ValidateFile(path, mustExist: true, "global replica content");
 
         var information = new FileInfo(path);
         if (expectedBytes is not null && information.Length != expectedBytes)
@@ -792,6 +804,15 @@ public sealed partial class GlobalReplicaClient
 
     private string CatalogPath(long sequence, string digest) =>
         Path.Combine(catalogsRoot, $"{sequence:D12}-{digest.ToLowerInvariant()}.catalog.json");
+
+    private void ValidateStorageLayout()
+    {
+        GlobalStoragePathGuard.RequireDirectory(ReplicaRoot, "global replica root");
+        GlobalStoragePathGuard.RequireDirectory(releasesRoot, "global release store");
+        GlobalStoragePathGuard.RequireDirectory(catalogsRoot, "global catalog store");
+        GlobalStoragePathGuard.RequireDirectory(stagingRoot, "global staging store");
+        GlobalStoragePathGuard.RequireDirectory(artifactsRoot, "global artifact store");
+    }
 
     private static bool IsSha256(string? value) =>
         value is { Length: 64 } && value.All(char.IsAsciiHexDigit);

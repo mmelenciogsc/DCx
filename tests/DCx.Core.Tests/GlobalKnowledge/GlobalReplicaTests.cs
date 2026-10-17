@@ -3,6 +3,7 @@ using System.Text;
 using DCx.Core.GlobalKnowledge;
 using DCx.Core.Knowledge;
 using DCx.GlobalService;
+using Microsoft.Data.Sqlite;
 
 namespace DCx.Core.Tests.GlobalKnowledge;
 
@@ -348,6 +349,123 @@ public sealed class GlobalReplicaTests : IDisposable
         Assert.Equal(initial, replay);
         Assert.Equal(1, (await reopened.GetLatestAsync())!.Sequence);
         Assert.Contains("reused", conflict.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StorageBoundary_RejectsReparseAncestorAndSwappedClientDirectory()
+    {
+        Directory.CreateDirectory(root);
+        var outside = Path.Combine(root, "outside-client-storage");
+        Directory.CreateDirectory(outside);
+        var linkedApplicationRoot = Path.Combine(root, "linked-client-root");
+        Directory.CreateSymbolicLink(linkedApplicationRoot, outside);
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var publicKey = key.ExportSubjectPublicKeyInfo();
+
+        await Assert.ThrowsAsync<GlobalReplicaException>(() =>
+            GlobalReplicaClient.OpenAsync(
+                Path.GetPathRoot(root)!,
+                publicKey,
+                TestGlobalTrustPolicyAnchorStore.Shared));
+        await Assert.ThrowsAsync<GlobalReplicaException>(() =>
+            GlobalReplicaClient.OpenAsync(
+                linkedApplicationRoot,
+                publicKey,
+                TestGlobalTrustPolicyAnchorStore.Shared));
+
+        var client = await GlobalReplicaClient.OpenAsync(
+            Path.Combine(root, "safe-client"),
+            publicKey,
+            TestGlobalTrustPolicyAnchorStore.Shared);
+        var staging = Path.Combine(client.ReplicaRoot, "staging");
+        Directory.Delete(staging);
+        var outsideStaging = Path.Combine(root, "outside-staging");
+        Directory.CreateDirectory(outsideStaging);
+        Directory.CreateSymbolicLink(staging, outsideStaging);
+
+        await Assert.ThrowsAsync<GlobalReplicaException>(() => client.GetStatusAsync());
+        Assert.Empty(Directory.GetFileSystemEntries(outsideStaging));
+
+        var pointerClient = await GlobalReplicaClient.OpenAsync(
+            Path.Combine(root, "pointer-client"),
+            publicKey,
+            TestGlobalTrustPolicyAnchorStore.Shared);
+        var outsidePointer = Path.Combine(root, "outside-active.json");
+        await File.WriteAllTextAsync(outsidePointer, "{}");
+        File.CreateSymbolicLink(
+            Path.Combine(pointerClient.ReplicaRoot, "active.json"),
+            outsidePointer);
+        await Assert.ThrowsAsync<GlobalReplicaException>(() => pointerClient.GetStatusAsync());
+    }
+
+    [Fact]
+    public async Task AuthoritativeStorage_RejectsReparseRootsSwapsAndNonP256Key()
+    {
+        Directory.CreateDirectory(root);
+        using var p256 = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var p384 = ECDsa.Create(ECCurve.NamedCurves.nistP384);
+        await Assert.ThrowsAsync<CryptographicException>(() =>
+            GlobalRegistryRepository.OpenAsync(
+                Path.Combine(root, "wrong-key-server"),
+                p384.ExportPkcs8PrivateKey()));
+
+        var outside = Path.Combine(root, "outside-server-storage");
+        Directory.CreateDirectory(outside);
+        var linkedRoot = Path.Combine(root, "linked-server-root");
+        Directory.CreateSymbolicLink(linkedRoot, outside);
+        await Assert.ThrowsAsync<GlobalReplicaException>(() =>
+            GlobalRegistryRepository.OpenAsync(linkedRoot, p256.ExportPkcs8PrivateKey()));
+
+        var linkedDatabaseRoot = Path.Combine(root, "linked-database-server");
+        Directory.CreateDirectory(linkedDatabaseRoot);
+        var outsideDatabase = Path.Combine(root, "outside-registry.sqlite3");
+        await File.WriteAllBytesAsync(outsideDatabase, [0]);
+        File.CreateSymbolicLink(
+            Path.Combine(linkedDatabaseRoot, "authoritative-registry.sqlite3"),
+            outsideDatabase);
+        await Assert.ThrowsAsync<GlobalReplicaException>(() =>
+            GlobalRegistryRepository.OpenAsync(
+                linkedDatabaseRoot,
+                p256.ExportPkcs8PrivateKey()));
+
+        var metadataRoot = Path.Combine(root, "metadata-server");
+        await using (var metadataRepository = await GlobalRegistryRepository.OpenAsync(
+                         metadataRoot,
+                         p256.ExportPkcs8PrivateKey()))
+        {
+            var artifact = await metadataRepository.AddArtifactAsync(
+                "digest-bound path"u8.ToArray(),
+                "application/octet-stream");
+            await using var connection = new SqliteConnection(
+                new SqliteConnectionStringBuilder
+                {
+                    DataSource = Path.Combine(metadataRoot, "authoritative-registry.sqlite3"),
+                    Mode = SqliteOpenMode.ReadWrite,
+                    Pooling = false,
+                }.ToString());
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = "UPDATE artifacts SET relative_path = '../outside' WHERE sha256 = $sha;";
+            command.Parameters.AddWithValue("$sha", artifact.Sha256);
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+
+            await Assert.ThrowsAsync<GlobalReplicaException>(() =>
+                metadataRepository.ReadArtifactChunkAsync(artifact.Sha256, 0, 1));
+        }
+
+        var serverRoot = Path.Combine(root, "safe-server");
+        await using var repository = await GlobalRegistryRepository.OpenAsync(
+            serverRoot,
+            p256.ExportPkcs8PrivateKey());
+        var artifactStore = Path.Combine(serverRoot, "artifacts", "sha256");
+        Directory.Delete(artifactStore);
+        var outsideArtifacts = Path.Combine(root, "outside-artifacts");
+        Directory.CreateDirectory(outsideArtifacts);
+        Directory.CreateSymbolicLink(artifactStore, outsideArtifacts);
+
+        await Assert.ThrowsAsync<GlobalReplicaException>(() =>
+            repository.AddArtifactAsync("must not escape"u8.ToArray(), "application/octet-stream"));
+        Assert.Empty(Directory.GetFileSystemEntries(outsideArtifacts));
     }
 
     public void Dispose()

@@ -48,6 +48,8 @@ try {
     "Private collection isolation=PASS"
     "Offline search and rollback=PASS"
     "Lazy artifact download=PASS"
+    "Replica/server reparse-root, swapped-directory and linked-file denial=PASS"
+    "Authoritative digest-path metadata and exact P-256 signing-key admission=PASS"
     "Storage forecast=$forecast"
     "P09 global-knowledge tests=PASS ($globalKnowledgeTestsPassed/$globalKnowledgeTestsPassed)"
 

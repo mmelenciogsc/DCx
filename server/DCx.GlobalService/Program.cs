@@ -1,4 +1,5 @@
 using DCx.Core.Finance;
+using DCx.Core.GlobalKnowledge;
 using DCx.GlobalService;
 
 if (!string.Equals(Environment.GetEnvironmentVariable("DCX_GLOBAL_SIMULATION"), "1", StringComparison.Ordinal))
@@ -46,9 +47,12 @@ builder.WebHost.ConfigureKestrel(options =>
     options.Limits.MaxRequestBodySize = DCx.Core.Contributions.ContributionTransportCodec.MaximumEnvelopeBytes;
 });
 builder.WebHost.UseUrls(inContainer ? "http://0.0.0.0:5087" : simulationUrl);
-var signingKeyFile = new FileInfo(Path.GetFullPath(signingKeyPath));
-if (!signingKeyFile.Exists || signingKeyFile.Length is <= 0 or > 16 * 1024 ||
-    (signingKeyFile.Attributes & FileAttributes.ReparsePoint) != 0)
+var admittedSigningKeyPath = GlobalStoragePathGuard.ValidateFile(
+    signingKeyPath,
+    mustExist: true,
+    "global signing key");
+var signingKeyFile = new FileInfo(admittedSigningKeyPath);
+if (signingKeyFile.Length is <= 0 or > 16 * 1024)
 {
     throw new InvalidOperationException("The global signing-key file is not an admitted regular file.");
 }

@@ -9,28 +9,39 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
     private const int MaximumArtifactBytes = 256 * 1024 * 1024;
 
     private readonly string connectionString;
+    private readonly string databasePath;
     private readonly string artifactsRoot;
     private readonly ECDsa signingKey;
     private readonly byte[] trustRoot;
     private readonly SemaphoreSlim writeLock = new(1, 1);
+    private bool initialized;
 
     private GlobalRegistryRepository(string root, byte[] privateKeyPkcs8)
     {
         Root = root;
         artifactsRoot = Path.Combine(root, "artifacts", "sha256");
-        Directory.CreateDirectory(artifactsRoot);
-        signingKey = ECDsa.Create();
-        signingKey.ImportPkcs8PrivateKey(privateKeyPkcs8, out var bytesRead);
-        if (bytesRead != privateKeyPkcs8.Length)
+        var importedSigningKey = ECDsa.Create();
+        try
         {
-            throw new CryptographicException("The registry signing key contains trailing data.");
+            importedSigningKey.ImportPkcs8PrivateKey(privateKeyPkcs8, out var bytesRead);
+            if (bytesRead != privateKeyPkcs8.Length || importedSigningKey.KeySize != 256)
+            {
+                throw new CryptographicException("The registry signing key must be one exact P-256 private key.");
+            }
         }
+        catch
+        {
+            importedSigningKey.Dispose();
+            throw;
+        }
+        signingKey = importedSigningKey;
 
         trustRoot = signingKey.ExportSubjectPublicKeyInfo();
 
+        databasePath = Path.Combine(root, "authoritative-registry.sqlite3");
         connectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = Path.Combine(root, "authoritative-registry.sqlite3"),
+            DataSource = databasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Private,
             Pooling = false,
@@ -48,16 +59,31 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(privateKeyPkcs8);
-        var canonical = Path.GetFullPath(root);
-        Directory.CreateDirectory(canonical);
-        if ((File.GetAttributes(canonical) & FileAttributes.ReparsePoint) != 0)
-        {
-            throw new GlobalReplicaException("The authoritative registry root cannot be a reparse point.");
-        }
+        var canonical = GlobalStoragePathGuard.EnsureDirectory(root, "authoritative registry root");
 
         var repository = new GlobalRegistryRepository(canonical, privateKeyPkcs8);
-        await repository.InitializeAsync(cancellationToken).ConfigureAwait(false);
-        return repository;
+        try
+        {
+            GlobalStoragePathGuard.EnsureDirectory(
+                Path.Combine(canonical, "artifacts"),
+                "authoritative artifact root");
+            GlobalStoragePathGuard.EnsureDirectory(
+                repository.artifactsRoot,
+                "authoritative artifact digest store");
+            GlobalStoragePathGuard.ValidateFile(
+                repository.databasePath,
+                mustExist: false,
+                "authoritative registry database");
+            await repository.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            repository.initialized = true;
+            repository.ValidateStorageLayout();
+            return repository;
+        }
+        catch
+        {
+            await repository.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     public async Task<GlobalArtifactReference> AddArtifactAsync(
@@ -73,8 +99,10 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
 
         var digest = GlobalReleaseCodec.Sha256(content.Span);
         var directory = Path.Combine(artifactsRoot, digest[..2]);
-        Directory.CreateDirectory(directory);
+        ValidateStorageLayout();
+        GlobalStoragePathGuard.EnsureDirectory(directory, "authoritative artifact digest directory");
         var destination = Path.Combine(directory, digest);
+        GlobalStoragePathGuard.ValidateFile(destination, mustExist: false, "authoritative artifact");
         if (!File.Exists(destination))
         {
             var temporary = $"{destination}.{Guid.NewGuid():N}.tmp";
@@ -442,11 +470,10 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
         }
 
         var size = reader.GetInt64(0);
-        var path = Path.GetFullPath(Path.Combine(Root, reader.GetString(1)));
-        if (!path.StartsWith(Root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
-            new FileInfo(path).Length != size)
+        var path = ResolveArtifactPath(reader.GetString(1), sha256);
+        if (new FileInfo(path).Length != size)
         {
-            throw new GlobalReplicaException("The authoritative artifact path or size is invalid.");
+            throw new GlobalReplicaException("The authoritative artifact size is invalid.");
         }
 
         ValidateRange(offset, count);
@@ -511,8 +538,13 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
 
     private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
     {
+        ValidateStorageLayout();
         var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        GlobalStoragePathGuard.ValidateFile(
+            databasePath,
+            mustExist: true,
+            "authoritative registry database");
         var command = connection.CreateCommand();
         command.CommandText = "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -579,7 +611,7 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
         return value.AsSpan((int)offset, Math.Min(count, value.Length - (int)offset)).ToArray();
     }
 
-    private static async Task EnsureArtifactAsync(
+    private async Task EnsureArtifactAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         GlobalArtifactReference reference,
@@ -597,8 +629,8 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
             throw new GlobalReplicaException("A release references an absent or conflicting authoritative artifact.");
         }
 
-        var path = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(connection.DataSource)!, reader.GetString(2)));
-        if (!File.Exists(path) || new FileInfo(path).Length != reference.SizeBytes)
+        var path = ResolveArtifactPath(reader.GetString(2), reference.Sha256);
+        if (new FileInfo(path).Length != reference.SizeBytes)
         {
             throw new GlobalReplicaException("A release references an unavailable authoritative artifact file.");
         }
@@ -610,6 +642,71 @@ public sealed class GlobalRegistryRepository : IAsyncDisposable
         {
             throw new GlobalReplicaException("The requested registry range is invalid.");
         }
+    }
+
+    private void ValidateStorageLayout()
+    {
+        GlobalStoragePathGuard.RequireDirectory(Root, "authoritative registry root");
+        GlobalStoragePathGuard.RequireDirectory(
+            Path.Combine(Root, "artifacts"),
+            "authoritative artifact root");
+        GlobalStoragePathGuard.RequireDirectory(
+            artifactsRoot,
+            "authoritative artifact digest store");
+        GlobalStoragePathGuard.ValidateFile(
+            databasePath,
+            mustExist: initialized,
+            "authoritative registry database");
+        GlobalStoragePathGuard.ValidateFile(
+            databasePath + "-wal",
+            mustExist: false,
+            "authoritative registry write-ahead log");
+        GlobalStoragePathGuard.ValidateFile(
+            databasePath + "-shm",
+            mustExist: false,
+            "authoritative registry shared-memory file");
+    }
+
+    private string ResolveArtifactPath(string relativePath, string sha256)
+    {
+        if (sha256 is not { Length: 64 } || !sha256.All(char.IsAsciiHexDigit) ||
+            string.IsNullOrWhiteSpace(relativePath) || relativePath.Contains('\0') ||
+            Path.IsPathFullyQualified(relativePath))
+        {
+            throw new GlobalReplicaException("The authoritative artifact path is invalid.");
+        }
+
+        var normalizedSha256 = sha256.ToLowerInvariant();
+        var expectedRelative = Path.Combine(
+            "artifacts",
+            "sha256",
+            normalizedSha256[..2],
+            normalizedSha256);
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!string.Equals(relativePath, expectedRelative, comparison))
+        {
+            throw new GlobalReplicaException("The authoritative artifact path does not match its digest.");
+        }
+
+        string path;
+        try
+        {
+            path = Path.GetFullPath(Path.Combine(Root, relativePath));
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new GlobalReplicaException("The authoritative artifact path is invalid.");
+        }
+
+        if (!path.StartsWith(Root + Path.DirectorySeparatorChar, comparison))
+        {
+            throw new GlobalReplicaException("The authoritative artifact path escaped its root.");
+        }
+
+        return GlobalStoragePathGuard.ValidateFile(path, mustExist: true, "authoritative artifact");
     }
 
     private sealed record ReleaseRow(GlobalReleaseDescriptor Descriptor, byte[] CatalogBytes);
