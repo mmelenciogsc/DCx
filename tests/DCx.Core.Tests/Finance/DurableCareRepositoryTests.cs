@@ -37,6 +37,14 @@ public sealed class DurableCareRepositoryTests : IDisposable
         Assert.False((await reopened.GetEntitlementAsync("subscription:one"))!.Active);
         Assert.Equal(0, await reopened.BalanceAsync(LedgerAccount.Cash));
         Assert.True(await reopened.ReconcilesAsync());
+
+        var overrun = Event(
+            "event:overrun", "transmission:overrun", "PAYMENT.SALE.REVERSED", 1);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            reopened.ProcessSandboxWebhookAsync(
+                overrun, PayPalSandboxWebhookIntegrity.Sign(overrun, key), key));
+        Assert.Null(await reopened.GetWebhookAuditAsync(overrun.EventId));
+        Assert.Equal(0, await reopened.BalanceAsync(LedgerAccount.Cash));
     }
 
     [Fact]
@@ -73,17 +81,20 @@ public sealed class DurableCareRepositoryTests : IDisposable
 
         var reactivated = Event("event:causal-new", "transmission:causal-new",
             "BILLING.SUBSCRIPTION.ACTIVATED", 0) with { OccurredUtc = now.AddMinutes(20) };
+        var payment = Event("event:causal-payment", "transmission:causal-payment",
+            "PAYMENT.SALE.COMPLETED", 300) with { OccurredUtc = now.AddMinutes(14) };
         var staleRefund = Event("event:causal-old-refund", "transmission:causal-old-refund",
             "PAYMENT.SALE.REFUNDED", 300) with { OccurredUtc = now.AddMinutes(15) };
         var sameTimeCancellation = Event("event:causal-tie-cancel", "transmission:causal-tie-cancel",
             "BILLING.SUBSCRIPTION.CANCELLED", 0) with { OccurredUtc = now.AddMinutes(20) };
+        await ProcessAsync(reopened, payment, key);
         await ProcessAsync(reopened, reactivated, key);
         await ProcessAsync(reopened, staleRefund, key);
         Assert.True((await reopened.GetEntitlementAsync("subscription:one"))!.Active);
         Assert.Equal(
             PayPalSandboxWebhookPolicy.EntitlementStaleIgnored,
             (await reopened.GetWebhookAuditAsync(staleRefund.EventId))!.DecisionCode);
-        Assert.Equal(-300, await reopened.BalanceAsync(LedgerAccount.Cash));
+        Assert.Equal(0, await reopened.BalanceAsync(LedgerAccount.Cash));
         Assert.True(await reopened.ReconcilesAsync());
         await ProcessAsync(reopened, sameTimeCancellation, key);
         Assert.False((await reopened.GetEntitlementAsync("subscription:one"))!.Active);
@@ -148,7 +159,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(4L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(5L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -165,7 +176,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         {
             await connection.OpenAsync();
             var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 5;";
+            command.CommandText = "PRAGMA user_version = 6;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -177,7 +188,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(5L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(6L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -498,7 +509,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var version = reopened.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(4L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(5L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     public void Dispose()

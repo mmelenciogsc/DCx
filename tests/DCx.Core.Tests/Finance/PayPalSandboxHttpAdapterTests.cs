@@ -57,6 +57,144 @@ public sealed class PayPalSandboxHttpAdapterTests
     }
 
     [Fact]
+    public async Task VerifiedSubscriptionWebhooks_BindPlanAndSaleAndCapCorrections()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"dcx-paypal-subscription-{Guid.NewGuid():N}");
+        try
+        {
+            var handler = new ScriptedHandler(async (index, request, cancellationToken) =>
+            {
+                if (index % 2 == 0)
+                {
+                    await AssertTokenRequestAsync(request, cancellationToken);
+                    return Json(request, HttpStatusCode.OK, TokenResponse());
+                }
+
+                Assert.Equal(
+                    "/v1/notifications/verify-webhook-signature",
+                    request.RequestUri!.AbsolutePath);
+                using var document = JsonDocument.Parse(
+                    await request.Content!.ReadAsByteArrayAsync(cancellationToken));
+                Assert.StartsWith(
+                    "WH-",
+                    document.RootElement.GetProperty("webhook_event").GetProperty("id").GetString(),
+                    StringComparison.Ordinal);
+                return Json(request, HttpStatusCode.OK, "{\"verification_status\":\"SUCCESS\"}");
+            });
+            using var adapter = Adapter(handler);
+            var repository = await DurableCareRepository.OpenAsync(root);
+            const string planId = "P-DCX300";
+
+            var activation = OfficialWebhook(
+                "WH-ACTIVE",
+                "BILLING.SUBSCRIPTION.ACTIVATED",
+                "subscription",
+                "{\"id\":\"I-DCX-ONE\",\"plan_id\":\"P-DCX300\",\"status\":\"ACTIVE\"}");
+            var payment = OfficialWebhook(
+                "WH-PAYMENT",
+                "PAYMENT.SALE.COMPLETED",
+                "sale",
+                "{\"id\":\"SALE-DCX-ONE\",\"state\":\"completed\",\"billing_agreement_id\":\"I-DCX-ONE\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}");
+            var refund = OfficialWebhook(
+                "WH-REFUND",
+                "PAYMENT.SALE.REFUNDED",
+                "refund",
+                "{\"id\":\"REFUND-DCX-ONE\",\"state\":\"completed\",\"sale_id\":\"SALE-DCX-ONE\",\"amount\":{\"total\":\"1.00\",\"currency\":\"USD\"}}");
+
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:active"), activation, planId));
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:payment"), payment, planId));
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:refund"), refund, planId));
+            repository = await DurableCareRepository.OpenAsync(root);
+            Assert.False(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:refund"), refund, planId));
+            Assert.Equal(200, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.False((await repository.GetEntitlementAsync("I-DCX-ONE"))!.Active);
+
+            var excessive = OfficialWebhook(
+                "WH-REVERSAL",
+                "PAYMENT.SALE.REVERSED",
+                "refund",
+                "{\"id\":\"REVERSAL-DCX-ONE\",\"state\":\"completed\",\"sale_id\":\"SALE-DCX-ONE\",\"amount\":{\"total\":\"2.50\",\"currency\":\"USD\"}}");
+            var excessiveError = await Assert.ThrowsAsync<PayPalSandboxException>(() =>
+                repository.ProcessOfficialSandboxWebhookAsync(
+                    adapter, Evidence("transmission:reversal"), excessive, planId));
+            Assert.Equal("paypal_sandbox_correction_invalid", excessiveError.Code);
+            Assert.Equal(200, await repository.BalanceAsync(LedgerAccount.Cash));
+
+            var validRemainder = OfficialWebhook(
+                "WH-REVERSAL",
+                "PAYMENT.SALE.REVERSED",
+                "refund",
+                "{\"id\":\"REVERSAL-DCX-ONE\",\"state\":\"completed\",\"sale_id\":\"SALE-DCX-ONE\",\"amount\":{\"total\":\"2.00\",\"currency\":\"USD\"}}");
+            Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
+                adapter, Evidence("transmission:reversal"), validRemainder, planId));
+            Assert.Equal(0, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.True(await repository.ReconcilesAsync());
+
+            var wrongPlan = OfficialWebhook(
+                "WH-WRONG-PLAN",
+                "BILLING.SUBSCRIPTION.ACTIVATED",
+                "subscription",
+                "{\"id\":\"I-DCX-WRONG\",\"plan_id\":\"P-OTHER300\",\"status\":\"ACTIVE\"}");
+            var planError = await Assert.ThrowsAsync<PayPalSandboxException>(() =>
+                repository.ProcessOfficialSandboxWebhookAsync(
+                    adapter, Evidence("transmission:wrong-plan"), wrongPlan, planId));
+            Assert.Equal("paypal_sandbox_subscription_plan_mismatch", planError.Code);
+            Assert.Null(await repository.GetEntitlementAsync("I-DCX-WRONG"));
+            Assert.Equal(14, handler.Calls);
+        }
+        finally
+        {
+            TestDirectory.DeleteIfExists(root);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyAndMapWebhook_FailsClosedBeforeOrAfterVerificationAsApplicable()
+    {
+        var noNetwork = new ScriptedHandler((_, request, _) =>
+            Task.FromResult(Json(request, HttpStatusCode.InternalServerError, "{}")));
+        using (var adapter = Adapter(noNetwork))
+        {
+            var malformed = OfficialWebhook(
+                "WH-BAD",
+                "PAYMENT.SALE.COMPLETED",
+                "sale",
+                "{\"id\":\"SALE-BAD\",\"state\":\"completed\",\"billing_agreement_id\":\"I-BAD\",\"amount\":{\"total\":\"3e0\",\"currency\":\"USD\"}}");
+            var invalid = await Assert.ThrowsAsync<PayPalSandboxException>(() =>
+                adapter.VerifyAndMapWebhookAsync(Evidence(), malformed));
+            Assert.Equal("paypal_sandbox_webhook_resource_invalid", invalid.Code);
+            Assert.Equal(0, noNetwork.Calls);
+        }
+
+        var rejected = new ScriptedHandler(async (index, request, cancellationToken) =>
+        {
+            if (index == 0)
+            {
+                await AssertTokenRequestAsync(request, cancellationToken);
+                return Json(request, HttpStatusCode.OK, TokenResponse());
+            }
+
+            return Json(request, HttpStatusCode.OK, "{\"verification_status\":\"FAILURE\"}");
+        });
+        using (var adapter = Adapter(rejected))
+        {
+            var valid = OfficialWebhook(
+                "WH-UNVERIFIED",
+                "BILLING.SUBSCRIPTION.ACTIVATED",
+                "subscription",
+                "{\"id\":\"I-UNVERIFIED\",\"plan_id\":\"P-DCX300\",\"status\":\"ACTIVE\"}");
+            var unverified = await Assert.ThrowsAsync<PayPalSandboxException>(() =>
+                adapter.VerifyAndMapWebhookAsync(Evidence(), valid));
+            Assert.Equal("paypal_sandbox_webhook_not_verified", unverified.Code);
+            Assert.Equal(2, rejected.Calls);
+        }
+    }
+
+    [Fact]
     public async Task PayoutSubmissionAndLookup_UseStableIdsAndAsynchronousStateMapping()
     {
         var store = new MemoryReferenceStore();
@@ -594,12 +732,20 @@ public sealed class PayPalSandboxHttpAdapterTests
             cents,
             PayoutRecipientApproval.Create(DefaultSnapshotId, DefaultEmail))]);
 
-    private static PayPalSandboxWebhookVerificationEvidence Evidence() => new(
+    private static PayPalSandboxWebhookVerificationEvidence Evidence(
+        string transmissionId = "transmission:one") => new(
         "SHA256withRSA",
         new Uri("https://api.sandbox.paypal.com/v1/notifications/certs/CERT-DCX123"),
-        "transmission:one",
+        transmissionId,
         Convert.ToBase64String(Enumerable.Repeat((byte)7, 64).ToArray()),
         "2026-10-17T01:02:03Z");
+
+    private static byte[] OfficialWebhook(
+        string eventId,
+        string eventType,
+        string resourceType,
+        string resourceJson) => Encoding.UTF8.GetBytes(
+            $"{{\"id\":\"{eventId}\",\"create_time\":\"2026-10-17T01:02:03Z\",\"resource_type\":\"{resourceType}\",\"event_type\":\"{eventType}\",\"resource\":{resourceJson}}}");
 
     private static string TokenResponse() =>
         $"{{\"access_token\":\"{AccessToken}\",\"token_type\":\"Bearer\",\"expires_in\":3600}}";

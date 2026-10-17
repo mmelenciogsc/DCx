@@ -69,6 +69,38 @@ public sealed class CareFinanceTests
     }
 
     [Fact]
+    public void SandboxCorrection_CannotExceedRecordedPaymentsOrPoisonRejectedIdentifier()
+    {
+        var ledger = new DoubleEntryLedger();
+        var processor = new PayPalSandboxWebhookProcessor(
+            ledger, Enumerable.Repeat((byte)10, 32).ToArray());
+        var correction = Event(
+            "event:bounded-correction",
+            "transmission:bounded-correction",
+            "PAYMENT.SALE.REFUNDED",
+            100);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            processor.Process(correction, processor.Sign(correction)));
+        var payment = Event(
+            "event:bounded-payment",
+            "transmission:bounded-payment",
+            "PAYMENT.SALE.COMPLETED",
+            300);
+        Assert.True(processor.Process(payment, processor.Sign(payment)));
+        Assert.True(processor.Process(correction, processor.Sign(correction)));
+        var overrun = Event(
+            "event:bounded-overrun",
+            "transmission:bounded-overrun",
+            "PAYMENT.SALE.REVERSED",
+            300);
+        Assert.Throws<InvalidOperationException>(() =>
+            processor.Process(overrun, processor.Sign(overrun)));
+        Assert.Equal(200, ledger.Balance(LedgerAccount.Cash));
+        Assert.True(ledger.Reconciles());
+    }
+
+    [Fact]
     public void CareAllocation_CapsAggregateAtFortyPercentAndSplitsByQualifiedWeight()
     {
         var input = new CarePeriodInput(

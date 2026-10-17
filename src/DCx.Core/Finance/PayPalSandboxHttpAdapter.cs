@@ -74,6 +74,47 @@ public sealed record PayPalSandboxWebhookVerificationEvidence(
     string TransmissionSignature,
     string TransmissionTime);
 
+public sealed class PayPalSandboxVerifiedWebhook
+{
+    internal PayPalSandboxVerifiedWebhook(
+        string eventId,
+        string transmissionId,
+        string eventType,
+        string providerObjectId,
+        string? subscriptionId,
+        string? planId,
+        string? relatedSaleId,
+        long amountCents,
+        string currency,
+        DateTimeOffset occurredUtc,
+        string payloadSha256)
+    {
+        EventId = eventId;
+        TransmissionId = transmissionId;
+        EventType = eventType;
+        ProviderObjectId = providerObjectId;
+        SubscriptionId = subscriptionId;
+        PlanId = planId;
+        RelatedSaleId = relatedSaleId;
+        AmountCents = amountCents;
+        Currency = currency;
+        OccurredUtc = occurredUtc;
+        PayloadSha256 = payloadSha256;
+    }
+
+    public string EventId { get; }
+    public string TransmissionId { get; }
+    public string EventType { get; }
+    public string ProviderObjectId { get; }
+    public string? SubscriptionId { get; }
+    public string? PlanId { get; }
+    public string? RelatedSaleId { get; }
+    public long AmountCents { get; }
+    public string Currency { get; }
+    public DateTimeOffset OccurredUtc { get; }
+    public string PayloadSha256 { get; }
+}
+
 public sealed record PayPalSandboxRecipient(
     string SnapshotId,
     string ContributorPseudonym,
@@ -112,6 +153,9 @@ public static class PayPalSandboxValidation
 
     internal static void RequireRecipientSnapshotId(string value) =>
         RequireIdentifier(value, 128, "recipient snapshot");
+
+    public static void RequireSubscriptionPlanId(string value) =>
+        RequireIdentifier(value, 50, "subscription plan");
 
     private static void RequireIdentifier(string value, int maximumLength, string label)
     {
@@ -199,27 +243,33 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
         CancellationToken cancellationToken = default)
     {
         ValidateWebhookEvidence(evidence);
-        if (webhookEventJson.IsEmpty || webhookEventJson.Length > MaximumWebhookEventBytes)
+        var webhookEvent = ParseWebhookEvent(webhookEventJson);
+        return await VerifyParsedWebhookAsync(evidence, webhookEvent, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<PayPalSandboxVerifiedWebhook> VerifyAndMapWebhookAsync(
+        PayPalSandboxWebhookVerificationEvidence evidence,
+        ReadOnlyMemory<byte> webhookEventJson,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateWebhookEvidence(evidence);
+        var webhookEvent = ParseWebhookEvent(webhookEventJson);
+        var mapped = MapSubscriptionWebhook(evidence.TransmissionId, webhookEvent);
+        if (!await VerifyParsedWebhookAsync(evidence, webhookEvent, cancellationToken)
+                .ConfigureAwait(false))
         {
-            throw new PayPalSandboxException("paypal_sandbox_webhook_event_invalid");
+            throw new PayPalSandboxException("paypal_sandbox_webhook_not_verified");
         }
 
-        JsonElement webhookEvent;
-        try
-        {
-            using var eventDocument = JsonDocument.Parse(webhookEventJson, DocumentOptions);
-            RequireNoDuplicateProperties(eventDocument.RootElement);
-            if (eventDocument.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                throw new PayPalSandboxException("paypal_sandbox_webhook_event_invalid");
-            }
+        return mapped;
+    }
 
-            webhookEvent = eventDocument.RootElement.Clone();
-        }
-        catch (JsonException)
-        {
-            throw new PayPalSandboxException("paypal_sandbox_webhook_event_invalid");
-        }
+    private async Task<bool> VerifyParsedWebhookAsync(
+        PayPalSandboxWebhookVerificationEvidence evidence,
+        JsonElement webhookEvent,
+        CancellationToken cancellationToken)
+    {
 
         var body = WriteJson(writer =>
         {
@@ -977,6 +1027,226 @@ public sealed class PayPalSandboxHttpAdapter : IReconcilablePayoutSandboxProvide
             !IsApprovedCertificateUri(evidence.CertificateUrl))
         {
             throw new PayPalSandboxException("paypal_sandbox_webhook_evidence_invalid");
+        }
+    }
+
+    private static JsonElement ParseWebhookEvent(ReadOnlyMemory<byte> webhookEventJson)
+    {
+        if (webhookEventJson.IsEmpty || webhookEventJson.Length > MaximumWebhookEventBytes)
+        {
+            throw new PayPalSandboxException("paypal_sandbox_webhook_event_invalid");
+        }
+
+        try
+        {
+            using var eventDocument = JsonDocument.Parse(webhookEventJson, DocumentOptions);
+            RequireNoDuplicateProperties(eventDocument.RootElement);
+            if (eventDocument.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                throw new PayPalSandboxException("paypal_sandbox_webhook_event_invalid");
+            }
+
+            return eventDocument.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            throw new PayPalSandboxException("paypal_sandbox_webhook_event_invalid");
+        }
+    }
+
+    private static PayPalSandboxVerifiedWebhook MapSubscriptionWebhook(
+        string transmissionId,
+        JsonElement webhookEvent)
+    {
+        const string errorCode = "paypal_sandbox_webhook_resource_invalid";
+        var eventId = RequireString(webhookEvent, "id", 128, errorCode);
+        RequireIdentifier(eventId, 128, "webhook event");
+        var eventType = RequireString(webhookEvent, "event_type", 50, errorCode);
+        if (eventType is not ("BILLING.SUBSCRIPTION.ACTIVATED" or
+            "BILLING.SUBSCRIPTION.CANCELLED" or "BILLING.SUBSCRIPTION.SUSPENDED" or
+            "BILLING.SUBSCRIPTION.EXPIRED" or "PAYMENT.SALE.COMPLETED" or
+            "PAYMENT.SALE.REFUNDED" or "PAYMENT.SALE.REVERSED"))
+        {
+            throw new PayPalSandboxException(errorCode);
+        }
+
+        var occurredText = RequireString(webhookEvent, "create_time", 100, errorCode);
+        if (!HasRfc3339Offset(occurredText) ||
+            !DateTimeOffset.TryParse(
+                occurredText,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AdjustToUniversal,
+                out var occurredUtc))
+        {
+            throw new PayPalSandboxException(errorCode);
+        }
+
+        var resourceType = RequireString(webhookEvent, "resource_type", 64, errorCode);
+        var resource = RequireObject(RequireProperty(webhookEvent, "resource", errorCode), errorCode);
+        var providerObjectId = RequireString(resource, "id", 128, errorCode);
+        RequireIdentifier(providerObjectId, 128, "provider object");
+
+        string? subscriptionId = null;
+        string? planId = null;
+        string? relatedSaleId = null;
+        long amountCents = 0;
+        var currency = "USD";
+
+        if (eventType.StartsWith("BILLING.SUBSCRIPTION.", StringComparison.Ordinal))
+        {
+            if (!string.Equals(resourceType, "subscription", StringComparison.Ordinal))
+            {
+                throw new PayPalSandboxException(errorCode);
+            }
+
+            subscriptionId = providerObjectId;
+            RequireIdentifier(subscriptionId, 50, "subscription");
+            planId = RequireString(resource, "plan_id", 50, errorCode);
+            RequireIdentifier(planId, 50, "subscription plan");
+            var status = RequireString(resource, "status", 32, errorCode);
+            var expectedStatus = eventType switch
+            {
+                "BILLING.SUBSCRIPTION.ACTIVATED" => "ACTIVE",
+                "BILLING.SUBSCRIPTION.CANCELLED" => "CANCELLED",
+                "BILLING.SUBSCRIPTION.SUSPENDED" => "SUSPENDED",
+                "BILLING.SUBSCRIPTION.EXPIRED" => "EXPIRED",
+                _ => throw new PayPalSandboxException(errorCode),
+            };
+            if (!string.Equals(status, expectedStatus, StringComparison.Ordinal))
+            {
+                throw new PayPalSandboxException(errorCode);
+            }
+        }
+        else
+        {
+            if (resourceType is not ("sale" or "refund"))
+            {
+                throw new PayPalSandboxException(errorCode);
+            }
+
+            var amount = RequireObject(RequireProperty(resource, "amount", errorCode), errorCode);
+            currency = RequireString(amount, "currency", 3, errorCode);
+            var total = RequireString(amount, "total", 16, errorCode);
+            amountCents = ParseUsdCents(total, errorCode);
+            var state = RequireString(resource, "state", 32, errorCode);
+
+            if (resource.TryGetProperty("billing_agreement_id", out var agreementProperty))
+            {
+                if (agreementProperty.ValueKind != JsonValueKind.String)
+                {
+                    throw new PayPalSandboxException(errorCode);
+                }
+
+                subscriptionId = agreementProperty.GetString();
+                if (string.IsNullOrEmpty(subscriptionId))
+                {
+                    throw new PayPalSandboxException(errorCode);
+                }
+
+                RequireIdentifier(subscriptionId, 50, "subscription");
+            }
+
+            if (eventType == "PAYMENT.SALE.COMPLETED")
+            {
+                if (!string.Equals(resourceType, "sale", StringComparison.Ordinal) ||
+                    !string.Equals(state, "completed", StringComparison.Ordinal) ||
+                    subscriptionId is null || amountCents != PayPalSandboxWebhookProcessor.MonthlyPlanCents)
+                {
+                    throw new PayPalSandboxException(errorCode);
+                }
+
+                relatedSaleId = providerObjectId;
+            }
+            else
+            {
+                if ((eventType == "PAYMENT.SALE.REFUNDED" &&
+                     state is not ("refunded" or "partially_refunded" or "completed")) ||
+                    (eventType == "PAYMENT.SALE.REVERSED" &&
+                     state is not ("reversed" or "completed")))
+                {
+                    throw new PayPalSandboxException(errorCode);
+                }
+
+                if (resource.TryGetProperty("sale_id", out var saleProperty))
+                {
+                    if (saleProperty.ValueKind != JsonValueKind.String)
+                    {
+                        throw new PayPalSandboxException(errorCode);
+                    }
+
+                    relatedSaleId = saleProperty.GetString();
+                    if (string.IsNullOrEmpty(relatedSaleId))
+                    {
+                        throw new PayPalSandboxException(errorCode);
+                    }
+
+                    RequireIdentifier(relatedSaleId, 128, "related sale");
+                }
+                else if (string.Equals(resourceType, "sale", StringComparison.Ordinal))
+                {
+                    relatedSaleId = providerObjectId;
+                }
+
+                if (relatedSaleId is null || amountCents is < 1 or > PayPalSandboxWebhookProcessor.MonthlyPlanCents)
+                {
+                    throw new PayPalSandboxException(errorCode);
+                }
+            }
+        }
+
+        byte[]? canonicalPayload = null;
+        try
+        {
+            canonicalPayload = JsonSerializer.SerializeToUtf8Bytes(webhookEvent);
+            var payloadSha256 = Convert.ToHexStringLower(SHA256.HashData(canonicalPayload));
+            return new PayPalSandboxVerifiedWebhook(
+                eventId,
+                transmissionId,
+                eventType,
+                providerObjectId,
+                subscriptionId,
+                planId,
+                relatedSaleId,
+                amountCents,
+                currency,
+                occurredUtc.ToUniversalTime(),
+                payloadSha256);
+        }
+        finally
+        {
+            if (canonicalPayload is not null) CryptographicOperations.ZeroMemory(canonicalPayload);
+        }
+    }
+
+    private static long ParseUsdCents(string value, string errorCode)
+    {
+        if (value.Length is < 4 or > 10 || value[^3] != '.' ||
+            !value.AsSpan(0, value.Length - 3).ContainsAnyInRange('0', '9') ||
+            value.AsSpan().ContainsAnyExcept("0123456789."))
+        {
+            throw new PayPalSandboxException(errorCode);
+        }
+
+        var decimalIndex = value.Length - 3;
+        if ((decimalIndex > 1 && value[0] == '0') ||
+            !value.AsSpan(0, decimalIndex).ToString().All(char.IsAsciiDigit) ||
+            !char.IsAsciiDigit(value[^2]) || !char.IsAsciiDigit(value[^1]) ||
+            !decimal.TryParse(
+                value,
+                NumberStyles.AllowDecimalPoint,
+                CultureInfo.InvariantCulture,
+                out var parsed))
+        {
+            throw new PayPalSandboxException(errorCode);
+        }
+
+        try
+        {
+            return checked((long)(parsed * 100m));
+        }
+        catch (OverflowException)
+        {
+            throw new PayPalSandboxException(errorCode);
         }
     }
 

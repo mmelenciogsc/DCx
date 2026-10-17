@@ -109,6 +109,40 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
 
         ValidateWebhook(webhook);
         var payloadSha = Convert.ToHexStringLower(SHA256.HashData(PayPalSandboxWebhookIntegrity.CanonicalBytes(webhook)));
+        return await ProcessWebhookAsync(webhook, payloadSha, null, null, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<bool> ProcessOfficialSandboxWebhookAsync(
+        PayPalSandboxHttpAdapter adapter,
+        PayPalSandboxWebhookVerificationEvidence evidence,
+        ReadOnlyMemory<byte> webhookEventJson,
+        string expectedPlanId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(adapter);
+        PayPalSandboxValidation.RequireSubscriptionPlanId(expectedPlanId);
+        var verified = await adapter.VerifyAndMapWebhookAsync(
+                evidence, webhookEventJson, cancellationToken)
+            .ConfigureAwait(false);
+        return await ProcessWebhookAsync(
+                null,
+                verified.PayloadSha256,
+                verified,
+                expectedPlanId,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<bool> ProcessWebhookAsync(
+        PayPalSandboxWebhookEvent? fixtureWebhook,
+        string payloadSha,
+        PayPalSandboxVerifiedWebhook? verifiedWebhook,
+        string? expectedPlanId,
+        CancellationToken cancellationToken)
+    {
+        var eventId = verifiedWebhook?.EventId ?? fixtureWebhook!.EventId;
+        var transmissionId = verifiedWebhook?.TransmissionId ?? fixtureWebhook!.TransmissionId;
         await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -117,13 +151,13 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
             var existing = await ReadWebhookAsync(
                     connection,
                     (SqliteTransaction)transaction,
-                    webhook.EventId,
-                    webhook.TransmissionId,
+                    eventId,
+                    transmissionId,
                     cancellationToken)
                 .ConfigureAwait(false);
             if (existing is not null)
             {
-                if (existing.EventId == webhook.EventId && existing.TransmissionId == webhook.TransmissionId &&
+                if (existing.EventId == eventId && existing.TransmissionId == transmissionId &&
                     string.Equals(existing.PayloadSha256, payloadSha, StringComparison.Ordinal))
                 {
                     return false;
@@ -131,6 +165,15 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
 
                 throw new InvalidOperationException("A webhook event or transmission identifier conflicts with prior data.");
             }
+
+            var webhook = fixtureWebhook ?? await NormalizeOfficialWebhookAsync(
+                    connection,
+                    (SqliteTransaction)transaction,
+                    verifiedWebhook!,
+                    expectedPlanId!,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            ValidateWebhook(webhook);
 
             SubscriptionEntitlementTransition? entitlementTransition = null;
             var decisionCode = PayPalSandboxWebhookPolicy.LedgerOnly;
@@ -189,6 +232,12 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
+            await ApplySubscriptionFinancialInvariantAsync(
+                    connection,
+                    (SqliteTransaction)transaction,
+                    webhook,
+                    cancellationToken)
+                .ConfigureAwait(false);
             var journalEntry = CreateWebhookEntry(webhook);
             if (journalEntry is not null)
             {
@@ -609,7 +658,7 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
         command.CommandText = "PRAGMA user_version;";
         var schemaVersion = Convert.ToInt32(
             await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
-        if (schemaVersion > 4)
+        if (schemaVersion > 5)
         {
             throw new InvalidOperationException("The CARE ledger schema is newer than this application.");
         }
@@ -650,6 +699,38 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
                 updated_utc TEXT NOT NULL,
                 source_event_id TEXT NOT NULL,
                 source_event_type TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS subscription_provider_bindings(
+                subscription_id TEXT PRIMARY KEY,
+                plan_id TEXT NOT NULL,
+                source_event_id TEXT NOT NULL UNIQUE,
+                created_utc TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS sale_provider_bindings(
+                sale_id TEXT PRIMARY KEY,
+                subscription_id TEXT NOT NULL,
+                gross_cents INTEGER NOT NULL CHECK(gross_cents > 0),
+                corrected_cents INTEGER NOT NULL DEFAULT 0
+                    CHECK(corrected_cents >= 0 AND corrected_cents <= gross_cents),
+                reversed INTEGER NOT NULL DEFAULT 0 CHECK(reversed IN (0, 1)),
+                source_event_id TEXT NOT NULL UNIQUE,
+                created_utc TEXT NOT NULL,
+                FOREIGN KEY(subscription_id)
+                    REFERENCES subscription_provider_bindings(subscription_id)
+            );
+            CREATE TABLE IF NOT EXISTS correction_provider_objects(
+                provider_object_id TEXT PRIMARY KEY,
+                sale_id TEXT NOT NULL,
+                amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+                event_type TEXT NOT NULL,
+                source_event_id TEXT NOT NULL UNIQUE,
+                FOREIGN KEY(sale_id) REFERENCES sale_provider_bindings(sale_id)
+            );
+            CREATE TABLE IF NOT EXISTS subscription_financial_totals(
+                subscription_id TEXT PRIMARY KEY,
+                received_cents INTEGER NOT NULL DEFAULT 0 CHECK(received_cents >= 0),
+                corrected_cents INTEGER NOT NULL DEFAULT 0
+                    CHECK(corrected_cents >= 0 AND corrected_cents <= received_cents)
             );
             CREATE TABLE IF NOT EXISTS payout_batches(
                 batch_id TEXT PRIMARY KEY,
@@ -736,7 +817,7 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
             WHERE provider_batch_id IS NOT NULL;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        command.CommandText = "PRAGMA user_version = 4;";
+        command.CommandText = "PRAGMA user_version = 5;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -835,6 +916,246 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
     private static void ValidateWebhook(PayPalSandboxWebhookEvent webhook)
         => PayPalSandboxWebhookPolicy.Validate(webhook);
 
+    private static async Task<PayPalSandboxWebhookEvent> NormalizeOfficialWebhookAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        PayPalSandboxVerifiedWebhook verified,
+        string expectedPlanId,
+        CancellationToken cancellationToken)
+    {
+        if (!PayoutContractValidation.IsLowerSha256(verified.PayloadSha256))
+        {
+            throw new PayPalSandboxException("paypal_sandbox_webhook_payload_digest_invalid");
+        }
+
+        string subscriptionId;
+        if (verified.EventType.StartsWith("BILLING.SUBSCRIPTION.", StringComparison.Ordinal))
+        {
+            if (verified.SubscriptionId is null || verified.PlanId is null ||
+                !string.Equals(verified.PlanId, expectedPlanId, StringComparison.Ordinal))
+            {
+                throw new PayPalSandboxException("paypal_sandbox_subscription_plan_mismatch");
+            }
+
+            subscriptionId = verified.SubscriptionId;
+            await RequireOrCreateSubscriptionBindingAsync(
+                    connection,
+                    transaction,
+                    subscriptionId,
+                    expectedPlanId,
+                    verified.EventId,
+                    verified.OccurredUtc,
+                    permitCreate: true,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        else if (verified.EventType == "PAYMENT.SALE.COMPLETED")
+        {
+            if (verified.SubscriptionId is null || verified.RelatedSaleId is null ||
+                !string.Equals(
+                    verified.ProviderObjectId,
+                    verified.RelatedSaleId,
+                    StringComparison.Ordinal))
+            {
+                throw new PayPalSandboxException("paypal_sandbox_subscription_mapping_invalid");
+            }
+
+            subscriptionId = verified.SubscriptionId;
+            await RequireOrCreateSubscriptionBindingAsync(
+                    connection,
+                    transaction,
+                    subscriptionId,
+                    expectedPlanId,
+                    verified.EventId,
+                    verified.OccurredUtc,
+                    permitCreate: false,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO sale_provider_bindings(
+                    sale_id, subscription_id, gross_cents, corrected_cents,
+                    reversed, source_event_id, created_utc)
+                VALUES($sale, $subscription, $gross, 0, 0, $event, $created);
+                """;
+            command.Parameters.AddWithValue("$sale", verified.RelatedSaleId);
+            command.Parameters.AddWithValue("$subscription", subscriptionId);
+            command.Parameters.AddWithValue("$gross", verified.AmountCents);
+            command.Parameters.AddWithValue("$event", verified.EventId);
+            command.Parameters.AddWithValue("$created", verified.OccurredUtc.ToUniversalTime().ToString("O"));
+            try
+            {
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (SqliteException exception) when (exception.SqliteErrorCode == 19)
+            {
+                throw new PayPalSandboxException("paypal_sandbox_sale_mapping_conflict");
+            }
+        }
+        else
+        {
+            if (verified.RelatedSaleId is null)
+            {
+                throw new PayPalSandboxException("paypal_sandbox_sale_mapping_missing");
+            }
+
+            var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                SELECT subscription_id, gross_cents, corrected_cents, reversed
+                FROM sale_provider_bindings
+                WHERE sale_id = $sale;
+                """;
+            command.Parameters.AddWithValue("$sale", verified.RelatedSaleId);
+            long grossCents;
+            long correctedCents;
+            bool reversed;
+            await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    throw new PayPalSandboxException("paypal_sandbox_sale_mapping_missing");
+                }
+
+                subscriptionId = reader.GetString(0);
+                grossCents = reader.GetInt64(1);
+                correctedCents = reader.GetInt64(2);
+                reversed = reader.GetInt32(3) == 1;
+            }
+
+            if ((verified.SubscriptionId is not null &&
+                 !string.Equals(verified.SubscriptionId, subscriptionId, StringComparison.Ordinal)) ||
+                reversed || verified.AmountCents > grossCents - correctedCents)
+            {
+                throw new PayPalSandboxException("paypal_sandbox_correction_invalid");
+            }
+
+            await RequireOrCreateSubscriptionBindingAsync(
+                    connection,
+                    transaction,
+                    subscriptionId,
+                    expectedPlanId,
+                    verified.EventId,
+                    verified.OccurredUtc,
+                    permitCreate: false,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!string.Equals(
+                    verified.ProviderObjectId,
+                    verified.RelatedSaleId,
+                    StringComparison.Ordinal))
+            {
+                command.Parameters.Clear();
+                command.CommandText = """
+                    INSERT INTO correction_provider_objects(
+                        provider_object_id, sale_id, amount_cents, event_type, source_event_id)
+                    VALUES($object, $sale, $amount, $type, $event);
+                    """;
+                command.Parameters.AddWithValue("$object", verified.ProviderObjectId);
+                command.Parameters.AddWithValue("$sale", verified.RelatedSaleId);
+                command.Parameters.AddWithValue("$amount", verified.AmountCents);
+                command.Parameters.AddWithValue("$type", verified.EventType);
+                command.Parameters.AddWithValue("$event", verified.EventId);
+                try
+                {
+                    await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (SqliteException exception) when (exception.SqliteErrorCode == 19)
+                {
+                    throw new PayPalSandboxException("paypal_sandbox_correction_object_conflict");
+                }
+            }
+
+            command.Parameters.Clear();
+            command.CommandText = """
+                UPDATE sale_provider_bindings
+                SET corrected_cents = corrected_cents + $amount,
+                    reversed = CASE WHEN $is_reversal = 1 THEN 1 ELSE reversed END
+                WHERE sale_id = $sale
+                  AND corrected_cents = $prior_corrected
+                  AND reversed = 0;
+                """;
+            command.Parameters.AddWithValue("$amount", verified.AmountCents);
+            command.Parameters.AddWithValue(
+                "$is_reversal",
+                verified.EventType == "PAYMENT.SALE.REVERSED" ? 1 : 0);
+            command.Parameters.AddWithValue("$sale", verified.RelatedSaleId);
+            command.Parameters.AddWithValue("$prior_corrected", correctedCents);
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+            {
+                throw new PayPalSandboxException("paypal_sandbox_correction_conflict");
+            }
+        }
+
+        var webhook = new PayPalSandboxWebhookEvent(
+            verified.EventId,
+            verified.TransmissionId,
+            verified.EventType,
+            subscriptionId,
+            verified.AmountCents,
+            verified.Currency,
+            verified.OccurredUtc);
+        ValidateWebhook(webhook);
+        return webhook;
+    }
+
+    private static async Task RequireOrCreateSubscriptionBindingAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string subscriptionId,
+        string expectedPlanId,
+        string eventId,
+        DateTimeOffset occurredUtc,
+        bool permitCreate,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT plan_id
+            FROM subscription_provider_bindings
+            WHERE subscription_id = $subscription;
+            """;
+        command.Parameters.AddWithValue("$subscription", subscriptionId);
+        var existingPlanId = (string?)await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        if (existingPlanId is not null)
+        {
+            if (!string.Equals(existingPlanId, expectedPlanId, StringComparison.Ordinal))
+            {
+                throw new PayPalSandboxException("paypal_sandbox_subscription_plan_mismatch");
+            }
+
+            return;
+        }
+
+        if (!permitCreate)
+        {
+            throw new PayPalSandboxException("paypal_sandbox_subscription_mapping_missing");
+        }
+
+        command.Parameters.Clear();
+        command.CommandText = """
+            INSERT INTO subscription_provider_bindings(
+                subscription_id, plan_id, source_event_id, created_utc)
+            VALUES($subscription, $plan, $event, $created);
+            """;
+        command.Parameters.AddWithValue("$subscription", subscriptionId);
+        command.Parameters.AddWithValue("$plan", expectedPlanId);
+        command.Parameters.AddWithValue("$event", eventId);
+        command.Parameters.AddWithValue("$created", occurredUtc.ToUniversalTime().ToString("O"));
+        try
+        {
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (SqliteException exception) when (exception.SqliteErrorCode == 19)
+        {
+            throw new PayPalSandboxException("paypal_sandbox_subscription_mapping_conflict");
+        }
+    }
+
     private static LedgerJournalEntry? CreateWebhookEntry(PayPalSandboxWebhookEvent webhook) => webhook.EventType switch
     {
         "PAYMENT.SALE.COMPLETED" => new LedgerJournalEntry(
@@ -855,6 +1176,67 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
             ]),
         _ => null,
     };
+
+    private static async Task ApplySubscriptionFinancialInvariantAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        PayPalSandboxWebhookEvent webhook,
+        CancellationToken cancellationToken)
+    {
+        if (webhook.EventType is not ("PAYMENT.SALE.COMPLETED" or
+            "PAYMENT.SALE.REFUNDED" or "PAYMENT.SALE.REVERSED"))
+        {
+            return;
+        }
+
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT received_cents, corrected_cents
+            FROM subscription_financial_totals
+            WHERE subscription_id = $subscription;
+            """;
+        command.Parameters.AddWithValue("$subscription", webhook.SubscriptionId);
+        long receivedCents = 0;
+        long correctedCents = 0;
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                receivedCents = reader.GetInt64(0);
+                correctedCents = reader.GetInt64(1);
+            }
+        }
+
+        if (webhook.EventType == "PAYMENT.SALE.COMPLETED")
+        {
+            receivedCents = checked(receivedCents + webhook.AmountCents);
+        }
+        else
+        {
+            if (webhook.AmountCents > receivedCents - correctedCents)
+            {
+                throw new InvalidOperationException(
+                    "The sandbox correction exceeds recorded subscription payments.");
+            }
+
+            correctedCents = checked(correctedCents + webhook.AmountCents);
+        }
+
+        command.Parameters.Clear();
+        command.CommandText = """
+            INSERT INTO subscription_financial_totals(
+                subscription_id, received_cents, corrected_cents)
+            VALUES($subscription, $received, $corrected)
+            ON CONFLICT(subscription_id) DO UPDATE SET
+                received_cents = excluded.received_cents,
+                corrected_cents = excluded.corrected_cents;
+            """;
+        command.Parameters.AddWithValue("$subscription", webhook.SubscriptionId);
+        command.Parameters.AddWithValue("$received", receivedCents);
+        command.Parameters.AddWithValue("$corrected", correctedCents);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     private static async Task<WebhookRow?> ReadWebhookAsync(
         SqliteConnection connection,

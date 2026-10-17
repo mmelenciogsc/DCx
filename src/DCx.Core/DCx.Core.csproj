@@ -8,5 +8,6 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="DCx.Core.Tests" />
+    <InternalsVisibleTo Include="DCx.GlobalService" />
   </ItemGroup>
 </Project>

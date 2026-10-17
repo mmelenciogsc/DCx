@@ -37,6 +37,7 @@ public static class PayPalSandboxWebhookPolicy
             webhook.OccurredUtc == default ||
             webhook.EventType is not ("BILLING.SUBSCRIPTION.ACTIVATED" or
                 "BILLING.SUBSCRIPTION.CANCELLED" or "BILLING.SUBSCRIPTION.SUSPENDED" or
+                "BILLING.SUBSCRIPTION.EXPIRED" or
                 "PAYMENT.SALE.COMPLETED" or "PAYMENT.SALE.REFUNDED" or "PAYMENT.SALE.REVERSED"))
         {
             throw new InvalidOperationException(
@@ -61,7 +62,8 @@ public static class PayPalSandboxWebhookPolicy
             "BILLING.SUBSCRIPTION.ACTIVATED",
             StringComparison.Ordinal);
         return active || eventType is "BILLING.SUBSCRIPTION.CANCELLED" or
-            "BILLING.SUBSCRIPTION.SUSPENDED" or "PAYMENT.SALE.REFUNDED" or
+            "BILLING.SUBSCRIPTION.SUSPENDED" or "BILLING.SUBSCRIPTION.EXPIRED" or
+            "PAYMENT.SALE.REFUNDED" or
             "PAYMENT.SALE.REVERSED";
     }
 
@@ -161,6 +163,7 @@ public sealed class PayPalSandboxWebhookProcessor(DoubleEntryLedger ledger, byte
     private readonly Dictionary<string, SubscriptionEntitlement> entitlements = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> transmissionPayloads = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> eventPayloads = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> refundableCents = new(StringComparer.Ordinal);
 
     public string Sign(PayPalSandboxWebhookEvent webhook) =>
         PayPalSandboxWebhookIntegrity.Sign(webhook, verificationKey);
@@ -197,18 +200,29 @@ public sealed class PayPalSandboxWebhookProcessor(DoubleEntryLedger ledger, byte
             case "BILLING.SUBSCRIPTION.ACTIVATED":
             case "BILLING.SUBSCRIPTION.CANCELLED":
             case "BILLING.SUBSCRIPTION.SUSPENDED":
+            case "BILLING.SUBSCRIPTION.EXPIRED":
                 ApplyEntitlement(webhook);
                 break;
             case "PAYMENT.SALE.COMPLETED":
                 ledger.Post(Entry(webhook, "subscription_payment",
                     new LedgerPosting(LedgerAccount.Cash, webhook.AmountCents, 0),
                     new LedgerPosting(LedgerAccount.SubscriptionRevenue, 0, webhook.AmountCents)));
+                refundableCents[webhook.SubscriptionId] = checked(
+                    refundableCents.GetValueOrDefault(webhook.SubscriptionId) + webhook.AmountCents);
                 break;
             case "PAYMENT.SALE.REFUNDED":
             case "PAYMENT.SALE.REVERSED":
+                var available = refundableCents.GetValueOrDefault(webhook.SubscriptionId);
+                if (webhook.AmountCents > available)
+                {
+                    throw new InvalidOperationException(
+                        "The sandbox correction exceeds recorded subscription payments.");
+                }
+
                 ledger.Post(Entry(webhook, "refund_or_chargeback",
                     new LedgerPosting(LedgerAccount.RefundsAndChargebacks, webhook.AmountCents, 0),
                     new LedgerPosting(LedgerAccount.Cash, 0, webhook.AmountCents)));
+                refundableCents[webhook.SubscriptionId] = available - webhook.AmountCents;
                 ApplyEntitlement(webhook);
                 break;
             default:
