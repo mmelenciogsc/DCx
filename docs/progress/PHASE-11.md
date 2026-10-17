@@ -1,7 +1,7 @@
 # P11 — PayPal subscriptions and CARE
 
 - Status: BLOCKED (verified-event mapping, durable causal quarantine, accounting and failed-item remediation lineage pass; credentialed PayPal sandbox acceptance, eligibility, product/plan provisioning and production operator/policy gates remain unavailable)
-- Implementation/validation commits: `2f97540`, `3984c6b`, `4b05cc0`, `dc25a87`, `c021520`, `df1c0b8`, `9877a60`, `faf6b71`, `1631ebb`, `599cee9`, `ec37d1f`, `a662abb`, `8583b29`, `d5624a6`, `9576d63`, `261f6ee`
+- Implementation/validation commits: `2f97540`, `3984c6b`, `4b05cc0`, `dc25a87`, `c021520`, `df1c0b8`, `9877a60`, `faf6b71`, `1631ebb`, `599cee9`, `ec37d1f`, `a662abb`, `8583b29`, `d5624a6`, `9576d63`, `261f6ee`, `76d0750`
 - Documentation commit: recorded by the commit containing this file
 
 No PayPal credential was accessed, no PayPal API request was made, and no subscription, payment or payout was attempted. The only PayPal network activity was six bounded read-only GET requests to official developer documentation/schema URLs.
@@ -29,6 +29,7 @@ No PayPal credential was accessed, no PayPal API request was made, and no subscr
 - A schema-v8 repository stores subscription-to-plan, sale-to-subscription, correction-object and cumulative financial bindings in addition to the unique local-to-provider payout reference, result digest, paid total, exact per-item outcomes, immutable later-return adjustments, failed-item remediation lineage and verified-event dependency quarantine. A crash after PayPal acceptance but before local return reconciles through the provider reference instead of resending.
 - Only an officially verified, strictly mapped sale/refund/reversal whose subscription or sale binding has not arrived may enter quarantine. The durable record contains bounded normalized fields and digests, never the raw webhook, signature, credential or provider response. Exact replay is inert; event/transmission reuse with different content and collisions from the fixture path fail closed.
 - The explicit local reprocessor performs no provider request, scans at most 100 due records, prioritizes sales before corrections, and backs unresolved dependencies off from two seconds through one hour. Apply/completion commits atomically; retry/blocked state is written only after rolling back failed mapping work. Nonremediable state becomes blocked, and stored-record tamper stops without ledger mutation.
+- A read-only aggregate health snapshot exposes only stable status, pending/due/blocked/completed counts, maximum retry depth and oldest/next UTC times. It has no event, transmission, provider, plan, subscription, sale, account or contributor identifier. `operator_action_required` is explicit when any record is blocked; this is alert-ready state, not a scheduler, notification or disposition workflow.
 - `PENDING`, `PROCESSING` and pending/unclaimed/on-hold item states remain reserved and never post cash. A completed mixed result posts only successful item amounts, retains failed amounts in contributor payable, persists item status, and becomes `partially_succeeded`; no remediation batch is created automatically.
 - A ten-minute review can select only unsuccessful items from one terminal source batch. It binds the source result, exact source ordinals/statuses, unchanged contributor/amount/Net 60 date and every replacement snapshot/destination digest into a review SHA-256. Separate owner approval and sandbox eligibility are required before atomic target reservation.
 - Schema-v8 retains the v7 authorization markers and one-to-one source/target lineage that prohibit successful-item inclusion, amount/date substitution and multiple remediation branches for one failed item. Missing lineage blocks completion and lookup-first restart recovery. A process/provider failure can resume only the same already-approved stable target batch.
@@ -52,9 +53,9 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\audit-paypal-contrac
 ## Measured result
 
 - Locked Release build: 0 warnings, 0 errors.
-- P11 exact-namespace tests: passed 61, failed 0, skipped 0; about 1 second.
-- P11 evidence: `artifacts/test-results/p11-660c510488bd4a659f4943c6746ae52c/` with `p11-finance.trx` and `recipient-snapshot-uia.json` (generated from the source committed through `261f6ee` and intentionally not committed).
-- Full native suite: passed 332, failed 0, skipped 0; about 10 seconds in the recorded post-commit run.
+- P11 exact-namespace tests: passed 62, failed 0, skipped 0; about 1 second.
+- P11 evidence: `artifacts/test-results/p11-cc3bc094633b4ef78f9e5f56c3d9b618/` with `p11-finance.trx` and `recipient-snapshot-uia.json` (generated from the source committed through `76d0750` and intentionally not committed).
+- Full native suite: passed 333, failed 0, skipped 0; about 8 seconds in the recorded post-commit run.
 - Official-contract evidence: `artifacts/test-results/paypal-contract-c2619695def04e9c9302b09f203d5538/paypal-contract-audit.json`; official sources 6, credentials used 0, PayPal API requests 0, subscription/payment/payout attempts 0.
 - Adapter tests cover exact request shapes, sandbox-origin pinning, redirect/origin denial, bounded JSON, duplicate properties, credential/provider-text non-disclosure, recipient-snapshot substitution before credential use, idempotent retry, durable reference recovery, pending state, complete success, receiver/amount mismatch and mixed item outcomes.
 - Repository tests prove a 500-cent success plus 700-cent failure posts only 500 cents to cash, leaves 700 cents payable, survives reopen with exact item states, accepts exact replay and denies a conflicting terminal result.
@@ -62,7 +63,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\audit-paypal-contrac
 - Five remediation tests prove schema-v6→v7 migration, successful-item exclusion, exact one-time failed-item lineage, separate owner/eligibility gates, expiry and digest denial, balanced payout after remediation, provider-failure restart recovery and fail-closed behavior when authorization lineage is deleted. Fixtures made no PayPal request.
 - Eight recipient-store tests cover default-off approval, exact protected binding, plaintext exclusion, restart, duplicate prevention, tamper denial, revocation, canceled/failed writes, orphan recovery and malformed identities. Native UIA proves review invalidation, default-off save/revoke, distinct access keys, Credential Manager reopen, cleared input, minimized list/state, false provider eligibility, deletion on revoke, network requests 0 and payout attempts 0.
 - Verified-event tests prove activation→US$3 sale→partial refund across repository reopen, deny wrong-plan activation, malformed/unverified events and excessive corrections, then accept a corrected reuse of an identifier whose rejected transaction was rolled back.
-- Four quarantine tests prove payment/refund-before-dependency survival across repository reopen, sale-before-correction causal replay, bounded backoff, zero provider calls during reprocessing, exact replay, cross-path/event-content conflict denial, nonremediable blocking and digest-tamper rejection without an audit or ledger mutation.
+- Five quarantine tests prove payment/refund-before-dependency survival across repository reopen, sale-before-correction causal replay, bounded backoff, zero provider calls during reprocessing, exact replay, cross-path/event-content conflict denial, nonremediable blocking, digest-tamper rejection without an audit or ledger mutation, and an exact aggregate-only health contract with identifier fields structurally absent.
 - Payment, refund, entitlement, balanced-entry and payout state survive repository reopen. Conflicting replay IDs fail closed, and a rejected invalid event does not consume identifiers.
 
 ## Changed files in the latest milestone
@@ -70,7 +71,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\audit-paypal-contrac
 - Official sandbox boundary and verified mapping: `src/DCx.Core/Finance/PayPalSandboxHttpAdapter.cs`; fixture policy and correction cap: `src/DCx.Core/Finance/PayPalSandboxWebhook.cs`.
 - Pending-aware payout contract and coordinator: `src/DCx.Core/Finance/PayoutSafety.cs`.
 - Durable schema-v8 plan/sale/correction, recipient/result binding, partial posting, later-return adjustment, remediation authorization, verified-event quarantine and migrations: `server/DCx.GlobalService/DurableCareRepository.cs`.
-- Bounded local quarantine reprocessing, backoff, digest verification and atomic completion: `server/DCx.GlobalService/OfficialWebhookQuarantine.cs`, `docs/architecture/adr/0040-durable-verified-webhook-dependency-quarantine.md`.
+- Bounded local quarantine reprocessing, backoff, digest verification, atomic completion and minimized health snapshot: `server/DCx.GlobalService/OfficialWebhookQuarantine.cs`, `docs/architecture/adr/0040-durable-verified-webhook-dependency-quarantine.md`.
 - Expiring failed-item review, immutable lineage, coordinator and denial checks: `server/DCx.GlobalService/FailedPayoutRemediation.cs`, `docs/architecture/adr/0039-explicit-failed-payout-item-remediation.md`.
 - Compensating payout-return journal: `src/DCx.Core/Finance/CareLedgerJournal.cs`; one-way policy: `docs/architecture/adr/0037-idempotent-post-terminal-payout-returns.md`.
 - Protected owner snapshot store and policy: `src/DCx.Core/Finance/PayoutRecipientSnapshotStore.cs`, `docs/architecture/adr/0038-protected-owner-approved-recipient-snapshots.md`.

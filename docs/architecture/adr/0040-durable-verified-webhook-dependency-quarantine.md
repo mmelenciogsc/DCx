@@ -15,6 +15,8 @@ CARE schema v8 stores the bounded normalized verified fields, expected plan, can
 
 Reprocessing is an explicit local database operation. It accepts at most 100 due records, performs no provider request, prioritizes sales before corrections, and uses bounded exponential backoff from two seconds through one hour when a dependency is still absent. Normalization, mapping mutation, webhook audit, entitlement/ledger accounting and quarantine completion share one transaction. A failed normalization transaction is rolled back before retry state is recorded. A now-invalid event becomes blocked under a stable generic reason instead of retrying forever. The stored record digest is verified before every read/reprocess; tamper fails closed without accounting mutation.
 
+A separate read-only health snapshot contains only one stable status code, four aggregate state counts, maximum attempt count, and the oldest-pending/next-attempt UTC times. Identifier-bearing fields are structurally absent. It distinguishes due, scheduled, clear and operator-action-required state without making a provider request or authorizing an action.
+
 ## Consequences
 
 - Verified out-of-order sales and corrections survive process/repository restart and can be applied after their dependencies without a second PayPal call.
