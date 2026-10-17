@@ -99,7 +99,8 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - Sandbox webhooks require fixture integrity and unique transmission/event IDs. Refund/reversal suspends entitlement and posts a correcting balanced entry.
 - Payout execution requires sandbox mode, verified eligibility, explicit owner approval, Net 60 and a unique batch. Live mode has no provider path and always fails.
 - SQLite persists canonical event hashes, postings, webhook replay identifiers, entitlement and payout terminal state with WAL and full synchronous writes. Reopen tests prove local idempotency and conflicting-event denial.
-- These controls remain local mocks. Production webhook authenticity, asynchronous provider reconciliation/outbox, account/recipient eligibility, key custody and legal/accounting policy remain blockers.
+- Reserved payout batches retain canonical previews and SHA-256 digests. Restart reconciliation first looks up the stable batch ID: accepted/failed batches become terminal without resend, provider-pending batches remain reserved, and provider-not-found batches are resent idempotently with the same ID.
+- These controls remain local mocks. Official PayPal webhook authenticity, provider lookup/status semantics and idempotency still require sandbox acceptance; account/recipient eligibility, key custody and legal/accounting policy remain blockers.
 
 ## Implemented release/recovery controls through partial P13
 
