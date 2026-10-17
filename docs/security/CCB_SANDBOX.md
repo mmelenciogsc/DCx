@@ -29,10 +29,10 @@ Intake stores the exact SHA-256-addressed ZIP in quarantine. Approval rechecks t
 
 Signed publication and its digest-bound operation record commit atomically in the registry. Reviewer-authorized intent is durable first; startup validates and processes at most 100 pending intents, and the local state transition plus intent completion commit together. Recovery rehashes quarantine and authoritative artifacts, reuses the original operation/timestamp/reviewer and does not rerun CCB code. Changed request, candidate or artifact bytes fail closed.
 
-The default simulation service remains read-only for contributions. A separately enabled authenticated simulation API can reach intake/review and can inject this executor only from the complete hash-pinned Linux configuration. That combined HTTP-to-sandbox path remains unrun without a Linux .NET service runtime or approved Compose environment; it is not production exposure.
+The default simulation service remains read-only for contributions. When the API, worker and complete hash-pinned Linux executor configuration are all enabled, CCB approval first persists and claims a digest-bound review job before calling this executor. That combined HTTP-to-real-Bubblewrap path remains unrun without a Linux .NET service runtime or approved Compose environment; it is not production exposure.
 
 ## Remaining production work
 
-Required work includes production identity/ingress, supported distributed queue/high-availability deployment beyond the same-SQLite simulation worker, a durable claim before expensive sandbox validation, general language-specific dependency-lock/build profiles, seccomp, measured cgroup-v2 resource enforcement, immutable builder/base-image digests, Ubuntu 24.04 service deployment, monitoring and independent penetration testing.
+Required work includes production identity/ingress, supported distributed queue/high-availability deployment beyond the same-SQLite simulation worker, lease heartbeat/alerting evidence, general language-specific dependency-lock/build profiles, seccomp, measured cgroup-v2 resource enforcement, immutable builder/base-image digests, Ubuntu 24.04 service deployment, monitoring and independent penetration testing.
 
 Official upstream policy guidance: <https://github.com/containers/bubblewrap/blob/main/README.md>.

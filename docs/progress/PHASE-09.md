@@ -34,7 +34,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 - Locked restore and native Release build passed with 0 warnings/errors.
 - P09 filtered tests: passed 9, failed 0, skipped 0; about 1 second in the recorded validation.
-- Current full suite after P10 durable simulation-worker hardening: passed 182, failed 0, skipped 0; about 7 seconds.
+- Current full suite after P10 pre-sandbox CCB queue hardening: passed 186, failed 0, skipped 0; about 7 seconds.
 - A real child Kestrel process served three chained trust-policy revisions and a signed SQLite-backed release over loopback HTTP; a fresh production client transport caught up all revisions, synchronized and searched it.
 - Two distinct client roots synchronized the same chain; the P08 private sentinel remained present and absent from global results.
 - Wrong-key release activation was rejected with no active pointer.
@@ -43,7 +43,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - A transfer interrupted after its first 64 KiB chunk resumed at a nonzero offset and downloaded fewer bytes on retry than the full release.
 - Lazy 150,000-byte artifact retrieval, deprecation, offline search and explicit rollback passed.
 - Publication retry used reordered equivalent changes and a later timestamp after repository reopen, returned the byte-identical original descriptor and kept the chain at sequence 1; a changed request under the same operation ID was rejected.
-- Latest storage evidence: `artifacts/test-results/p09-4f008b96a4294306a546f731a085644a/storage-forecast.json` (generated and intentionally not committed).
+- Latest storage evidence: `artifacts/test-results/p09-ef55af28a6be4ad0ae32eba6acd880c9/storage-forecast.json` (generated and intentionally not committed).
 
 ## Measured storage/bandwidth fixture
 
@@ -52,10 +52,10 @@ The deterministic benchmark uses 1,000 resources and excludes artifact bodies:
 | Fixture | Bytes |
 |---|---:|
 | Metadata-only canonical catalog | 470,703 |
-| Initial signed release | 722,689 |
+| Initial signed release | 722,674 |
 | Catalog with 384-dimensional vectors | 4,388,562 |
-| Signed delta changing 100 resources | 73,554 |
-| Two retained metadata catalogs plus two releases | 1,738,549 |
+| Signed delta changing 100 resources | 73,559 |
+| Two retained metadata catalogs plus two releases | 1,738,539 |
 
 Artifact storage and transfer must add exact signed artifact sizes. Artifacts are not included in catalog sync and download only on use.
 

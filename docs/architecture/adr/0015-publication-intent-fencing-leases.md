@@ -21,4 +21,4 @@ The registry's digest-bound idempotent operation ID remains the final duplicate-
 - Time jumps can cause early or late takeover, but fencing plus idempotent registry operations preserve correctness.
 - A separately gated simulation worker now polls, backs off and exposes body-free dead-letter/remediation status; the lease remains the execution fence and the intent remains the authority.
 - There is still no production scheduler, alerting/operator UI, supported multi-node/network-filesystem coordination or high-availability evidence.
-- CCB sandbox review occurs before the publication intent exists and remains protected only by a process-local approval lock; a durable pre-sandbox workload queue is still required for production.
+- CCB sandbox review still occurs before the publication intent, but the authenticated API path now requires a separate durable ownership-fenced review job first. The older direct in-process method is retained only for deterministic tests.

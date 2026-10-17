@@ -1,7 +1,7 @@
 # P10 — Contributions, governance and provenance
 
 - Status: BLOCKED (authenticated local-simulation intake/review and server-side CCB hostile-code policy pass; production publication remains unavailable)
-- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`, `f417f6e`, `0fc2649`
+- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`, `f417f6e`, `0fc2649`, `bbadbca`
 - Documentation commit: recorded by the commit containing this file
 
 No contribution was sent externally or published to a production catalog.
@@ -42,6 +42,9 @@ No contribution was sent externally or published to a production catalog.
 - A separately gated hosted worker continuously polls a bounded ready-intent batch. It cannot start unless the contribution API is explicitly enabled; the poll interval is constrained to 100–60,000 ms, and health reports worker activation separately.
 - Worker failures persist only operation/submission identifiers, a stable code, bounded count and timestamps. Exponential delays cap at five minutes; five consecutive transient failures or one permanent policy failure enters dead-letter state. Candidate bodies, exception messages and stack traces are structurally absent.
 - Reviewer-only queue/status and retry routes expose the minimized state. Retry clears dead-letter scheduling but cannot alter the immutable reviewer intent, canonical change digest, candidate, contributor, reviewer or publication operation identifier. Successful completion marks any failure record resolved in the same governance transaction.
+- API CCB approval now requires the worker and first persists a deterministic job binding submission, candidate digest, server-derived reviewer and request time. The job and its reviewer-only queue contain no candidate or artifact body.
+- A separate 30-minute ownership-fenced review lease is acquired before package extraction or sandbox execution. Its duration exceeds the current closed profile's maximum 32 tests at 30 seconds each. Same-SQLite concurrent service instances executed one claimed package exactly once in the deterministic fixture.
+- CCB review failures use the same bounded backoff/dead-letter principles; malformed leases/rows fail closed and 20 expired crash claims dead-letter. Explicit reviewer remediation resets the claim budget without changing the job binding. Only a successfully reviewed job can enter the existing signed publication-intent path.
 
 ## Reproduction
 
@@ -54,15 +57,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 ## Measured result
 
 - Locked native Release build: 0 warnings, 0 errors; 1.12 seconds in the recorded dedicated run.
-- P10 tests: passed 34, failed 0, skipped 0; about 8 seconds in the recorded native gate.
-- Current full suite after durable simulation-worker hardening: passed 182, failed 0, skipped 0; about 7 seconds.
+- P10 tests: passed 38, failed 0, skipped 0; about 9 seconds in the recorded native gate.
+- Current full suite after pre-sandbox CCB queue hardening: passed 186, failed 0, skipped 0; about 7 seconds.
 - Eligible CKB item: quarantined, absent from catalog before review, approved into a signed release, synchronized by a client, then withdrawn/deprecated.
 - Secret/PII/dummy item: remained quarantined and reviewer publication failed closed.
 - Receipt: one qualified event; replay, contributor self-use and invalid integrity excluded.
 - Native UIA: all five consent/attestation controls initially unchecked, preparation disabled, and no-upload state accessible.
 - WSL-hosted Ubuntu local simulation: Bubblewrap 0.6.1 SHA-256 `bf6cf3d4456665f5d80c14eb79a76e0ce87b39a0883e614a161658b4ec33492c`; static BusyBox SHA-256 `b3c1009e1b5c927e537487c80639cdf404f69e3eb49371d9be5d841672be3ff9`.
 - Benign transformation passed. Host/repository and `/etc`/`/usr` reads, an external network request, root write, inherited secret environment, outside-quarantine workspace, symlink, workspace-digest substitution, timeout and output overflow were denied.
-- Latest hostile-sandbox evidence: `artifacts/test-results/p10-0943a3b7ff1b406f8713e0ee03e179ae/sandbox-evidence.json` (generated and intentionally not committed).
+- Latest hostile-sandbox evidence: `artifacts/test-results/p10-09e36a1d66174188a5c14a54210404cd/sandbox-evidence.json` (generated and intentionally not committed).
 - Schema-v2 success path executed two declared tests, persisted two passing evidence rows, published the exact artifact into a signed release, synchronized it to a separate global replica and lazily retrieved byte-identical content.
 - Denial coverage includes missing executor, package/digest/metadata mismatch, undeclared files/fields, invalid UTF-8/base64/null input, malicious entrypoint or test-input text, expected-output mismatch and post-intake quarantine tampering.
 - Cross-database crash simulations pre-commit approval and withdrawal releases, then verify governance retries reuse sequences 1 and 2 and synchronize one correctly deprecated resource rather than producing duplicate releases.
@@ -74,6 +77,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - Captured child-process diagnostics contained neither bearer credentials nor the private or malicious contribution bodies. The API remained absent (`404`) under the default configuration.
 - A real hosted loop completed an authorized intent left pending across service reconstruction. Persistent registry conflict produced scheduled exponential retries, deferred early polls, dead-lettering on failure five, reviewer-only explicit rescheduling and fail-closed rejection of malformed persisted queue state.
 - The queue JSON excluded the reviewed private body. A child process exposed worker health only when both simulation gates were enabled and failed startup when the worker was requested without the contribution API.
+- CCB approval returned a durable queue job before executing zero sandbox tests; the worker later executed both declared tests and published once. Two concurrent governance instances claimed that work once, with two total test executions rather than four.
+- Missing worker prevented API-path CCB approval. Output mismatch dead-lettered with a stable code and body-free status; reviewer retry was explicit. Malformed review leases/rows failed closed, and a 20-crash attempt limit required remediation before successful review.
+- Persisted scanner codes containing the policy namespace separator (`.`) are now admitted and exposed as codes; credential and PII values remain absent.
 
 ## Changed files in the latest milestone
 
@@ -82,6 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - Governance status/pending queries and owner-bound withdrawal: `server/DCx.GlobalService/ContributionGovernanceService.cs`.
 - Service wiring, request bound and private-key admission/zeroing: `server/DCx.GlobalService/Program.cs`.
 - Hosted polling and fail-closed configuration: `server/DCx.GlobalService/ContributionPublicationWorker.cs`.
+- Durable pre-sandbox CCB jobs, leases, status and remediation: `server/DCx.GlobalService/ContributionCcbReviewQueue.cs`.
 - Child-process and codec/governance coverage: `tests/DCx.Core.Tests/Contributions/ContributionApiE2eTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionPolicyTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionGovernanceTests.cs`, `tests/DCx.Core.Tests/GlobalKnowledge/GlobalServiceE2eTests.cs`.
 
 ## Blocker and limits
@@ -95,5 +102,5 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - Regex scanners are defense-in-depth, not a guarantee that content lacks secrets/PII or that the contributor owns it. Human/policy review remains mandatory.
 - An HMAC proves receipt integrity/installation association, not that an untrusted customer device reported honest usage. Server anomaly analysis, audit sampling and entitlement/account correlation remain required.
 - Each worker cycle processes at most 100 ready intents. Same-SQLite local processes coordinate with fencing leases and persist retry/dead-letter state, but there is no supported multi-node/network-filesystem deployment, production scheduler, alert transport, operator UI, retention policy, SLO or high-availability evidence.
-- The approval lock remains process-local and is held while CCB tests execute. Two processes can therefore duplicate expensive hostile-package validation before the publication intent exists; production still requires a durable queued worker claim before concurrent hostile workloads.
+- The authenticated API path now claims a durable CCB job before hostile execution. The older direct governance method remains for in-process tests and can bypass that queue, so it must not become a production endpoint. The queue is same-SQLite simulation infrastructure, not a supported distributed broker; its fixed lease depends on the current bounded test profile and has no production heartbeat/alerting evidence.
 - Human JAWS/NVDA/Narrator testing remains unverified; see `docs/accessibility/P10_CONTRIBUTION_CHECKLIST.md`.

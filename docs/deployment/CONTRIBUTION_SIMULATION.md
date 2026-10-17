@@ -29,7 +29,7 @@ The worker is independently default-off. It cannot start unless the contribution
 | `DCX_GLOBAL_CONTRIBUTION_WORKER` | Exact value `1` to enable the simulation polling loop |
 | `DCX_GLOBAL_CONTRIBUTION_WORKER_INTERVAL_MS` | Optional integer from 100 through 60,000; default 1,000 |
 
-With the worker enabled, `/health` reports `contributionWorker: true`. Each cycle processes at most 100 ready immutable intents. Transient failures back off exponentially up to five minutes and dead-letter after five; permanent policy failures dead-letter immediately. The reviewer queue contains identifiers, stable codes, counts and timestamps only. It is not a production queue or monitoring system.
+With the worker enabled, `/health` reports `contributionWorker: true`. Each cycle processes at most ten CCB review jobs and 100 ready immutable publication intents. Transient failures back off exponentially up to five minutes and dead-letter after five; permanent policy failures dead-letter immediately. The reviewer queues contain identifiers, digests where required for binding, stable codes, counts and timestamps only. They are not production queues or monitoring systems.
 
 ## Optional Linux CCB sandbox
 
@@ -46,11 +46,14 @@ CKB review works without an execution backend. A CCB can enter quarantine, but a
 
 The executor rehashes every executable before every run. A mismatch fails closed. The hostile local gate is reproducible with `scripts/validate-p10.ps1`; enabling the optional service path does not waive the production controls listed in `docs/progress/PHASE-10.md`.
 
+When both sandbox and worker are enabled, API CCB approval returns `202 Accepted` with a durable job before execution. The worker obtains a 30-minute ownership-fenced claim before extraction or sandbox tests. CCB approval fails with `ccb_review_worker_required` when this queue worker is off. The fixed lease is valid only for the current closed profile of at most 32 tests and 30 seconds per test.
+
 ## Supported simulation routes
 
 - Contributor: `POST /api/contributions/intake`, `GET /api/contributions/{submissionId}`, `POST /api/contributions/{submissionId}/withdraw`.
 - Reviewer: `GET /api/contributions/pending?limit=`, `GET /api/contributions/{submissionId}`, `POST /api/contributions/{submissionId}/approve`.
 - Reviewer worker operations: `GET /api/contributions/publication-queue?limit=`, `POST /api/contributions/publication-queue/{operationId}/retry`.
+- Reviewer CCB-review operations: `GET /api/contributions/ccb-review-queue?limit=`, `POST /api/contributions/ccb-review-queue/{jobId}/retry`.
 
 Use the automated child-process test rather than handling credentials manually:
 
