@@ -61,7 +61,7 @@ public sealed record DurableWebhookAuditRecord(
     DateTimeOffset OccurredUtc,
     string DecisionCode);
 
-public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
+public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
 {
     private readonly string connectionString;
     private readonly SemaphoreSlim mutationLock = new(1, 1);
@@ -355,6 +355,12 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
             {
                 throw new InvalidOperationException("The reserved payout preview was modified.");
             }
+            await ValidateRemediationTargetLineageAsync(
+                    connection,
+                    (SqliteTransaction)transaction,
+                    preview,
+                    cancellationToken)
+                .ConfigureAwait(false);
 
             var targetStatus = result.Outcome switch
             {
@@ -454,30 +460,39 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
         command.Parameters.AddWithValue("$cutoff", updatedBeforeOrAt.ToUniversalTime().ToString("O"));
         command.Parameters.AddWithValue("$limit", limit);
         var pending = new List<DurablePendingPayout>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
-            PayoutBatchPreview preview;
-            try
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                preview = JsonSerializer.Deserialize<PayoutBatchPreview>(reader.GetString(1))
-                    ?? throw new InvalidOperationException("A durable payout preview is empty.");
-            }
-            catch (JsonException exception)
-            {
-                throw new InvalidOperationException(
-                    $"A durable payout preview is unreadable: {exception.GetType().Name}.");
-            }
+                PayoutBatchPreview preview;
+                try
+                {
+                    preview = JsonSerializer.Deserialize<PayoutBatchPreview>(reader.GetString(1))
+                        ?? throw new InvalidOperationException("A durable payout preview is empty.");
+                }
+                catch (JsonException exception)
+                {
+                    throw new InvalidOperationException(
+                        $"A durable payout preview is unreadable: {exception.GetType().Name}.");
+                }
 
-            if (!string.Equals(reader.GetString(0), PayoutPreviewSha(preview), StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("A durable payout preview failed its stored digest.");
-            }
+                if (!string.Equals(reader.GetString(0), PayoutPreviewSha(preview), StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("A durable payout preview failed its stored digest.");
+                }
 
-            pending.Add(new DurablePendingPayout(
-                preview,
-                DateTimeOffset.Parse(reader.GetString(2)),
-                DateTimeOffset.Parse(reader.GetString(3))));
+                pending.Add(new DurablePendingPayout(
+                    preview,
+                    DateTimeOffset.Parse(reader.GetString(2)),
+                    DateTimeOffset.Parse(reader.GetString(3))));
+            }
+        }
+
+        foreach (var item in pending)
+        {
+            await ValidateRemediationTargetLineageAsync(
+                    connection, null, item.Preview, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         return pending;
@@ -501,29 +516,38 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
         command.Parameters.AddWithValue("$cutoff", updatedBeforeOrAt.ToUniversalTime().ToString("O"));
         command.Parameters.AddWithValue("$limit", limit);
         var terminal = new List<DurableTerminalPayout>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
-            PayoutBatchPreview preview;
-            try
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                preview = JsonSerializer.Deserialize<PayoutBatchPreview>(reader.GetString(1))
-                    ?? throw new InvalidOperationException("A durable payout preview is empty.");
-            }
-            catch (JsonException exception)
-            {
-                throw new InvalidOperationException(
-                    $"A durable payout preview is unreadable: {exception.GetType().Name}.");
-            }
+                PayoutBatchPreview preview;
+                try
+                {
+                    preview = JsonSerializer.Deserialize<PayoutBatchPreview>(reader.GetString(1))
+                        ?? throw new InvalidOperationException("A durable payout preview is empty.");
+                }
+                catch (JsonException exception)
+                {
+                    throw new InvalidOperationException(
+                        $"A durable payout preview is unreadable: {exception.GetType().Name}.");
+                }
 
-            if (!string.Equals(reader.GetString(0), PayoutPreviewSha(preview), StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("A durable payout preview failed its stored digest.");
-            }
+                if (!string.Equals(reader.GetString(0), PayoutPreviewSha(preview), StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("A durable payout preview failed its stored digest.");
+                }
 
-            terminal.Add(new DurableTerminalPayout(
-                preview,
-                DateTimeOffset.Parse(reader.GetString(2))));
+                terminal.Add(new DurableTerminalPayout(
+                    preview,
+                    DateTimeOffset.Parse(reader.GetString(2))));
+            }
+        }
+
+        foreach (var item in terminal)
+        {
+            await ValidateRemediationTargetLineageAsync(
+                    connection, null, item.Preview, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         return terminal;
@@ -1009,7 +1033,7 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
         command.CommandText = "PRAGMA user_version;";
         var schemaVersion = Convert.ToInt32(
             await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
-        if (schemaVersion > 6)
+        if (schemaVersion > 7)
         {
             throw new InvalidOperationException("The CARE ledger schema is newer than this application.");
         }
@@ -1092,6 +1116,7 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
                 provider_status TEXT,
                 provider_batch_id TEXT,
                 result_sha256 TEXT,
+                remediation_review_sha256 TEXT,
                 paid_cents INTEGER NOT NULL DEFAULT 0 CHECK(paid_cents >= 0),
                 created_utc TEXT NOT NULL,
                 updated_utc TEXT NOT NULL
@@ -1144,6 +1169,12 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
         {
             await MigratePayoutSchemaV4Async(connection, cancellationToken).ConfigureAwait(false);
         }
+        await EnsureColumnAsync(
+            connection,
+            "payout_batches",
+            "remediation_review_sha256",
+            "TEXT",
+            cancellationToken).ConfigureAwait(false);
 
         command.CommandText = """
             CREATE TABLE IF NOT EXISTS payout_item_results(
@@ -1173,6 +1204,26 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
                 FOREIGN KEY(batch_id, ordinal)
                     REFERENCES payout_item_results(batch_id, ordinal)
             );
+            CREATE TABLE IF NOT EXISTS payout_item_remediations(
+                source_batch_id TEXT NOT NULL,
+                source_ordinal INTEGER NOT NULL CHECK(source_ordinal >= 0),
+                remediation_batch_id TEXT NOT NULL,
+                remediation_ordinal INTEGER NOT NULL CHECK(remediation_ordinal >= 0),
+                contributor_pseudonym TEXT NOT NULL,
+                amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+                source_provider_status TEXT NOT NULL,
+                replacement_recipient_snapshot_id TEXT NOT NULL,
+                replacement_destination_sha256 TEXT NOT NULL,
+                source_result_sha256 TEXT NOT NULL,
+                review_sha256 TEXT NOT NULL,
+                approved_utc TEXT NOT NULL,
+                PRIMARY KEY(source_batch_id, source_ordinal),
+                UNIQUE(remediation_batch_id, remediation_ordinal),
+                FOREIGN KEY(source_batch_id, source_ordinal)
+                    REFERENCES payout_item_results(batch_id, ordinal),
+                FOREIGN KEY(remediation_batch_id)
+                    REFERENCES payout_batches(batch_id)
+            );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         command.CommandText = """
@@ -1181,7 +1232,7 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
             WHERE provider_batch_id IS NOT NULL;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        command.CommandText = "PRAGMA user_version = 6;";
+        command.CommandText = "PRAGMA user_version = 7;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -1703,6 +1754,7 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
                 provider_status TEXT,
                 provider_batch_id TEXT,
                 result_sha256 TEXT,
+                remediation_review_sha256 TEXT,
                 paid_cents INTEGER NOT NULL DEFAULT 0 CHECK(paid_cents >= 0),
                 created_utc TEXT NOT NULL,
                 updated_utc TEXT NOT NULL
@@ -1724,7 +1776,7 @@ public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
     }
 }
 
-public sealed class DurablePayoutCoordinator(
+public sealed partial class DurablePayoutCoordinator(
     DurableCareRepository repository,
     IPayoutSandboxProvider provider)
 {

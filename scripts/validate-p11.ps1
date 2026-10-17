@@ -62,6 +62,7 @@ try {
     "Owner-approved recipient snapshot ID and exact destination digest binding=PASS"
     "Batch SUCCESS requires exact item IDs recipients USD amounts and count=PASS"
     "Mixed payout outcomes post successful items only and hold failed payable amounts=PASS"
+    "Separately approved failed-item remediation lineage expiry denial and restart recovery=PASS"
     "Protected recipient snapshot owner-approval UI and restart binding=PASS"
     "Real PayPal network calls=0"
     "P11 evidence=$runRoot"

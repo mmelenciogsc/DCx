@@ -159,7 +159,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(6L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(7L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -176,7 +176,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         {
             await connection.OpenAsync();
             var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 7;";
+            command.CommandText = "PRAGMA user_version = 8;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -188,7 +188,43 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(7L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(8L, (long)(await versionCommand.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task SchemaSix_AddsFailedItemRemediationLineageWithoutReplacingPriorState()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var preview = Preview("batch:schema-six-source");
+        await AccrueAsync(repository, preview);
+        await new DurablePayoutCoordinator(repository, new FixtureProvider(false)).ExecuteAsync(
+            preview, true, true, preview.EligibilityDate, now);
+
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(root, "care-ledger.sqlite3"),
+            Pooling = false,
+        }.ToString();
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE payout_item_remediations; PRAGMA user_version = 6;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var reopened = await DurableCareRepository.OpenAsync(root);
+        Assert.Equal("failed", (await reopened.GetPayoutStateAsync(preview.BatchId))!.Status);
+        Assert.Empty(await reopened.GetPayoutItemRemediationsAsync(preview.BatchId));
+
+        await using var verified = new SqliteConnection(connectionString);
+        await verified.OpenAsync();
+        var version = verified.CreateCommand();
+        version.CommandText = "PRAGMA user_version;";
+        Assert.Equal(7L, (long)(await version.ExecuteScalarAsync())!);
+        var table = verified.CreateCommand();
+        table.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'payout_item_remediations';";
+        Assert.Equal(1L, (long)(await table.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -582,6 +618,205 @@ public sealed class DurableCareRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task FailedItemRemediation_RetriesOnlyReviewedFailureAndPersistsLineage()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var source = await CompletePartiallyFailedPayoutAsync(
+            repository, "batch:remediation-source");
+        var replacement = PayoutRecipientApproval.Create(
+            "snapshot:replacement-two", "replacement-two@personal.example.com");
+        var remediation = new PayoutBatchPreview(
+            "batch:remediation-target",
+            PayoutExecutionMode.Sandbox,
+            source.EligibilityDate,
+            [new PayoutItem("contributor:two", 700, replacement)]);
+        var review = await repository.ReviewFailedPayoutRemediationAsync(
+            source.BatchId, remediation, now.AddMinutes(1));
+
+        var reviewedItem = Assert.Single(review.Items);
+        Assert.Equal(1, reviewedItem.SourceOrdinal);
+        Assert.Equal("contributor:two", reviewedItem.ContributorPseudonym);
+        Assert.Equal("FAILED", reviewedItem.SourceProviderStatus);
+        Assert.Equal(replacement.SnapshotId, reviewedItem.ReplacementRecipientSnapshotId);
+        Assert.Equal(replacement.DestinationSha256, reviewedItem.ReplacementDestinationSha256);
+        Assert.Equal(now.AddMinutes(11), review.ExpiresUtc);
+
+        var provider = new FixtureProvider(true);
+        var coordinator = new DurablePayoutCoordinator(repository, provider);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            coordinator.ExecuteFailedItemRemediationAsync(
+                review, true, false, remediation.EligibilityDate, now.AddMinutes(2)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            coordinator.ExecuteFailedItemRemediationAsync(
+                review, false, true, remediation.EligibilityDate, now.AddMinutes(2)));
+        Assert.Equal(0, provider.Calls);
+        Assert.Null(await repository.GetPayoutStateAsync(remediation.BatchId));
+
+        var result = await coordinator.ExecuteFailedItemRemediationAsync(
+            review, true, true, remediation.EligibilityDate, now.AddMinutes(2));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, provider.Calls);
+        Assert.Equal("partially_succeeded", (await repository.GetPayoutStateAsync(source.BatchId))!.Status);
+        Assert.Equal("succeeded", (await repository.GetPayoutStateAsync(remediation.BatchId))!.Status);
+        Assert.Equal(0, await repository.BalanceAsync(LedgerAccount.ContributorPayable));
+        Assert.Equal(-1200, await repository.BalanceAsync(LedgerAccount.Cash));
+        Assert.True(await repository.ReconcilesAsync());
+
+        var reopened = await DurableCareRepository.OpenAsync(root);
+        var lineage = Assert.Single(await reopened.GetPayoutItemRemediationsAsync(source.BatchId));
+        Assert.Equal(source.BatchId, lineage.SourceBatchId);
+        Assert.Equal(1, lineage.SourceOrdinal);
+        Assert.Equal(remediation.BatchId, lineage.RemediationBatchId);
+        Assert.Equal(0, lineage.RemediationOrdinal);
+        Assert.Equal(review.ReviewSha256, lineage.ReviewSha256);
+        Assert.Equal("succeeded", lineage.RemediationStatus);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new DurablePayoutCoordinator(reopened, provider).ExecuteFailedItemRemediationAsync(
+                review, true, true, remediation.EligibilityDate, now.AddMinutes(3)));
+        Assert.Equal(1, provider.Calls);
+    }
+
+    [Fact]
+    public async Task FailedItemRemediation_DeniesSuccessTamperExpiryAndDuplicateSource()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var source = await CompletePartiallyFailedPayoutAsync(
+            repository, "batch:remediation-denials");
+        var successfulItemPreview = new PayoutBatchPreview(
+            "batch:cannot-retry-success",
+            PayoutExecutionMode.Sandbox,
+            source.EligibilityDate,
+            [new PayoutItem("contributor:one", 500, Approval("contributor:one"))]);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.ReviewFailedPayoutRemediationAsync(
+                source.BatchId, successfulItemPreview, now.AddMinutes(1)));
+
+        var remediation = new PayoutBatchPreview(
+            "batch:remediation-denial-target",
+            PayoutExecutionMode.Sandbox,
+            source.EligibilityDate,
+            [new PayoutItem("contributor:two", 700, Approval("replacement:two"))]);
+        var review = await repository.ReviewFailedPayoutRemediationAsync(
+            source.BatchId, remediation, now.AddMinutes(1));
+        var tampered = review with { ReviewSha256 = new string('0', 64) };
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.ReserveFailedPayoutRemediationAsync(
+                tampered, true, true, remediation.EligibilityDate, now.AddMinutes(2)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.ReserveFailedPayoutRemediationAsync(
+                review, true, true, remediation.EligibilityDate, now.AddMinutes(12)));
+        Assert.Null(await repository.GetPayoutStateAsync(remediation.BatchId));
+        Assert.Empty(await repository.GetPayoutItemRemediationsAsync(source.BatchId));
+
+        Assert.True(await repository.ReserveFailedPayoutRemediationAsync(
+            review, true, true, remediation.EligibilityDate, now.AddMinutes(2)));
+        Assert.False(await repository.ReserveFailedPayoutRemediationAsync(
+            review, true, true, remediation.EligibilityDate, now.AddMinutes(2)));
+        Assert.Equal("reserved", (await repository.GetPayoutStateAsync(remediation.BatchId))!.Status);
+        Assert.Single(await repository.GetPayoutItemRemediationsAsync(source.BatchId));
+
+        var duplicate = remediation with { BatchId = "batch:second-remediation-target" };
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.ReviewFailedPayoutRemediationAsync(
+                source.BatchId, duplicate, now.AddMinutes(3)));
+    }
+
+    [Fact]
+    public async Task FailedItemRemediation_ProviderFailureLeavesApprovedReservationForSafeRestart()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var source = Preview("batch:remediation-crash-source");
+        await AccrueAsync(repository, source);
+        await new DurablePayoutCoordinator(repository, new FixtureProvider(false)).ExecuteAsync(
+            source, true, true, source.EligibilityDate, now);
+        var remediation = source with
+        {
+            BatchId = "batch:remediation-crash-target",
+            Items =
+            [
+                new PayoutItem(
+                    "contributor:one",
+                    500,
+                    PayoutRecipientApproval.Create(
+                        "snapshot:crash-replacement",
+                        "crash-replacement@personal.example.com")),
+            ],
+        };
+        var review = await repository.ReviewFailedPayoutRemediationAsync(
+            source.BatchId, remediation, now.AddMinutes(1));
+        var throwingProvider = new ThrowingProvider();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new DurablePayoutCoordinator(repository, throwingProvider)
+                .ExecuteFailedItemRemediationAsync(
+                    review, true, true, remediation.EligibilityDate, now.AddMinutes(2)));
+
+        Assert.Equal(1, throwingProvider.Calls);
+        Assert.Equal("reserved", (await repository.GetPayoutStateAsync(remediation.BatchId))!.Status);
+        Assert.Single(await repository.GetPayoutItemRemediationsAsync(source.BatchId));
+
+        var reopened = await DurableCareRepository.OpenAsync(root);
+        var provider = new ReconcilableFixtureProvider();
+        var summary = await new DurablePayoutCoordinator(reopened, provider).ReconcilePendingAsync(
+            now.AddMinutes(3), now.AddMinutes(3));
+
+        Assert.Equal(new PayoutReconciliationSummary(1, 1, 0, 1), summary);
+        Assert.Equal(1, provider.SendCalls);
+        Assert.Equal("succeeded", (await reopened.GetPayoutStateAsync(remediation.BatchId))!.Status);
+        Assert.Equal(0, await reopened.BalanceAsync(LedgerAccount.ContributorPayable));
+        Assert.True(await reopened.ReconcilesAsync());
+    }
+
+    [Fact]
+    public async Task FailedItemRemediation_MissingLineageBlocksRestartAndCompletion()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var source = await CompletePartiallyFailedPayoutAsync(
+            repository, "batch:remediation-lineage-source");
+        var remediation = new PayoutBatchPreview(
+            "batch:remediation-lineage-target",
+            PayoutExecutionMode.Sandbox,
+            source.EligibilityDate,
+            [new PayoutItem("contributor:two", 700, Approval("lineage:replacement"))]);
+        var review = await repository.ReviewFailedPayoutRemediationAsync(
+            source.BatchId, remediation, now.AddMinutes(1));
+        Assert.True(await repository.ReserveFailedPayoutRemediationAsync(
+            review, true, true, remediation.EligibilityDate, now.AddMinutes(2)));
+
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(root, "care-ledger.sqlite3"),
+            Pooling = false,
+        }.ToString();
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM payout_item_remediations WHERE remediation_batch_id = $batch;";
+            command.Parameters.AddWithValue("$batch", remediation.BatchId);
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+
+        var reopened = await DurableCareRepository.OpenAsync(root);
+        var provider = new ReconcilableFixtureProvider();
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new DurablePayoutCoordinator(reopened, provider).ReconcilePendingAsync(
+                now.AddMinutes(3), now.AddMinutes(3)));
+        Assert.Equal(0, provider.SendCalls);
+
+        var terminal = new PayoutBatchResult(
+            remediation.BatchId,
+            PayoutBatchOutcome.Succeeded,
+            "SUCCESS",
+            [new PayoutItemResult("contributor:two", 700, true, "SUCCESS")]);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            reopened.CompletePayoutAsync(remediation, terminal, now.AddMinutes(3)));
+        Assert.Equal("reserved", (await reopened.GetPayoutStateAsync(remediation.BatchId))!.Status);
+    }
+
+    [Fact]
     public async Task SchemaThreeReservedPayout_IsQuarantinedForRecipientReapproval()
     {
         Directory.CreateDirectory(root);
@@ -631,7 +866,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var version = reopened.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(6L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(7L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     public void Dispose()
@@ -671,6 +906,35 @@ public sealed class DurableCareRepositoryTests : IDisposable
                 new LedgerPosting(LedgerAccount.ContributorExpense, preview.TotalCents, 0),
                 new LedgerPosting(LedgerAccount.ContributorPayable, 0, preview.TotalCents),
             ]));
+
+    private async Task<PayoutBatchPreview> CompletePartiallyFailedPayoutAsync(
+        DurableCareRepository repository,
+        string batchId)
+    {
+        var preview = new PayoutBatchPreview(
+            batchId,
+            PayoutExecutionMode.Sandbox,
+            new DateOnly(2026, 4, 1),
+            [
+                new PayoutItem("contributor:one", 500, Approval("contributor:one")),
+                new PayoutItem("contributor:two", 700, Approval("contributor:two")),
+            ]);
+        await AccrueAsync(repository, preview);
+        Assert.True(await repository.ReservePayoutAsync(
+            preview, true, true, preview.EligibilityDate, now));
+        Assert.True(await repository.CompletePayoutAsync(
+            preview,
+            new PayoutBatchResult(
+                preview.BatchId,
+                PayoutBatchOutcome.PartiallySucceeded,
+                "SUCCESS",
+                [
+                    new PayoutItemResult("contributor:one", 500, true, "SUCCESS"),
+                    new PayoutItemResult("contributor:two", 700, false, "FAILED"),
+                ]),
+            now));
+        return preview;
+    }
 
     private sealed class FixtureProvider(bool succeeds) : IPayoutSandboxProvider
     {
@@ -761,5 +1025,18 @@ public sealed class DurableCareRepositoryTests : IDisposable
                 preview.BatchId,
                 PayoutBatchOutcome.Pending,
                 "PENDING"));
+    }
+
+    private sealed class ThrowingProvider : IPayoutSandboxProvider
+    {
+        public int Calls { get; private set; }
+
+        public Task<PayoutBatchResult> SendSandboxAsync(
+            PayoutBatchPreview preview,
+            CancellationToken cancellationToken)
+        {
+            Calls++;
+            throw new InvalidOperationException("Synthetic provider failure.");
+        }
     }
 }
