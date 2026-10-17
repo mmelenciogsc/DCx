@@ -1,7 +1,7 @@
 # P06 — Local models and resource inventory
 
 - Status: BLOCKED (real vision passes; transcription/embedding contracts pass fixtures; actual backends remain absent)
-- Implementation commits: `463bfb6`, `b4aa4c9`
+- Implementation commits: `463bfb6`, `b4aa4c9`, `a160435`
 
 No model or runtime was downloaded or installed. The real benchmark uses only software and models already present on this Windows machine.
 
@@ -19,11 +19,12 @@ No model or runtime was downloaded or installed. The real benchmark uses only so
 ## Implemented
 
 - Loopback-only Ollama adapter with bounded JSON responses for model inventory, `/api/show`, nonstreaming vision and `/api/embed`.
+- The production Ollama transport owns a no-redirect, no-cookie, no-proxy HTTP handler, accepts only a root loopback origin, and rejects any response whose scheme/host/port differs from that origin.
 - Embedding requests allow at most 32 bounded texts, disable truncation, explicitly unload, require request/response model and count agreement, and reject empty, inconsistent, oversized or nonfinite vectors.
-- Image size/prompt bounds, deterministic temperature/output limit, cancellation and explicit unload.
+- Image size/prompt bounds, PNG/JPEG/WebP signature admission, deterministic temperature/output limit, cancellation and explicit unload. Vision responses must identify the requested model, be complete, nonempty and bounded.
 - Hardware-aware vision selection uses at most 70% of measured VRAM. Embedding selection prefers the smallest installed model within 25% of measured RAM; low-resource no-fit tests fail closed.
 - Fallback order is validated local GPU, bounded local CPU, then an explicitly approved reachable remote provider only for nonprivate input. Private input with no local backend becomes unavailable.
-- Hash-pinned `whisper-cli.exe` and `.bin`/`.gguf` model boundary. It accepts bounded signature-checked WAV only, uses argument arrays and a scrubbed environment, drains but never retains child diagnostics, enforces timeout/tree kill, bounds transcript output, records working set and removes its operation directory.
+- Hash-pinned `whisper-cli.exe` and `.bin`/`.gguf` model boundary. Verified executable/model files remain under read-only, no-write/no-delete leases for the entire child execution, closing the hash-check/use race. It accepts bounded signature-checked WAV only, uses argument arrays and a scrubbed environment, drains but never retains child diagnostics, enforces timeout/tree kill, bounds transcript output, records working set and removes its operation directory.
 - A native fake Whisper CLI validates process/argument/output/cancellation behavior. It does not count as speech-recognition accuracy evidence.
 
 ## Reproduction
@@ -36,17 +37,27 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 ## Measured result
 
-- Locked Release build: 0 warnings, 0 errors; 3.00 seconds in the recorded P06 run.
-- P06 local-model tests: passed 17, failed 0, skipped 0; 470 ms.
-- Expanded full suite: passed 134, failed 0, skipped 0; about 1 second.
+- Locked Release build: 0 warnings, 0 errors; 5.74 seconds in the recorded P06 run.
+- P06 local-model tests: passed 22, failed 0, skipped 0; about 1 second.
+- Expanded full suite: passed 151, failed 0, skipped 0; about 2 seconds.
 - Vision response: `A blue square and a red circle are displayed above the text "DCX 42".`
 - Prompt tokens: 1,100; output tokens: 20.
-- Ollama-reported duration: 18,957,929,100 ns; wall duration: 18,964 ms.
+- Ollama-reported duration: 15,395,872,900 ns; wall duration: 15,414 ms.
 - Ollama-reported loaded model and VRAM allocation: 3,527,545,978 bytes each.
 - Explicit model unload request: passed.
 - Hash-pinned fake Whisper happy path, model-tamper denial, invalid-WAV denial and timeout/tree-kill passed.
+- Whisper pinned-file write replacement was denied while the child fixture ran; the leases released after cancellation.
 - Ollama inspection/embed request shape, capability/license parsing, two-vector response and inconsistent-dimension denial passed.
-- Hardware evidence: `artifacts/test-results/p06-79f3de92af194ebeb21d1e7383e7dd4e/hardware-manifest.json` (generated and intentionally not committed).
+- Ollama redirect/cookie/proxy denial, exact response-origin enforcement, image-signature admission and mismatched/incomplete response denial passed.
+- The P07 native WebView2/UIA media test was rerun after transport hardening; local MP4 pause/describe/resume and the real loopback VLM description passed.
+- Hardware evidence: `artifacts/test-results/p06-9dfb9eede1224f0482749ebeb972a70d/hardware-manifest.json` (generated and intentionally not committed).
+
+## Changed files in the latest milestone
+
+- Hardened adapters: `src/DCx.Core/LocalModels/OllamaLocalClient.cs`, `src/DCx.Core/LocalModels/WhisperCliTranscriber.cs`.
+- Production consumer and test seam: `src/DCx.Desktop/Media/MediaFrameDescriptionService.cs`, `src/DCx.Core/DCx.Core.csproj`.
+- Denial and concurrency coverage: `tests/DCx.Core.Tests/LocalModels/OllamaLocalClientTests.cs`, `tests/DCx.Core.Tests/LocalModels/WhisperCliTranscriberTests.cs`.
+- Reproducible installed-hardware evidence: `scripts/validate-p06.ps1`.
 
 ## Blockers and unblock condition
 

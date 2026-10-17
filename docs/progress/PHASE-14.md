@@ -32,7 +32,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 release/readiness tests: passed 14, failed 0, skipped 0; about 1 second.
-- Current expanded full suite: passed 146, failed 0, skipped 0; about 1 second.
+- Current expanded full suite: passed 151, failed 0, skipped 0; about 2 seconds.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -47,7 +47,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-
 - Shared policy and tests: `src/DCx.Core/Release/ReleaseReadiness.cs`, `tests/DCx.Core.Tests/Release/ReleaseReadinessTests.cs`, `tests/DCx.ReadinessReport/Program.cs`.
 - Native accessible UI: `src/DCx.Desktop/ReadinessWindow.xaml`, `src/DCx.Desktop/ReadinessWindow.xaml.cs`, `src/DCx.Desktop/App.xaml.cs`, `src/DCx.Desktop/MainWindow.xaml`, `src/DCx.Desktop/MainWindow.xaml.cs`.
 - Reproducible UIA gate: `scripts/validate-p14.ps1`.
-- Windows fixture cleanup was separately stabilized in `1c06d97`; three consecutive no-build full-suite runs and the final clean CI run each passed 146/146.
+- Windows fixture cleanup was separately stabilized in `1c06d97`; three consecutive no-build runs and the P14 checkpoint CI run each passed 146/146.
 
 ## Blockers
 
