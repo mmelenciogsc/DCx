@@ -38,9 +38,34 @@ public sealed class CareFinanceTests
         Assert.Throws<InvalidOperationException>(() => processor.Process(payment, "bad"));
         Assert.True(processor.Process(payment, processor.Sign(payment)));
         var duplicateEvent = payment with { TransmissionId = "transmission:two" };
-        Assert.False(processor.Process(duplicateEvent, processor.Sign(duplicateEvent)));
+        Assert.Throws<InvalidOperationException>(() =>
+            processor.Process(duplicateEvent, processor.Sign(duplicateEvent)));
         var wrongPlan = Event("event:wrong", "transmission:wrong", "PAYMENT.SALE.COMPLETED", 301);
         Assert.Throws<InvalidOperationException>(() => processor.Process(wrongPlan, processor.Sign(wrongPlan)));
+        var correctedPlan = wrongPlan with { AmountCents = 300 };
+        Assert.True(processor.Process(correctedPlan, processor.Sign(correctedPlan)));
+    }
+
+    [Fact]
+    public void SandboxWebhook_CausalOrderingPreventsStaleAndEqualReactivation()
+    {
+        var processor = new PayPalSandboxWebhookProcessor(
+            new DoubleEntryLedger(), Enumerable.Repeat((byte)9, 32).ToArray());
+        var activated = Event("event:causal-active", "transmission:causal-active",
+            "BILLING.SUBSCRIPTION.ACTIVATED", 0) with { OccurredUtc = now };
+        var cancelled = Event("event:causal-cancel", "transmission:causal-cancel",
+            "BILLING.SUBSCRIPTION.CANCELLED", 0) with { OccurredUtc = now.AddMinutes(10) };
+        var stale = Event("event:causal-stale", "transmission:causal-stale",
+            "BILLING.SUBSCRIPTION.ACTIVATED", 0) with { OccurredUtc = now.AddMinutes(5) };
+        var equal = Event("event:causal-equal", "transmission:causal-equal",
+            "BILLING.SUBSCRIPTION.ACTIVATED", 0) with { OccurredUtc = now.AddMinutes(10) };
+
+        Assert.True(processor.Process(activated, processor.Sign(activated)));
+        Assert.True(processor.Process(cancelled, processor.Sign(cancelled)));
+        Assert.True(processor.Process(stale, processor.Sign(stale)));
+        Assert.True(processor.Process(equal, processor.Sign(equal)));
+        Assert.False(processor.GetEntitlement("subscription:one")!.Active);
+        Assert.Equal(cancelled.OccurredUtc, processor.GetEntitlement("subscription:one")!.UpdatedUtc);
     }
 
     [Fact]

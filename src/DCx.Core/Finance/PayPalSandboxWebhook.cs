@@ -14,6 +14,98 @@ public sealed record PayPalSandboxWebhookEvent(
 
 public sealed record SubscriptionEntitlement(string SubscriptionId, bool Active, DateTimeOffset UpdatedUtc);
 
+public sealed record SubscriptionEntitlementTransition(
+    bool Applies,
+    bool Active,
+    string DecisionCode);
+
+public static class PayPalSandboxWebhookPolicy
+{
+    public const string EntitlementAppliedInitial = "entitlement_applied_initial";
+    public const string EntitlementAppliedNewer = "entitlement_applied_newer";
+    public const string EntitlementAppliedEqualDeactivation = "entitlement_applied_equal_deactivation";
+    public const string EntitlementStaleIgnored = "entitlement_stale_ignored";
+    public const string EntitlementEqualIgnored = "entitlement_equal_ignored";
+    public const string LedgerOnly = "ledger_only";
+
+    public static void Validate(PayPalSandboxWebhookEvent webhook)
+    {
+        ArgumentNullException.ThrowIfNull(webhook);
+        if (!IsIdentifier(webhook.EventId) || !IsIdentifier(webhook.TransmissionId) ||
+            !IsIdentifier(webhook.SubscriptionId) ||
+            !string.Equals(webhook.Currency, "USD", StringComparison.Ordinal) ||
+            webhook.OccurredUtc == default ||
+            webhook.EventType is not ("BILLING.SUBSCRIPTION.ACTIVATED" or
+                "BILLING.SUBSCRIPTION.CANCELLED" or "BILLING.SUBSCRIPTION.SUSPENDED" or
+                "PAYMENT.SALE.COMPLETED" or "PAYMENT.SALE.REFUNDED" or "PAYMENT.SALE.REVERSED"))
+        {
+            throw new InvalidOperationException(
+                "The sandbox webhook schema, event type, currency, or time is invalid.");
+        }
+
+        if ((webhook.EventType.StartsWith("BILLING.", StringComparison.Ordinal) &&
+             webhook.AmountCents != 0) ||
+            (webhook.EventType == "PAYMENT.SALE.COMPLETED" &&
+             webhook.AmountCents != PayPalSandboxWebhookProcessor.MonthlyPlanCents) ||
+            (webhook.EventType is "PAYMENT.SALE.REFUNDED" or "PAYMENT.SALE.REVERSED" &&
+             webhook.AmountCents is < 1 or > PayPalSandboxWebhookProcessor.MonthlyPlanCents))
+        {
+            throw new InvalidOperationException("The sandbox webhook amount does not match the US$3 plan.");
+        }
+    }
+
+    public static bool TryGetEntitlementTarget(string eventType, out bool active)
+    {
+        active = string.Equals(
+            eventType,
+            "BILLING.SUBSCRIPTION.ACTIVATED",
+            StringComparison.Ordinal);
+        return active || eventType is "BILLING.SUBSCRIPTION.CANCELLED" or
+            "BILLING.SUBSCRIPTION.SUSPENDED" or "PAYMENT.SALE.REFUNDED" or
+            "PAYMENT.SALE.REVERSED";
+    }
+
+    public static SubscriptionEntitlementTransition ReduceEntitlement(
+        SubscriptionEntitlement? current,
+        bool targetActive,
+        DateTimeOffset occurredUtc)
+    {
+        var canonicalTime = occurredUtc.ToUniversalTime();
+        if (current is null)
+        {
+            return new SubscriptionEntitlementTransition(
+                true, targetActive, EntitlementAppliedInitial);
+        }
+
+        var comparison = canonicalTime.CompareTo(current.UpdatedUtc.ToUniversalTime());
+        if (comparison > 0)
+        {
+            return new SubscriptionEntitlementTransition(
+                true, targetActive, EntitlementAppliedNewer);
+        }
+
+        if (comparison < 0)
+        {
+            return new SubscriptionEntitlementTransition(
+                false, current.Active, EntitlementStaleIgnored);
+        }
+
+        if (current.Active && !targetActive)
+        {
+            return new SubscriptionEntitlementTransition(
+                true, false, EntitlementAppliedEqualDeactivation);
+        }
+
+        return new SubscriptionEntitlementTransition(
+            false, current.Active, EntitlementEqualIgnored);
+    }
+
+    private static bool IsIdentifier(string value) =>
+        !string.IsNullOrWhiteSpace(value) && value.Length <= 128 &&
+        value.All(character => char.IsAsciiLetterOrDigit(character) ||
+            character is ':' or '.' or '_' or '-');
+}
+
 public static class PayPalSandboxWebhookIntegrity
 {
     public static string Sign(PayPalSandboxWebhookEvent webhook, ReadOnlySpan<byte> verificationKey)
@@ -42,7 +134,7 @@ public static class PayPalSandboxWebhookIntegrity
                 HMACSHA256.HashData(verificationKey, CanonicalBytes(webhook)),
                 Convert.FromBase64String(signatureBase64));
         }
-        catch (FormatException)
+        catch (Exception exception) when (exception is FormatException or ArgumentNullException)
         {
             return false;
         }
@@ -67,8 +159,8 @@ public sealed class PayPalSandboxWebhookProcessor(DoubleEntryLedger ledger, byte
     public const long MonthlyPlanCents = 300;
 
     private readonly Dictionary<string, SubscriptionEntitlement> entitlements = new(StringComparer.Ordinal);
-    private readonly HashSet<string> transmissionIds = new(StringComparer.Ordinal);
-    private readonly HashSet<string> eventIds = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> transmissionPayloads = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> eventPayloads = new(StringComparer.Ordinal);
 
     public string Sign(PayPalSandboxWebhookEvent webhook) =>
         PayPalSandboxWebhookIntegrity.Sign(webhook, verificationKey);
@@ -81,34 +173,33 @@ public sealed class PayPalSandboxWebhookProcessor(DoubleEntryLedger ledger, byte
             throw new InvalidOperationException("The sandbox webhook signature is invalid.");
         }
 
-        if (transmissionIds.Contains(webhook.TransmissionId) || eventIds.Contains(webhook.EventId))
+        PayPalSandboxWebhookPolicy.Validate(webhook);
+        var payloadSha256 = Convert.ToHexStringLower(
+            SHA256.HashData(PayPalSandboxWebhookIntegrity.CanonicalBytes(webhook)));
+        var eventExists = eventPayloads.TryGetValue(webhook.EventId, out var eventPayload);
+        var transmissionExists = transmissionPayloads.TryGetValue(
+            webhook.TransmissionId, out var transmissionPayload);
+        if (eventExists || transmissionExists)
         {
-            return false;
-        }
+            if (eventExists && transmissionExists &&
+                string.Equals(eventPayload, payloadSha256, StringComparison.Ordinal) &&
+                string.Equals(transmissionPayload, payloadSha256, StringComparison.Ordinal))
+            {
+                return false;
+            }
 
-        if (!string.Equals(webhook.Currency, "USD", StringComparison.Ordinal) || webhook.AmountCents < 0)
-        {
-            throw new InvalidOperationException("The sandbox webhook currency or amount is invalid.");
+            throw new InvalidOperationException(
+                "A sandbox webhook event or transmission identifier conflicts with prior data.");
         }
-
-        transmissionIds.Add(webhook.TransmissionId);
-        eventIds.Add(webhook.EventId);
 
         switch (webhook.EventType)
         {
             case "BILLING.SUBSCRIPTION.ACTIVATED":
-                entitlements[webhook.SubscriptionId] = new SubscriptionEntitlement(webhook.SubscriptionId, true, webhook.OccurredUtc);
-                break;
             case "BILLING.SUBSCRIPTION.CANCELLED":
             case "BILLING.SUBSCRIPTION.SUSPENDED":
-                entitlements[webhook.SubscriptionId] = new SubscriptionEntitlement(webhook.SubscriptionId, false, webhook.OccurredUtc);
+                ApplyEntitlement(webhook);
                 break;
             case "PAYMENT.SALE.COMPLETED":
-                if (webhook.AmountCents != MonthlyPlanCents)
-                {
-                    throw new InvalidOperationException("The sandbox payment does not match the US$3 monthly plan.");
-                }
-
                 ledger.Post(Entry(webhook, "subscription_payment",
                     new LedgerPosting(LedgerAccount.Cash, webhook.AmountCents, 0),
                     new LedgerPosting(LedgerAccount.SubscriptionRevenue, 0, webhook.AmountCents)));
@@ -118,12 +209,14 @@ public sealed class PayPalSandboxWebhookProcessor(DoubleEntryLedger ledger, byte
                 ledger.Post(Entry(webhook, "refund_or_chargeback",
                     new LedgerPosting(LedgerAccount.RefundsAndChargebacks, webhook.AmountCents, 0),
                     new LedgerPosting(LedgerAccount.Cash, 0, webhook.AmountCents)));
-                entitlements[webhook.SubscriptionId] = new SubscriptionEntitlement(webhook.SubscriptionId, false, webhook.OccurredUtc);
+                ApplyEntitlement(webhook);
                 break;
             default:
                 throw new InvalidOperationException("The sandbox webhook event type is unsupported.");
         }
 
+        eventPayloads.Add(webhook.EventId, payloadSha256);
+        transmissionPayloads.Add(webhook.TransmissionId, payloadSha256);
         return true;
     }
 
@@ -135,5 +228,20 @@ public sealed class PayPalSandboxWebhookProcessor(DoubleEntryLedger ledger, byte
         string description,
         params LedgerPosting[] postings) =>
         new(webhook.EventId, webhook.OccurredUtc, description, postings);
+
+    private void ApplyEntitlement(PayPalSandboxWebhookEvent webhook)
+    {
+        _ = PayPalSandboxWebhookPolicy.TryGetEntitlementTarget(webhook.EventType, out var active);
+        var current = entitlements.GetValueOrDefault(webhook.SubscriptionId);
+        var transition = PayPalSandboxWebhookPolicy.ReduceEntitlement(
+            current, active, webhook.OccurredUtc);
+        if (transition.Applies)
+        {
+            entitlements[webhook.SubscriptionId] = new SubscriptionEntitlement(
+                webhook.SubscriptionId,
+                transition.Active,
+                webhook.OccurredUtc.ToUniversalTime());
+        }
+    }
 
 }

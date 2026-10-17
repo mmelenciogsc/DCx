@@ -22,6 +22,15 @@ public sealed record PayoutReconciliationSummary(
     int StillPending,
     int Resubmitted);
 
+public sealed record DurableWebhookAuditRecord(
+    string EventId,
+    string TransmissionId,
+    string EventType,
+    string SubscriptionSha256,
+    string PayloadSha256,
+    DateTimeOffset OccurredUtc,
+    string DecisionCode);
+
 public sealed class DurableCareRepository
 {
     private readonly string connectionString;
@@ -113,32 +122,60 @@ public sealed class DurableCareRepository
                 throw new InvalidOperationException("A webhook event or transmission identifier conflicts with prior data.");
             }
 
+            SubscriptionEntitlementTransition? entitlementTransition = null;
+            var decisionCode = PayPalSandboxWebhookPolicy.LedgerOnly;
+            if (PayPalSandboxWebhookPolicy.TryGetEntitlementTarget(
+                    webhook.EventType, out var targetActive))
+            {
+                var current = await ReadEntitlementAsync(
+                        connection,
+                        (SqliteTransaction)transaction,
+                        webhook.SubscriptionId,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                entitlementTransition = PayPalSandboxWebhookPolicy.ReduceEntitlement(
+                    current, targetActive, webhook.OccurredUtc);
+                decisionCode = entitlementTransition.DecisionCode;
+            }
+
+            var subscriptionSha = Convert.ToHexStringLower(
+                SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(webhook.SubscriptionId)));
             var command = connection.CreateCommand();
             command.Transaction = (SqliteTransaction)transaction;
             command.CommandText = """
-                INSERT INTO webhook_events(event_id, transmission_id, event_type, payload_sha256, occurred_utc)
-                VALUES($event, $transmission, $type, $sha, $occurred);
+                INSERT INTO webhook_events(
+                    event_id, transmission_id, event_type, subscription_sha256,
+                    payload_sha256, occurred_utc, decision_code)
+                VALUES($event, $transmission, $type, $subscription_sha,
+                    $payload_sha, $occurred, $decision);
                 """;
             command.Parameters.AddWithValue("$event", webhook.EventId);
             command.Parameters.AddWithValue("$transmission", webhook.TransmissionId);
             command.Parameters.AddWithValue("$type", webhook.EventType);
-            command.Parameters.AddWithValue("$sha", payloadSha);
+            command.Parameters.AddWithValue("$subscription_sha", subscriptionSha);
+            command.Parameters.AddWithValue("$payload_sha", payloadSha);
             command.Parameters.AddWithValue("$occurred", webhook.OccurredUtc.ToUniversalTime().ToString("O"));
+            command.Parameters.AddWithValue("$decision", decisionCode);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
-            var entitlementActive = webhook.EventType == "BILLING.SUBSCRIPTION.ACTIVATED";
-            if (entitlementActive || webhook.EventType is "BILLING.SUBSCRIPTION.CANCELLED" or
-                "BILLING.SUBSCRIPTION.SUSPENDED" or "PAYMENT.SALE.REFUNDED" or "PAYMENT.SALE.REVERSED")
+            if (entitlementTransition is { Applies: true } transition)
             {
                 command.Parameters.Clear();
                 command.CommandText = """
-                    INSERT INTO entitlements(subscription_id, active, updated_utc)
-                    VALUES($subscription, $active, $updated)
-                    ON CONFLICT(subscription_id) DO UPDATE SET active = excluded.active, updated_utc = excluded.updated_utc;
+                    INSERT INTO entitlements(
+                        subscription_id, active, updated_utc, source_event_id, source_event_type)
+                    VALUES($subscription, $active, $updated, $source_event, $source_type)
+                    ON CONFLICT(subscription_id) DO UPDATE SET
+                        active = excluded.active,
+                        updated_utc = excluded.updated_utc,
+                        source_event_id = excluded.source_event_id,
+                        source_event_type = excluded.source_event_type;
                     """;
                 command.Parameters.AddWithValue("$subscription", webhook.SubscriptionId);
-                command.Parameters.AddWithValue("$active", entitlementActive ? 1 : 0);
+                command.Parameters.AddWithValue("$active", transition.Active ? 1 : 0);
                 command.Parameters.AddWithValue("$updated", webhook.OccurredUtc.ToUniversalTime().ToString("O"));
+                command.Parameters.AddWithValue("$source_event", webhook.EventId);
+                command.Parameters.AddWithValue("$source_type", webhook.EventType);
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
@@ -390,10 +427,48 @@ public sealed class DurableCareRepository
             : null;
     }
 
+    public async Task<DurableWebhookAuditRecord?> GetWebhookAuditAsync(
+        string eventId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(eventId) || eventId.Length > 128)
+        {
+            throw new ArgumentException("A bounded webhook event ID is required.", nameof(eventId));
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT transmission_id, event_type, subscription_sha256, payload_sha256,
+                   occurred_utc, decision_code
+            FROM webhook_events WHERE event_id = $event;
+            """;
+        command.Parameters.AddWithValue("$event", eventId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? new DurableWebhookAuditRecord(
+                eventId,
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                DateTimeOffset.Parse(reader.GetString(4)),
+                reader.GetString(5))
+            : null;
+    }
+
     private async Task InitializeAsync(CancellationToken cancellationToken)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA user_version;";
+        var schemaVersion = Convert.ToInt32(
+            await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
+        if (schemaVersion > 2)
+        {
+            throw new InvalidOperationException("The CARE ledger schema is newer than this application.");
+        }
+
         command.CommandText = """
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = FULL;
@@ -416,13 +491,17 @@ public sealed class DurableCareRepository
                 event_id TEXT PRIMARY KEY,
                 transmission_id TEXT NOT NULL UNIQUE,
                 event_type TEXT NOT NULL,
+                subscription_sha256 TEXT NOT NULL,
                 payload_sha256 TEXT NOT NULL,
-                occurred_utc TEXT NOT NULL
+                occurred_utc TEXT NOT NULL,
+                decision_code TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS entitlements(
                 subscription_id TEXT PRIMARY KEY,
                 active INTEGER NOT NULL CHECK(active IN (0, 1)),
-                updated_utc TEXT NOT NULL
+                updated_utc TEXT NOT NULL,
+                source_event_id TEXT NOT NULL,
+                source_event_type TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS payout_batches(
                 batch_id TEXT PRIMARY KEY,
@@ -434,6 +513,32 @@ public sealed class DurableCareRepository
                 updated_utc TEXT NOT NULL
             );
             """;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(
+            connection,
+            "webhook_events",
+            "subscription_sha256",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(
+            connection,
+            "webhook_events",
+            "decision_code",
+            "TEXT NOT NULL DEFAULT 'legacy_unclassified'",
+            cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(
+            connection,
+            "entitlements",
+            "source_event_id",
+            "TEXT NOT NULL DEFAULT 'legacy:unknown'",
+            cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(
+            connection,
+            "entitlements",
+            "source_event_type",
+            "TEXT NOT NULL DEFAULT 'legacy_unknown'",
+            cancellationToken).ConfigureAwait(false);
+        command.CommandText = "PRAGMA user_version = 2;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -521,18 +626,7 @@ public sealed class DurableCareRepository
     }
 
     private static void ValidateWebhook(PayPalSandboxWebhookEvent webhook)
-    {
-        if (!string.Equals(webhook.Currency, "USD", StringComparison.Ordinal) || webhook.AmountCents < 0 ||
-            string.IsNullOrWhiteSpace(webhook.EventId) || string.IsNullOrWhiteSpace(webhook.TransmissionId) ||
-            string.IsNullOrWhiteSpace(webhook.SubscriptionId) ||
-            webhook.EventType is not ("BILLING.SUBSCRIPTION.ACTIVATED" or "BILLING.SUBSCRIPTION.CANCELLED" or
-                "BILLING.SUBSCRIPTION.SUSPENDED" or "PAYMENT.SALE.COMPLETED" or
-                "PAYMENT.SALE.REFUNDED" or "PAYMENT.SALE.REVERSED") ||
-            webhook.EventType == "PAYMENT.SALE.COMPLETED" && webhook.AmountCents != PayPalSandboxWebhookProcessor.MonthlyPlanCents)
-        {
-            throw new InvalidOperationException("The sandbox webhook schema, event type, currency, or amount is invalid.");
-        }
-    }
+        => PayPalSandboxWebhookPolicy.Validate(webhook);
 
     private static LedgerJournalEntry? CreateWebhookEntry(PayPalSandboxWebhookEvent webhook) => webhook.EventType switch
     {
@@ -574,6 +668,52 @@ public sealed class DurableCareRepository
     }
 
     private sealed record WebhookRow(string EventId, string TransmissionId, string PayloadSha256);
+
+    private static async Task<SubscriptionEntitlement?> ReadEntitlementAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string subscriptionId,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT active, updated_utc FROM entitlements WHERE subscription_id = $id;";
+        command.Parameters.AddWithValue("$id", subscriptionId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? new SubscriptionEntitlement(
+                subscriptionId,
+                reader.GetInt32(0) == 1,
+                DateTimeOffset.Parse(reader.GetString(1)))
+            : null;
+    }
+
+    private static async Task EnsureColumnAsync(
+        SqliteConnection connection,
+        string table,
+        string column,
+        string declaration,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({table});";
+        var exists = false;
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (string.Equals(reader.GetString(1), column, StringComparison.Ordinal))
+                {
+                    exists = true;
+                    break;
+                }
+            }
+        }
+
+        if (exists) return;
+        command.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {declaration};";
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
 }
 
 public sealed class DurablePayoutCoordinator(

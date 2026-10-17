@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using DCx.Core.Finance;
 using DCx.GlobalService;
+using Microsoft.Data.Sqlite;
 
 namespace DCx.Core.Tests.Finance;
 
@@ -36,6 +37,118 @@ public sealed class DurableCareRepositoryTests : IDisposable
         Assert.False((await reopened.GetEntitlementAsync("subscription:one"))!.Active);
         Assert.Equal(0, await reopened.BalanceAsync(LedgerAccount.Cash));
         Assert.True(await reopened.ReconcilesAsync());
+    }
+
+    [Fact]
+    public async Task WebhookCausality_RejectsStaleReactivationAndRecordsMinimizedAuditAcrossReopen()
+    {
+        var key = Enumerable.Repeat((byte)41, 32).ToArray();
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var activated = Event("event:causal-active", "transmission:causal-active",
+            "BILLING.SUBSCRIPTION.ACTIVATED", 0) with { OccurredUtc = now };
+        var cancelled = Event("event:causal-cancel", "transmission:causal-cancel",
+            "BILLING.SUBSCRIPTION.CANCELLED", 0) with { OccurredUtc = now.AddMinutes(10) };
+        await ProcessAsync(repository, activated, key);
+        await ProcessAsync(repository, cancelled, key);
+
+        var reopened = await DurableCareRepository.OpenAsync(root);
+        var staleActivation = Event("event:causal-stale", "transmission:causal-stale",
+            "BILLING.SUBSCRIPTION.ACTIVATED", 0) with { OccurredUtc = now.AddMinutes(5) };
+        var equalActivation = Event("event:causal-equal", "transmission:causal-equal",
+            "BILLING.SUBSCRIPTION.ACTIVATED", 0) with { OccurredUtc = now.AddMinutes(10) };
+        Assert.True(await ProcessAsync(reopened, staleActivation, key));
+        Assert.True(await ProcessAsync(reopened, equalActivation, key));
+        Assert.False(await ProcessAsync(reopened, equalActivation, key));
+
+        var entitlement = (await reopened.GetEntitlementAsync("subscription:one"))!;
+        Assert.False(entitlement.Active);
+        Assert.Equal(cancelled.OccurredUtc, entitlement.UpdatedUtc);
+        var staleAudit = (await reopened.GetWebhookAuditAsync(staleActivation.EventId))!;
+        Assert.Equal(PayPalSandboxWebhookPolicy.EntitlementStaleIgnored, staleAudit.DecisionCode);
+        Assert.Equal(64, staleAudit.SubscriptionSha256.Length);
+        Assert.Equal(64, staleAudit.PayloadSha256.Length);
+        Assert.DoesNotContain("subscription:one", staleAudit.SubscriptionSha256, StringComparison.Ordinal);
+        var equalAudit = (await reopened.GetWebhookAuditAsync(equalActivation.EventId))!;
+        Assert.Equal(PayPalSandboxWebhookPolicy.EntitlementEqualIgnored, equalAudit.DecisionCode);
+
+        var reactivated = Event("event:causal-new", "transmission:causal-new",
+            "BILLING.SUBSCRIPTION.ACTIVATED", 0) with { OccurredUtc = now.AddMinutes(20) };
+        var staleRefund = Event("event:causal-old-refund", "transmission:causal-old-refund",
+            "PAYMENT.SALE.REFUNDED", 300) with { OccurredUtc = now.AddMinutes(15) };
+        var sameTimeCancellation = Event("event:causal-tie-cancel", "transmission:causal-tie-cancel",
+            "BILLING.SUBSCRIPTION.CANCELLED", 0) with { OccurredUtc = now.AddMinutes(20) };
+        await ProcessAsync(reopened, reactivated, key);
+        await ProcessAsync(reopened, staleRefund, key);
+        Assert.True((await reopened.GetEntitlementAsync("subscription:one"))!.Active);
+        Assert.Equal(
+            PayPalSandboxWebhookPolicy.EntitlementStaleIgnored,
+            (await reopened.GetWebhookAuditAsync(staleRefund.EventId))!.DecisionCode);
+        Assert.Equal(-300, await reopened.BalanceAsync(LedgerAccount.Cash));
+        Assert.True(await reopened.ReconcilesAsync());
+        await ProcessAsync(reopened, sameTimeCancellation, key);
+        Assert.False((await reopened.GetEntitlementAsync("subscription:one"))!.Active);
+        Assert.Equal(
+            PayPalSandboxWebhookPolicy.EntitlementAppliedEqualDeactivation,
+            (await reopened.GetWebhookAuditAsync(sameTimeCancellation.EventId))!.DecisionCode);
+    }
+
+    [Fact]
+    public async Task LegacySchema_MigratesWithoutReactivatingNewerEntitlement()
+    {
+        Directory.CreateDirectory(root);
+        var databasePath = Path.Combine(root, "care-ledger.sqlite3");
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Pooling = false,
+        }.ToString();
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE webhook_events(
+                    event_id TEXT PRIMARY KEY,
+                    transmission_id TEXT NOT NULL UNIQUE,
+                    event_type TEXT NOT NULL,
+                    payload_sha256 TEXT NOT NULL,
+                    occurred_utc TEXT NOT NULL
+                );
+                CREATE TABLE entitlements(
+                    subscription_id TEXT PRIMARY KEY,
+                    active INTEGER NOT NULL CHECK(active IN (0, 1)),
+                    updated_utc TEXT NOT NULL
+                );
+                INSERT INTO webhook_events(
+                    event_id, transmission_id, event_type, payload_sha256, occurred_utc)
+                VALUES('event:legacy', 'transmission:legacy',
+                    'BILLING.SUBSCRIPTION.CANCELLED', 'legacy-digest', $updated);
+                INSERT INTO entitlements(subscription_id, active, updated_utc)
+                VALUES('subscription:one', 0, $updated);
+                PRAGMA user_version = 1;
+                """;
+            command.Parameters.AddWithValue("$updated", now.AddMinutes(10).ToString("O"));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var legacyAudit = (await repository.GetWebhookAuditAsync("event:legacy"))!;
+        Assert.Equal("legacy_unclassified", legacyAudit.DecisionCode);
+        Assert.Equal(string.Empty, legacyAudit.SubscriptionSha256);
+        var key = Enumerable.Repeat((byte)42, 32).ToArray();
+        var stale = Event("event:post-migration", "transmission:post-migration",
+            "BILLING.SUBSCRIPTION.ACTIVATED", 0) with { OccurredUtc = now };
+        Assert.True(await ProcessAsync(repository, stale, key));
+        Assert.False((await repository.GetEntitlementAsync("subscription:one"))!.Active);
+        Assert.Equal(
+            PayPalSandboxWebhookPolicy.EntitlementStaleIgnored,
+            (await repository.GetWebhookAuditAsync(stale.EventId))!.DecisionCode);
+
+        await using var reopened = new SqliteConnection(connectionString);
+        await reopened.OpenAsync();
+        var versionCommand = reopened.CreateCommand();
+        versionCommand.CommandText = "PRAGMA user_version;";
+        Assert.Equal(2L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -177,6 +290,15 @@ public sealed class DurableCareRepositoryTests : IDisposable
 
     private PayPalSandboxWebhookEvent Event(string eventId, string transmissionId, string eventType, long amount) =>
         new(eventId, transmissionId, eventType, "subscription:one", amount, "USD", now);
+
+    private static Task<bool> ProcessAsync(
+        DurableCareRepository repository,
+        PayPalSandboxWebhookEvent webhook,
+        byte[] key) =>
+        repository.ProcessSandboxWebhookAsync(
+            webhook,
+            PayPalSandboxWebhookIntegrity.Sign(webhook, key),
+            key);
 
     private static PayoutBatchPreview Preview(string batchId) => new(
         batchId,
