@@ -31,7 +31,7 @@ public sealed record DurableWebhookAuditRecord(
     DateTimeOffset OccurredUtc,
     string DecisionCode);
 
-public sealed class DurableCareRepository
+public sealed class DurableCareRepository : IPayPalSandboxPayoutReferenceStore
 {
     private readonly string connectionString;
     private readonly SemaphoreSlim mutationLock = new(1, 1);
@@ -249,6 +249,7 @@ public sealed class DurableCareRepository
         CancellationToken cancellationToken = default)
     {
         if (preview.BatchId != result.BatchId || preview.Mode != PayoutExecutionMode.Sandbox ||
+            !result.IsTerminal ||
             string.IsNullOrWhiteSpace(result.ProviderStatus) || result.ProviderStatus.Length > 128 ||
             result.ProviderStatus.Any(char.IsControl))
         {
@@ -427,6 +428,67 @@ public sealed class DurableCareRepository
             : null;
     }
 
+    public async Task<string?> GetProviderBatchIdAsync(
+        string localBatchId,
+        CancellationToken cancellationToken = default)
+    {
+        PayPalSandboxValidation.RequireLocalBatchId(localBatchId);
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT provider_batch_id FROM payout_batches WHERE batch_id = $batch;";
+        command.Parameters.AddWithValue("$batch", localBatchId);
+        var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return value is null or DBNull ? null : (string)value;
+    }
+
+    public async Task StoreProviderBatchIdAsync(
+        string localBatchId,
+        string providerBatchId,
+        CancellationToken cancellationToken = default)
+    {
+        PayPalSandboxValidation.RequireLocalBatchId(localBatchId);
+        PayPalSandboxValidation.RequireProviderBatchId(providerBatchId);
+        await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var command = connection.CreateCommand();
+            command.CommandText = "SELECT provider_batch_id FROM payout_batches WHERE batch_id = $batch;";
+            command.Parameters.AddWithValue("$batch", localBatchId);
+            var existing = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            if (existing is null)
+            {
+                throw new InvalidOperationException("The provider payout reference has no reserved local batch.");
+            }
+
+            if (existing is not DBNull)
+            {
+                if (!string.Equals((string)existing, providerBatchId, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("The provider payout reference conflicts with prior data.");
+                }
+
+                return;
+            }
+
+            command.Parameters.Clear();
+            command.CommandText = """
+                UPDATE payout_batches SET provider_batch_id = $provider
+                WHERE batch_id = $batch AND provider_batch_id IS NULL;
+                """;
+            command.Parameters.AddWithValue("$provider", providerBatchId);
+            command.Parameters.AddWithValue("$batch", localBatchId);
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+            {
+                throw new InvalidOperationException("The provider payout reference transition conflicted.");
+            }
+        }
+        finally
+        {
+            mutationLock.Release();
+        }
+    }
+
     public async Task<DurableWebhookAuditRecord?> GetWebhookAuditAsync(
         string eventId,
         CancellationToken cancellationToken = default)
@@ -464,7 +526,7 @@ public sealed class DurableCareRepository
         command.CommandText = "PRAGMA user_version;";
         var schemaVersion = Convert.ToInt32(
             await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
-        if (schemaVersion > 2)
+        if (schemaVersion > 3)
         {
             throw new InvalidOperationException("The CARE ledger schema is newer than this application.");
         }
@@ -509,6 +571,7 @@ public sealed class DurableCareRepository
                 preview_json TEXT NOT NULL,
                 status TEXT NOT NULL CHECK(status IN ('reserved', 'succeeded', 'failed')),
                 provider_status TEXT,
+                provider_batch_id TEXT,
                 created_utc TEXT NOT NULL,
                 updated_utc TEXT NOT NULL
             );
@@ -538,7 +601,19 @@ public sealed class DurableCareRepository
             "source_event_type",
             "TEXT NOT NULL DEFAULT 'legacy_unknown'",
             cancellationToken).ConfigureAwait(false);
-        command.CommandText = "PRAGMA user_version = 2;";
+        await EnsureColumnAsync(
+            connection,
+            "payout_batches",
+            "provider_batch_id",
+            "TEXT",
+            cancellationToken).ConfigureAwait(false);
+        command.CommandText = """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_payout_batches_provider_batch_id
+            ON payout_batches(provider_batch_id)
+            WHERE provider_batch_id IS NOT NULL;
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        command.CommandText = "PRAGMA user_version = 3;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -740,7 +815,12 @@ public sealed class DurablePayoutCoordinator(
         }
 
         var result = await provider.SendSandboxAsync(preview, cancellationToken).ConfigureAwait(false);
-        await repository.CompletePayoutAsync(preview, result, now, cancellationToken).ConfigureAwait(false);
+        ValidateSubmissionResult(preview, result);
+        if (result.IsTerminal)
+        {
+            await repository.CompletePayoutAsync(preview, result, now, cancellationToken).ConfigureAwait(false);
+        }
+
         return result;
     }
 
@@ -762,7 +842,7 @@ public sealed class DurablePayoutCoordinator(
         var resubmitted = 0;
         foreach (var item in pending)
         {
-            var lookup = await reconcilable.LookupSandboxAsync(item.Preview.BatchId, cancellationToken)
+            var lookup = await reconcilable.LookupSandboxAsync(item.Preview, cancellationToken)
                 .ConfigureAwait(false);
             if (!string.Equals(lookup.BatchId, item.Preview.BatchId, StringComparison.Ordinal))
             {
@@ -774,6 +854,7 @@ public sealed class DurablePayoutCoordinator(
             {
                 case SandboxPayoutLookupState.NotFound:
                     result = await reconcilable.SendSandboxAsync(item.Preview, cancellationToken).ConfigureAwait(false);
+                    ValidateSubmissionResult(item.Preview, result);
                     resubmitted++;
                     break;
                 case SandboxPayoutLookupState.Pending:
@@ -795,11 +876,15 @@ public sealed class DurablePayoutCoordinator(
                     throw new InvalidOperationException("The sandbox payout lookup state is invalid.");
             }
 
-            if (result is not null)
+            if (result is { IsTerminal: true })
             {
                 await repository.CompletePayoutAsync(item.Preview, result, now, cancellationToken)
                     .ConfigureAwait(false);
                 completed++;
+            }
+            else if (result is { IsTerminal: false })
+            {
+                stillPending++;
             }
         }
 
@@ -814,5 +899,18 @@ public sealed class DurablePayoutCoordinator(
         }
 
         return status;
+    }
+
+    private static void ValidateSubmissionResult(
+        PayoutBatchPreview preview,
+        PayoutBatchResult result)
+    {
+        if (!string.Equals(result.BatchId, preview.BatchId, StringComparison.Ordinal) ||
+            result.Succeeded && !result.IsTerminal ||
+            string.IsNullOrWhiteSpace(result.ProviderStatus) ||
+            result.ProviderStatus.Length > 128 || result.ProviderStatus.Any(char.IsControl))
+        {
+            throw new InvalidOperationException("The sandbox provider returned an invalid submission result.");
+        }
     }
 }

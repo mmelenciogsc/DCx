@@ -148,7 +148,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(2L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(3L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         {
             await connection.OpenAsync();
             var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 3;";
+            command.CommandText = "PRAGMA user_version = 4;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -177,7 +177,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(3L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(4L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -336,6 +336,49 @@ public sealed class DurableCareRepositoryTests : IDisposable
         Assert.Equal(0, provider.SendCalls);
     }
 
+    [Fact]
+    public async Task PendingSubmission_RemainsReservedUntilTerminalReconciliation()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var preview = Preview("batch:asynchronous-provider");
+        var provider = new PendingFixtureProvider();
+
+        var result = await new DurablePayoutCoordinator(repository, provider).ExecuteAsync(
+            preview, true, true, preview.EligibilityDate, now);
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.IsTerminal);
+        Assert.Equal("PENDING", result.ProviderStatus);
+        Assert.Equal("reserved", (await repository.GetPayoutStateAsync(preview.BatchId))!.Status);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.CompletePayoutAsync(preview, result, now));
+    }
+
+    [Fact]
+    public async Task ProviderBatchReference_IsConflictSafeAndSurvivesReopen()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var preview = Preview("batch:provider-reference");
+        Assert.True(await repository.ReservePayoutAsync(
+            preview, true, true, preview.EligibilityDate, now));
+
+        await repository.StoreProviderBatchIdAsync(preview.BatchId, "PB-123456");
+        await repository.StoreProviderBatchIdAsync(preview.BatchId, "PB-123456");
+        var reopened = await DurableCareRepository.OpenAsync(root);
+
+        Assert.Equal("PB-123456", await reopened.GetProviderBatchIdAsync(preview.BatchId));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            reopened.StoreProviderBatchIdAsync(preview.BatchId, "PB-OTHER"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            reopened.StoreProviderBatchIdAsync("batch:not-reserved", "PB-NEW"));
+
+        var second = Preview("batch:provider-reference-two");
+        Assert.True(await reopened.ReservePayoutAsync(
+            second, true, true, second.EligibilityDate, now));
+        await Assert.ThrowsAsync<SqliteException>(() =>
+            reopened.StoreProviderBatchIdAsync(second.BatchId, "PB-123456"));
+    }
+
     public void Dispose()
     {
         TestDirectory.DeleteIfExists(root);
@@ -393,10 +436,11 @@ public sealed class DurableCareRepositoryTests : IDisposable
             lookups[batchId] = new SandboxPayoutLookupResult(batchId, state, providerStatus);
 
         public Task<SandboxPayoutLookupResult> LookupSandboxAsync(
-            string batchId,
+            PayoutBatchPreview preview,
             CancellationToken cancellationToken) =>
-            Task.FromResult(lookups.GetValueOrDefault(batchId) ??
-                            new SandboxPayoutLookupResult(batchId, SandboxPayoutLookupState.NotFound, null));
+            Task.FromResult(lookups.GetValueOrDefault(preview.BatchId) ??
+                            new SandboxPayoutLookupResult(
+                                preview.BatchId, SandboxPayoutLookupState.NotFound, null));
 
         public Task<PayoutBatchResult> SendSandboxAsync(
             PayoutBatchPreview preview,
@@ -406,5 +450,13 @@ public sealed class DurableCareRepositoryTests : IDisposable
             SetLookup(preview.BatchId, SandboxPayoutLookupState.Succeeded, "SANDBOX_SUCCESS");
             return Task.FromResult(new PayoutBatchResult(preview.BatchId, true, "SANDBOX_SUCCESS"));
         }
+    }
+
+    private sealed class PendingFixtureProvider : IPayoutSandboxProvider
+    {
+        public Task<PayoutBatchResult> SendSandboxAsync(
+            PayoutBatchPreview preview,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new PayoutBatchResult(preview.BatchId, false, "PENDING", false));
     }
 }

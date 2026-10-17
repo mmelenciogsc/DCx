@@ -17,7 +17,11 @@ public sealed record PayoutBatchPreview(
     public long TotalCents => Items.Sum(item => item.AmountCents);
 }
 
-public sealed record PayoutBatchResult(string BatchId, bool Succeeded, string ProviderStatus);
+public sealed record PayoutBatchResult(
+    string BatchId,
+    bool Succeeded,
+    string ProviderStatus,
+    bool IsTerminal = true);
 
 public interface IPayoutSandboxProvider
 {
@@ -39,7 +43,9 @@ public sealed record SandboxPayoutLookupResult(
 
 public interface IReconcilablePayoutSandboxProvider : IPayoutSandboxProvider
 {
-    Task<SandboxPayoutLookupResult> LookupSandboxAsync(string batchId, CancellationToken cancellationToken);
+    Task<SandboxPayoutLookupResult> LookupSandboxAsync(
+        PayoutBatchPreview preview,
+        CancellationToken cancellationToken);
 }
 
 public sealed class PayoutSafetyCoordinator(IPayoutSandboxProvider sandboxProvider)
