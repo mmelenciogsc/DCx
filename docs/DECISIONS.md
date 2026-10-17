@@ -47,6 +47,7 @@
 | [0043](architecture/adr/0043-immediate-transaction-care-replay.md) | Serialize reviewed CARE replay across shared-SQLite connections and commit the bounded batch atomically | Accepted for shared-SQLite local validation; authenticated distributed operations blocked | 2026-10-18 |
 | [0044](architecture/adr/0044-authenticated-loopback-care-operations-api.md) | Expose aggregate CARE review/replay only through a separately gated, digest-authenticated loopback simulation API | Accepted for default-off local simulation; production identity and deployment blocked | 2026-10-18 |
 | [0045](architecture/adr/0045-transactional-minimized-care-operator-audit.md) | Chain minimized authenticated CARE simulation decisions in the same finance transaction | Accepted for default-off local simulation; production identity and centralized audit blocked | 2026-10-18 |
-| [0046](architecture/adr/0046-default-off-aggregate-care-monitor.md) | Detect aggregate CARE attention and recovery transitions without automatic processing | Accepted for default-off local simulation; production scheduling and notification blocked | 2026-10-18 |
+| [0046](architecture/adr/0046-default-off-aggregate-care-monitor.md) | Detect aggregate CARE attention and recovery transitions without automatic processing | Accepted; process-memory state superseded by 0047 | 2026-10-18 |
+| [0047](architecture/adr/0047-durable-aggregate-care-alert-outbox.md) | Persist chained aggregate CARE alerts with exact at-least-once delivery receipts | Accepted for shared-SQLite local simulation; external notification and distributed scheduling blocked | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

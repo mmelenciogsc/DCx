@@ -1,6 +1,6 @@
 # ADR 0046: Monitor aggregate CARE transitions without automatic processing
 
-- Status: Accepted for default-off local simulation; production scheduling and notification remain blocked
+- Status: Accepted for monitor behavior; process-memory state superseded by ADR 0047; production notification remains blocked
 - Date: 2026-10-18
 
 ## Context
@@ -19,5 +19,5 @@ The simulation sink logs only a stable alert code and aggregate pending/due/bloc
 
 - Automated evidence now covers bounded cadence, default-off service wiring, state/recovery transitions, unchanged-state deduplication, concurrent polling, sink retry, aggregate-only shape and zero process/provider actions.
 - Existing review, approval, transactional audit and replay gates are unchanged; the monitor cannot trigger them.
-- Deduplication is process-local. There is no durable schedule/alert state, external notification transport, delivery receipt, acknowledgment, escalation, on-call routing, SLA, dashboard or accessible blocked-event disposition. Production scheduling/alerting therefore remains blocked.
+- At this decision, deduplication was process-local. ADR 0047 subsequently added same-database durable state and at-least-once delivery receipts. External notification transport, human acknowledgment, escalation, on-call routing, SLA, dashboard and accessible blocked-event disposition remain absent.
 - Logging is not an operator notification system or centralized audit. Deployment, monitoring, retention and human assistive-technology acceptance remain required.

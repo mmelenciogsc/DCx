@@ -1,7 +1,7 @@
 # P14 — Pilot and release readiness
 
 - Status: BLOCKED / NO_GO (local readiness controls pass; pilot and production activation are off)
-- Implementation commits: `01539fd`, `66715b0`, `edd516a`, `26da605`, `993149e`, `54f66bc`, `9877a60`, `faf6b71`, `1631ebb`, `599cee9`, `ec37d1f`, `a662abb`, `8583b29`, `d5624a6`, `9576d63`, `261f6ee`, `76d0750`, `562667b`, `f66dd20`, `3bf9452`, `23ed1d9`, `9140183`, `8cb2db4`
+- Implementation commits: `01539fd`, `66715b0`, `edd516a`, `26da605`, `993149e`, `54f66bc`, `9877a60`, `faf6b71`, `1631ebb`, `599cee9`, `ec37d1f`, `a662abb`, `8583b29`, `d5624a6`, `9576d63`, `261f6ee`, `76d0750`, `562667b`, `f66dd20`, `3bf9452`, `23ed1d9`, `9140183`, `8cb2db4`, `eb81ac3`
 - Documentation commit: recorded by the commit containing this file
 
 No pilot was started, no telemetry was collected, no user was enrolled, and no production service or payment was activated.
@@ -32,7 +32,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 exact-namespace release/readiness tests: passed 10, failed 0, skipped 0; about 1 second. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
-- Current committed-source expanded full suite: passed 354, failed 0, skipped 0; about 8 seconds.
+- Current committed-source expanded full suite: passed 357, failed 0, skipped 0; about 9 seconds.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -40,8 +40,8 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 - Decision: `NO_GO`.
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled consent state, blocker list, metric-definition list and refresh action. The validator confirmed that no control named `Activate production` exists.
-- The P11 readiness gate was rerun after the default-off read-only aggregate transition monitor was implemented. It remains blocking because exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider policy, real operator identity/MFA/TLS/secret custody/centralized audit, deployed distributed fencing, durable scheduling/external alert delivery, accessible disposition/notification and authorized provider acceptance remain absent.
-- Evidence: `artifacts/test-results/p14-4eb8fe8bc4da4d52875ce9e6fdb34375/go-no-go.json` with `p14-readiness.trx` beside it, generated from the exact source committed through `8cb2db4` and intentionally not committed.
+- The P11 readiness gate was rerun after the durable same-database aggregate alert outbox and delivery receipts were implemented. It remains blocking because exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider policy, real operator identity/MFA/TLS/secret custody/centralized audit, deployed distributed fencing, external alert delivery/human acknowledgment, accessible disposition/notification and authorized provider acceptance remain absent.
+- Evidence: `artifacts/test-results/p14-fecbce46daa64b4187e44c0ddbe5e028/go-no-go.json` with `p14-readiness.trx` beside it, generated from the exact source committed through `eb81ac3` and intentionally not committed.
 
 ## Changed files in the latest milestone
 
