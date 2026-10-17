@@ -11,6 +11,7 @@ $solution = Join-Path $repoRoot "DCx.slnx"
 $tests = Join-Path $repoRoot "tests\DCx.Core.Tests\DCx.Core.Tests.csproj"
 $localModelsTrx = Join-Path $runRoot "p06-local-models.trx"
 $fixtureImage = Join-Path $runRoot "vision-fixture.png"
+$ffmpegAudioFixture = Join-Path $runRoot "ffmpeg-audio-fixture.mp3"
 $manifestPath = Join-Path $runRoot "hardware-manifest.json"
 $whisperRegistrationRoot = Join-Path $runRoot "whisper-registration"
 $whisperRegistrationEvidencePath = Join-Path $whisperRegistrationRoot "whisper-registration-evidence.json"
@@ -227,6 +228,107 @@ if ($ffmpegReview.LicenseText -notmatch "GNU GENERAL PUBLIC LICENSE" -or
     $ffmpegReview.Binding.AuthenticodeStatus -ne "NotSigned") {
     throw "The installed FFmpeg license or real Windows signature evidence changed."
 }
+
+& $ffmpeg.Source -hide_banner -nostdin -loglevel error -f lavfi `
+    -i "sine=frequency=440:sample_rate=48000:duration=1" -c:a libmp3lame -b:a 128k -y $ffmpegAudioFixture
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ffmpegAudioFixture -PathType Leaf)) {
+    throw "The installed FFmpeg candidate could not create the deterministic MP3 fixture."
+}
+$ffmpegBenchmarkStore = [DCx.Core.LocalModels.FfmpegBackendSelectionStore]::OpenAsync(
+    (Join-Path $runRoot "ffmpeg-benchmark-data"),
+    [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+$null = $ffmpegBenchmarkStore.SetAsync(
+    $ffmpegReview.Binding, $true, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+$ffmpegBenchmarkState = $ffmpegBenchmarkStore.GetStateAsync(
+    [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+if ($null -eq $ffmpegBenchmarkState.Backend) {
+    throw "The disposable FFmpeg benchmark approval did not persist."
+}
+$ffmpegProcessor = $ffmpegBenchmarkState.Backend.CreateProcessor([TimeSpan]::FromSeconds(30))
+$ffmpegExtractionClock = [Diagnostics.Stopwatch]::StartNew()
+$ffmpegArtifact = $null
+$ffmpegWavePath = $null
+try {
+    $ffmpegArtifact = $ffmpegProcessor.ExtractWaveAsync(
+        $ffmpegAudioFixture, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    $ffmpegWavePath = $ffmpegArtifact.Path
+    $ffmpegWaveBytes = [IO.File]::ReadAllBytes($ffmpegWavePath)
+    if ($ffmpegWaveBytes.Length -lt 44 -or
+        [Text.Encoding]::ASCII.GetString($ffmpegWaveBytes, 0, 4) -ne "RIFF" -or
+        [Text.Encoding]::ASCII.GetString($ffmpegWaveBytes, 8, 4) -ne "WAVE") {
+        throw "The production FFmpeg processor returned an invalid WAV container."
+    }
+    $waveFormat = $null
+    $waveChannels = $null
+    $waveSampleRate = $null
+    $waveBits = $null
+    $waveDataOffset = $null
+    $waveDataBytes = $null
+    for ($offset = 12; $offset + 8 -le $ffmpegWaveBytes.Length;) {
+        $chunkName = [Text.Encoding]::ASCII.GetString($ffmpegWaveBytes, $offset, 4)
+        $chunkBytes = [BitConverter]::ToUInt32($ffmpegWaveBytes, $offset + 4)
+        $chunkData = $offset + 8
+        if ($chunkData + $chunkBytes -gt $ffmpegWaveBytes.Length) {
+            throw "The production FFmpeg processor returned malformed WAV chunk bounds."
+        }
+        if ($chunkName -eq "fmt " -and $chunkBytes -ge 16) {
+            $waveFormat = [BitConverter]::ToUInt16($ffmpegWaveBytes, $chunkData)
+            $waveChannels = [BitConverter]::ToUInt16($ffmpegWaveBytes, $chunkData + 2)
+            $waveSampleRate = [BitConverter]::ToUInt32($ffmpegWaveBytes, $chunkData + 4)
+            $waveBits = [BitConverter]::ToUInt16($ffmpegWaveBytes, $chunkData + 14)
+        }
+        elseif ($chunkName -eq "data") {
+            $waveDataOffset = $chunkData
+            $waveDataBytes = [int]$chunkBytes
+        }
+        $offset = $chunkData + [int]$chunkBytes + ([int]$chunkBytes % 2)
+    }
+    if ($waveFormat -ne 1 -or $waveChannels -ne 1 -or $waveSampleRate -ne 16000 -or
+        $waveBits -ne 16 -or $null -eq $waveDataOffset -or $waveDataBytes -lt 16000) {
+        throw "The production FFmpeg processor did not produce bounded 16 kHz mono PCM16 audio."
+    }
+    $sampleCount = [int]($waveDataBytes / 2)
+    $zeroCrossings = 0
+    $lastSign = 0
+    $sumSquares = 0.0
+    for ($sampleIndex = 0; $sampleIndex -lt $sampleCount; $sampleIndex++) {
+        $sample = [BitConverter]::ToInt16($ffmpegWaveBytes, $waveDataOffset + ($sampleIndex * 2))
+        $sumSquares += [double]$sample * [double]$sample
+        $sign = if ($sample -gt 0) { 1 } elseif ($sample -lt 0) { -1 } else { 0 }
+        if ($sign -ne 0) {
+            if ($lastSign -ne 0 -and $sign -ne $lastSign) { $zeroCrossings++ }
+            $lastSign = $sign
+        }
+    }
+    $waveDurationSeconds = $sampleCount / [double]$waveSampleRate
+    $measuredFrequencyHz = $zeroCrossings / (2.0 * $waveDurationSeconds)
+    $waveRms = [Math]::Sqrt($sumSquares / $sampleCount)
+    if ($measuredFrequencyHz -lt 430 -or $measuredFrequencyHz -gt 450 -or $waveRms -lt 1000) {
+        throw "The production FFmpeg processor did not preserve the deterministic audio signal."
+    }
+    $ffmpegWaveLength = $ffmpegArtifact.Length
+}
+finally {
+    $ffmpegExtractionClock.Stop()
+    if ($null -ne $ffmpegArtifact) {
+        $ffmpegArtifact.DisposeAsync().GetAwaiter().GetResult()
+    }
+    $null = $ffmpegBenchmarkStore.ClearAsync(
+        [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+}
+if (-not [string]::IsNullOrWhiteSpace($ffmpegWavePath) -and (Test-Path -LiteralPath $ffmpegWavePath)) {
+    throw "The production FFmpeg processor retained its leased temporary WAV after disposal."
+}
+
+$legacyWhisperModelRoot = Join-Path $env:LOCALAPPDATA "ADFi\models\whisper"
+$incompatibleWhisperModels = @()
+if (Test-Path -LiteralPath $legacyWhisperModelRoot -PathType Container) {
+    $incompatibleWhisperModels = @(
+        Get-ChildItem -LiteralPath $legacyWhisperModelRoot -File -Filter "*.pt" -ErrorAction SilentlyContinue |
+            Sort-Object Name | Select-Object -First 16 |
+            ForEach-Object { [ordered]@{ name = $_.Name; bytes = [long]$_.Length; format = "pytorch_pt"; compatible = $false } }
+    )
+}
 $manifest = [ordered]@{
     captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
     gpu_name = $gpuParts[0]
@@ -255,7 +357,16 @@ $manifest = [ordered]@{
     ffmpeg_license_sha256 = [string]$ffmpegReview.Binding.LicenseSha256
     ffmpeg_authenticode_status = [string]$ffmpegReview.Binding.AuthenticodeStatus
     ffmpeg_registration_candidate_approved = $false
+    ffmpeg_real_audio_fixture_passed = $true
+    ffmpeg_real_audio_extraction_ms = [long]$ffmpegExtractionClock.ElapsedMilliseconds
+    ffmpeg_real_audio_output_bytes = [long]$ffmpegWaveLength
+    ffmpeg_real_audio_sample_rate = [int]$waveSampleRate
+    ffmpeg_real_audio_channels = [int]$waveChannels
+    ffmpeg_real_audio_bits_per_sample = [int]$waveBits
+    ffmpeg_real_audio_measured_frequency_hz = [Math]::Round($measuredFrequencyHz, 2)
+    ffmpeg_real_audio_rms = [Math]::Round($waveRms, 2)
     whisper_backend_available = $null -ne $whisper
+    incompatible_whisper_model_candidates = @($incompatibleWhisperModels)
     installed_embedding_models = @($embeddingModels)
     whisper_adapter_fixture_passed = $true
     ollama_embedding_adapter_fixture_passed = $true
@@ -288,7 +399,9 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "FFmpeg available=$($manifest.ffmpeg_available)"
 "FFmpeg bytes=$($manifest.ffmpeg_executable_bytes); SHA-256=$($manifest.ffmpeg_executable_sha256)"
 "FFmpeg license SHA-256=$($manifest.ffmpeg_license_sha256); Windows status=$($manifest.ffmpeg_authenticode_status); approved=False"
+"Approved-binding real FFmpeg MP3-to-WAV fixture=PASS; elapsed ms=$($manifest.ffmpeg_real_audio_extraction_ms); measured Hz=$($manifest.ffmpeg_real_audio_measured_frequency_hz)"
 "Whisper backend available=$($manifest.whisper_backend_available)"
+"Incompatible existing PyTorch Whisper model candidates=$(@($manifest.incompatible_whisper_model_candidates).Count)"
 "Installed embedding models=$(@($manifest.installed_embedding_models).Count)"
 "Hash-pinned Whisper adapter fixture=PASS"
 "Pinned Whisper executable/model execution leases=PASS"
