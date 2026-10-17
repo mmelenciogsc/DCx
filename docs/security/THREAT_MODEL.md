@@ -91,7 +91,10 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - Contribution preparation defaults off, and each changed item invalidates its prior review/approval digest. Local preparation always yields quarantine and no UI/network upload action exists.
 - Rights/license/sensitive-data attestations, bounded approval age and unique nonces are revalidated at authoritative intake; client-provided scan results are not trusted.
 - Scanner findings store only stable codes, not matched secrets or PII. Risky/dummy content cannot transition to approved.
-- Approved CKB metadata enters the signed release path; withdrawal emits deprecation. CCB transition is denied until an actual hostile-code sandbox passes.
+- Approved CKB metadata enters the signed release path; withdrawal emits deprecation. CCB transition is denied until the authoritative end-to-end hostile-code gates pass.
+- A server-side rootless Bubblewrap prototype now executes hostile BusyBox-shell fixtures in separate user/mount/PID/network/IPC/UTS/cgroup namespaces. It drops all capabilities, clears environment, runs as 65534, exposes only digest-bound read-only package/input/runtime mounts, remounts root read-only and applies bounded CPU/address-space/process/file/descriptor/output/wall limits.
+- Sandbox evidence binds the claimed artifact, canonical extracted workspace, test suite, policy launcher, Bubblewrap, runtime and output digests. Outside-quarantine paths, links/special files, digest substitution, host/system reads, external network, root writes, inherited secrets, timeouts and output floods fail closed in the local hostile gate.
+- This is not yet the authoritative publication boundary: no package-ingestion/extraction pipeline, SBOM/dependency/lock validation, durable review evidence, seccomp, cgroup-v2 measurement, immutable builder image, Ubuntu 24.04 deployment or independent penetration test is connected. CCB approval therefore remains structurally denied.
 - Credit lineage rejects cycles, duplicate parents, invalid weights and total parent credit above 100%.
 - Usage receipts contain identifiers, time and verification status only. Integrity, replay, entitlement, approved-resource, self-use, success, time and rate checks fail closed; client honesty is still treated as an untrusted signal.
 

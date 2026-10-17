@@ -8,7 +8,7 @@ All seven current critical/major issues are triaged to owner roles with evidence
 |---|---|---|---|
 | P06 local transcription/embeddings | Major | Local-model engineering | Approved install and hardware benchmark |
 | P09 authoritative Compose simulation | Major | Platform engineering | Approved native Docker/Compose run |
-| P10 hostile CCB sandbox | Critical | Security engineering | Implement and penetration-test isolation |
+| P10 production hostile CCB isolation | Critical | Security engineering | Integrate authoritative package/evidence flow, add seccomp/cgroup/base-image controls, and penetration-test |
 | P11 PayPal eligibility/reconciliation | Critical | Finance platform and owner | Approved sandbox credentials, official verification and reconciliation |
 | P12 live/human acceptance | Major | Quality and accessibility | Separately authorized provider and AT acceptance |
 | P13 signed installer lifecycle | Critical | Release and security engineering | Signed MSIX, clean-VM, AV/vulnerability and AT gates |

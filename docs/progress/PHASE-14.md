@@ -32,7 +32,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 release/readiness tests: passed 14, failed 0, skipped 0; about 1 second.
-- Current expanded full suite: passed 151, failed 0, skipped 0; about 2 seconds.
+- Current expanded full suite: passed 155, failed 0, skipped 0; about 1 second.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -40,7 +40,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-
 - Decision: `NO_GO`.
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled consent state, blocker list, metric-definition list and refresh action. The validator confirmed that no control named `Activate production` exists.
-- Evidence: `artifacts/test-results/p14-e72be5b1edb9457789270ce65511b507/go-no-go.json` (generated and intentionally not committed).
+- Evidence: `artifacts/test-results/p14-fc7ff6efe40b4d28833725615b7427d9/go-no-go.json` (generated and intentionally not committed).
 
 ## Changed files in the latest milestone
 
