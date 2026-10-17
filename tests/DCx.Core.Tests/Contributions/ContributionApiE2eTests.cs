@@ -64,6 +64,7 @@ public sealed class ContributionApiE2eTests : IDisposable
                        await client.GetStringAsync(new Uri(endpoint, "health"))))
             {
                 Assert.True(health.RootElement.GetProperty("contributionApi").GetBoolean());
+                Assert.True(health.RootElement.GetProperty("contributionRateLimit").GetBoolean());
                 Assert.True(health.RootElement.GetProperty("contributionWorker").GetBoolean());
                 Assert.False(health.RootElement.GetProperty("ccbSandbox").GetBoolean());
             }
@@ -286,6 +287,68 @@ public sealed class ContributionApiE2eTests : IDisposable
             Assert.DoesNotContain(wrongToken, diagnostics, StringComparison.Ordinal);
             Assert.DoesNotContain(privateBody, diagnostics, StringComparison.Ordinal);
             Assert.DoesNotContain(riskyBody, diagnostics, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task LoopbackApi_RateLimitsUnauthenticatedRequestsWithoutLoggingCredentials()
+    {
+        Directory.CreateDirectory(root);
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var keyPath = Path.Combine(root, "rate-limit-key.pk8");
+        await File.WriteAllBytesAsync(keyPath, key.ExportPkcs8PrivateKey());
+        var contributorToken = $"contributor-{Guid.NewGuid():N}";
+        var reviewerToken = $"reviewer-{Guid.NewGuid():N}";
+        var endpoint = new Uri($"http://127.0.0.1:{ReserveEphemeralPort()}/");
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add(typeof(GlobalRegistryRepository).Assembly.Location);
+        startInfo.Environment["DCX_GLOBAL_SIMULATION"] = "1";
+        startInfo.Environment["DCX_GLOBAL_DATA_ROOT"] = Path.Combine(root, "rate-limit-server");
+        startInfo.Environment["DCX_GLOBAL_SIGNING_KEY"] = keyPath;
+        startInfo.Environment["DCX_GLOBAL_SIMULATION_URL"] = endpoint.AbsoluteUri;
+        startInfo.Environment["DCX_GLOBAL_CONTRIBUTION_API"] = "1";
+        startInfo.Environment["DCX_GLOBAL_CONTRIBUTION_REQUESTS_PER_MINUTE"] = "10";
+        startInfo.Environment["DCX_GLOBAL_CONTRIBUTOR_TOKEN_SHA256"] = Digest(contributorToken);
+        startInfo.Environment["DCX_GLOBAL_CONTRIBUTOR_PSEUDONYM"] = "contributor:rate-limit-fixture";
+        startInfo.Environment["DCX_GLOBAL_REVIEWER_TOKEN_SHA256"] = Digest(reviewerToken);
+        startInfo.Environment["DCX_GLOBAL_REVIEWER_ID"] = "reviewer:rate-limit-fixture";
+        startInfo.Environment["Logging__LogLevel__Default"] = "Warning";
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start the rate-limit fixture.");
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            await WaitForHealthAsync(client, endpoint, process, errorTask);
+            var pendingUri = new Uri(endpoint, "api/contributions/pending?limit=1");
+            for (var requestNumber = 0; requestNumber < 10; requestNumber++)
+            {
+                using var response = await client.GetAsync(pendingUri);
+                await AssertErrorAsync(
+                    response, HttpStatusCode.Unauthorized, "authentication_required");
+            }
+
+            using var limited = await client.GetAsync(pendingUri);
+            await AssertErrorAsync(limited, HttpStatusCode.TooManyRequests, "rate_limited");
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
+            }
+
+            var diagnostics = await outputTask + await errorTask;
+            Assert.DoesNotContain(contributorToken, diagnostics, StringComparison.Ordinal);
+            Assert.DoesNotContain(reviewerToken, diagnostics, StringComparison.Ordinal);
         }
     }
 

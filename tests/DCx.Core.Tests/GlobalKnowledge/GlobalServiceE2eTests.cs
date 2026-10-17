@@ -97,6 +97,7 @@ public sealed class GlobalServiceE2eTests : IDisposable
                        await httpClient.GetStringAsync(new Uri(endpoint, "health"))))
             {
                 Assert.False(health.RootElement.GetProperty("contributionApi").GetBoolean());
+                Assert.False(health.RootElement.GetProperty("contributionRateLimit").GetBoolean());
                 Assert.False(health.RootElement.GetProperty("contributionWorker").GetBoolean());
                 Assert.False(health.RootElement.GetProperty("ccbSandbox").GetBoolean());
             }

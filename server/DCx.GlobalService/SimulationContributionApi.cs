@@ -125,9 +125,11 @@ internal static class SimulationContributionApi
         WebApplication app,
         ContributionGovernanceService governance,
         SimulationContributionApiOptions options,
+        SimulationContributionRequestLimiter rateLimiter,
         bool contributionWorkerEnabled)
     {
         var group = app.MapGroup("/api/contributions");
+        group.AddEndpointFilter(new SimulationContributionRateLimitFilter(rateLimiter));
         group.MapPost("/intake", async (HttpRequest request, CancellationToken cancellationToken) =>
         {
             var authorization = Authorize(request, options, SimulationApiRole.Contributor);

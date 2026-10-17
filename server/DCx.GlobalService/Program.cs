@@ -14,6 +14,9 @@ if (string.IsNullOrWhiteSpace(dataRoot) || string.IsNullOrWhiteSpace(signingKeyP
 
 var builder = WebApplication.CreateBuilder(args);
 var contributionApiOptions = SimulationContributionApiOptions.Load();
+var contributionRateLimiter = contributionApiOptions is null
+    ? null
+    : new SimulationContributionRequestLimiter(SimulationContributionRateLimitOptions.Load());
 var contributionWorkerOptions = SimulationContributionWorkerOptions.Load(
     contributionApiOptions is not null);
 var inContainer = string.Equals(Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"), "true", StringComparison.OrdinalIgnoreCase);
@@ -93,6 +96,7 @@ app.MapGet("/health", () => Results.Ok(new
 {
     status = "simulation",
     contributionApi = contributionApiOptions is not null,
+    contributionRateLimit = contributionRateLimiter is not null,
     contributionWorker = contributionWorkerOptions is not null,
     ccbSandbox = ccbSandbox is not null,
 }));
@@ -137,12 +141,13 @@ app.MapGet("/api/artifacts/{sha256}", async (
     CancellationToken cancellationToken) =>
     Results.Bytes(await registry.ReadArtifactChunkAsync(sha256, offset, count, cancellationToken), "application/octet-stream"));
 
-if (contributionApiOptions is not null && governance is not null)
+if (contributionApiOptions is not null && contributionRateLimiter is not null && governance is not null)
 {
     SimulationContributionApi.Map(
         app,
         governance,
         contributionApiOptions,
+        contributionRateLimiter,
         contributionWorkerOptions is not null);
 }
 
