@@ -248,7 +248,8 @@ public sealed class PayPalSandboxHttpAdapterTests
             var source = new DurableCareOperationsSource(
                 repository,
                 processingCapabilityEnabled: true,
-                timeProvider: new FixedTimeProvider(received));
+                timeProvider: new FixedTimeProvider(received),
+                operatorPseudonymSha256: new string('b', 64));
             var exactReview = await source.RefreshAsync();
 
             await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
@@ -277,6 +278,7 @@ public sealed class PayPalSandboxHttpAdapterTests
             Assert.Equal("pending", first.State);
             Assert.Equal(0, first.AttemptCount);
             Assert.Null(await repository.GetWebhookAuditAsync("WH-A-OPERATIONS-ROLLBACK"));
+            Assert.Empty(await repository.GetCareOperatorActionAuditAsync());
             Assert.Equal(0, await repository.BalanceAsync(LedgerAccount.Cash));
             Assert.Equal(6, handler.Calls);
         }

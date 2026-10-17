@@ -25,6 +25,7 @@ public sealed class CareOperationsApiE2eTests : IDisposable
         await File.WriteAllBytesAsync(keyPath, signingKey.ExportPkcs8PrivateKey());
         var operatorToken = $"care-operator-{Guid.NewGuid():N}";
         var wrongToken = $"wrong-operator-{Guid.NewGuid():N}";
+        var operatorPseudonymSha256 = Digest("care-operator-fixture");
         var dataRoot = Path.Combine(root, "server");
         var careRoot = Path.Combine(dataRoot, "care");
         var repository = await DurableCareRepository.OpenAsync(careRoot);
@@ -61,6 +62,8 @@ public sealed class CareOperationsApiE2eTests : IDisposable
         startInfo.Environment["DCX_GLOBAL_CARE_OPERATIONS_API"] = "1";
         startInfo.Environment["DCX_GLOBAL_CARE_PROCESSING"] = "1";
         startInfo.Environment["DCX_GLOBAL_CARE_OPERATOR_TOKEN_SHA256"] = Digest(operatorToken);
+        startInfo.Environment["DCX_GLOBAL_CARE_OPERATOR_PSEUDONYM_SHA256"] =
+            operatorPseudonymSha256;
         startInfo.Environment["Logging__LogLevel__Default"] = "Warning";
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start the CARE operations fixture.");
@@ -99,6 +102,7 @@ public sealed class CareOperationsApiE2eTests : IDisposable
                 await AssertErrorAsync(
                     malformed, HttpStatusCode.BadRequest, "care_operations_request_invalid");
             }
+            Assert.Empty(await repository.GetCareOperatorActionAuditAsync());
 
             using var source = new LoopbackCareOperationsSource(
                 endpoint, operatorToken, TimeSpan.FromSeconds(5));
@@ -151,6 +155,29 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             Assert.Equal("care_operations_review_stale", replay.Code);
             Assert.Equal(600, await repository.BalanceAsync(LedgerAccount.Cash));
             Assert.Equal(8, providerHandler.Calls);
+            var audit = await repository.GetCareOperatorActionAuditAsync();
+            Assert.Equal(
+                [
+                    CareOperatorActionAuditIntegrity.ApprovalRequiredDecision,
+                    CareOperatorActionAuditIntegrity.ReviewStaleDecision,
+                    CareOperatorActionAuditIntegrity.ProcessedDecision,
+                    CareOperatorActionAuditIntegrity.ReviewStaleDecision,
+                ],
+                audit.Select(record => record.DecisionCode).ToArray());
+            Assert.Equal([1L, 2L, 3L, 4L], audit.Select(record => record.Sequence).ToArray());
+            Assert.All(audit, record =>
+            {
+                Assert.Equal(operatorPseudonymSha256, record.OperatorPseudonymSha256);
+                Assert.Equal(CareOperatorActionAuditIntegrity.ProcessDueAction, record.ActionCode);
+                Assert.Equal(64, record.ReviewedHealthSha256.Length);
+                Assert.Equal(64, record.RecordSha256.Length);
+            });
+            Assert.Null(audit[0].ResultSha256);
+            Assert.NotNull(audit[2].ResultSha256);
+            var serializedAudit = JsonSerializer.Serialize(audit);
+            Assert.DoesNotContain(operatorToken, serializedAudit, StringComparison.Ordinal);
+            Assert.DoesNotContain("WH-CARE-API", serializedAudit, StringComparison.Ordinal);
+            Assert.DoesNotContain("I-CARE-API", serializedAudit, StringComparison.Ordinal);
         }
         finally
         {

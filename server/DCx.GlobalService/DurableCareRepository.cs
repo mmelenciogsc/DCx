@@ -1033,7 +1033,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         command.CommandText = "PRAGMA user_version;";
         var schemaVersion = Convert.ToInt32(
             await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
-        if (schemaVersion > 8)
+        if (schemaVersion > 9)
         {
             throw new InvalidOperationException("The CARE ledger schema is newer than this application.");
         }
@@ -1259,6 +1259,46 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                     (state = 'completed' AND next_attempt_utc IS NULL AND completed_utc IS NOT NULL) OR
                     (state = 'blocked' AND next_attempt_utc IS NULL AND completed_utc IS NULL))
             );
+            CREATE TABLE IF NOT EXISTS care_operator_action_audit(
+                sequence INTEGER PRIMARY KEY CHECK(sequence > 0),
+                occurred_utc TEXT NOT NULL,
+                operator_pseudonym_sha256 TEXT NOT NULL CHECK(
+                    length(operator_pseudonym_sha256) = 64 AND
+                    operator_pseudonym_sha256 = lower(operator_pseudonym_sha256) AND
+                    operator_pseudonym_sha256 NOT GLOB '*[^0-9a-f]*'),
+                action_code TEXT NOT NULL CHECK(action_code = 'process_due'),
+                decision_code TEXT NOT NULL CHECK(decision_code IN (
+                    'approval_required', 'processing_disabled', 'review_stale',
+                    'nothing_due', 'processed')),
+                reviewed_health_sha256 TEXT NOT NULL CHECK(
+                    length(reviewed_health_sha256) = 64 AND
+                    reviewed_health_sha256 = lower(reviewed_health_sha256) AND
+                    reviewed_health_sha256 NOT GLOB '*[^0-9a-f]*'),
+                result_sha256 TEXT CHECK(
+                    result_sha256 IS NULL OR (
+                        length(result_sha256) = 64 AND
+                        result_sha256 = lower(result_sha256) AND
+                        result_sha256 NOT GLOB '*[^0-9a-f]*')),
+                previous_record_sha256 TEXT NOT NULL CHECK(
+                    length(previous_record_sha256) = 64 AND
+                    previous_record_sha256 = lower(previous_record_sha256) AND
+                    previous_record_sha256 NOT GLOB '*[^0-9a-f]*'),
+                record_sha256 TEXT NOT NULL UNIQUE CHECK(
+                    length(record_sha256) = 64 AND
+                    record_sha256 = lower(record_sha256) AND
+                    record_sha256 NOT GLOB '*[^0-9a-f]*'),
+                CHECK((decision_code = 'processed') = (result_sha256 IS NOT NULL))
+            );
+            CREATE TRIGGER IF NOT EXISTS care_operator_action_audit_no_update
+            BEFORE UPDATE ON care_operator_action_audit
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE operator audit is append-only');
+            END;
+            CREATE TRIGGER IF NOT EXISTS care_operator_action_audit_no_delete
+            BEFORE DELETE ON care_operator_action_audit
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE operator audit is append-only');
+            END;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         command.CommandText = """
@@ -1269,7 +1309,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             ON webhook_event_quarantine(state, next_attempt_utc, occurred_utc, event_id);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        command.CommandText = "PRAGMA user_version = 8;";
+        command.CommandText = "PRAGMA user_version = 9;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 

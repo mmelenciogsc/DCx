@@ -12,12 +12,14 @@ public sealed class DurableCareOperationsSource : ICareOperationsSource
     private readonly bool processingCapabilityEnabled;
     private readonly TimeProvider timeProvider;
     private readonly int processLimit;
+    private readonly string? operatorPseudonymSha256;
 
     public DurableCareOperationsSource(
         DurableCareRepository repository,
         bool processingCapabilityEnabled = false,
         TimeProvider? timeProvider = null,
-        int processLimit = CareOperationsPolicy.MaximumProcessBatch)
+        int processLimit = CareOperationsPolicy.MaximumProcessBatch,
+        string? operatorPseudonymSha256 = null)
     {
         this.repository = repository ?? throw new ArgumentNullException(nameof(repository));
         if (processLimit is < 1 or > CareOperationsPolicy.MaximumProcessBatch)
@@ -28,6 +30,10 @@ public sealed class DurableCareOperationsSource : ICareOperationsSource
         this.processingCapabilityEnabled = processingCapabilityEnabled;
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.processLimit = processLimit;
+        this.operatorPseudonymSha256 = operatorPseudonymSha256 is null
+            ? null
+            : CareOperatorActionAuditIntegrity.NormalizeOperatorPseudonymSha256(
+                operatorPseudonymSha256);
     }
 
     public async Task<CareOperationsHealth> RefreshAsync(
@@ -52,6 +58,7 @@ public sealed class DurableCareOperationsSource : ICareOperationsSource
             processingCapabilityEnabled,
             timeProvider.GetUtcNow(),
             processLimit,
+            operatorPseudonymSha256,
             cancellationToken);
 
     internal static CareOperationsHealth ToCareOperationsHealth(

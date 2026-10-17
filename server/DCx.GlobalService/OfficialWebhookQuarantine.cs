@@ -63,32 +63,57 @@ public sealed partial class DurableCareRepository
             bool processingCapabilityEnabled,
             DateTimeOffset now,
             int limit = CareOperationsPolicy.MaximumProcessBatch,
+            string? operatorPseudonymSha256 = null,
             CancellationToken cancellationToken = default)
     {
         CareOperationsPolicy.RequireHealth(reviewedHealth);
-        if (!explicitlyApproved)
-        {
-            throw new InvalidOperationException(
-                "Explicit approval is required to process verified CARE events.");
-        }
-
-        if (!processingCapabilityEnabled)
-        {
-            throw new InvalidOperationException(
-                "CARE verified-event processing capability is disabled.");
-        }
-
         if (limit is < 1 or > CareOperationsPolicy.MaximumProcessBatch)
         {
             throw new ArgumentOutOfRangeException(nameof(limit));
         }
 
         var nowUtc = now.ToUniversalTime();
+        var reviewedHealthSha256 = operatorPseudonymSha256 is null
+            ? null
+            : CareOperatorActionAuditIntegrity.ReviewedHealthSha256(
+                reviewedHealth, explicitlyApproved);
         await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
             await using var transaction = connection.BeginTransaction(deferred: false);
+            if (!explicitlyApproved)
+            {
+                if (operatorPseudonymSha256 is not null)
+                {
+                    await AppendCareOperatorActionAuditAsync(
+                            connection, transaction, operatorPseudonymSha256,
+                            CareOperatorActionAuditIntegrity.ApprovalRequiredDecision,
+                            reviewedHealthSha256!, null, nowUtc, cancellationToken)
+                        .ConfigureAwait(false);
+                    await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                throw new InvalidOperationException(
+                    "Explicit approval is required to process verified CARE events.");
+            }
+
+            if (!processingCapabilityEnabled)
+            {
+                if (operatorPseudonymSha256 is not null)
+                {
+                    await AppendCareOperatorActionAuditAsync(
+                            connection, transaction, operatorPseudonymSha256,
+                            CareOperatorActionAuditIntegrity.ProcessingDisabledDecision,
+                            reviewedHealthSha256!, null, nowUtc, cancellationToken)
+                        .ConfigureAwait(false);
+                    await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                throw new InvalidOperationException(
+                    "CARE verified-event processing capability is disabled.");
+            }
+
             var currentHealth = DurableCareOperationsSource.ToCareOperationsHealth(
                 await ReadWebhookQuarantineHealthAsync(
                         connection, transaction, nowUtc, cancellationToken)
@@ -96,12 +121,32 @@ public sealed partial class DurableCareRepository
                 processingCapabilityEnabled);
             if (currentHealth != reviewedHealth)
             {
+                if (operatorPseudonymSha256 is not null)
+                {
+                    await AppendCareOperatorActionAuditAsync(
+                            connection, transaction, operatorPseudonymSha256,
+                            CareOperatorActionAuditIntegrity.ReviewStaleDecision,
+                            reviewedHealthSha256!, null, nowUtc, cancellationToken)
+                        .ConfigureAwait(false);
+                    await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                }
+
                 throw new InvalidOperationException(
                     "The reviewed CARE operations state changed before processing.");
             }
 
             if (!currentHealth.CanProcessDue)
             {
+                if (operatorPseudonymSha256 is not null)
+                {
+                    await AppendCareOperatorActionAuditAsync(
+                            connection, transaction, operatorPseudonymSha256,
+                            CareOperatorActionAuditIntegrity.NothingDueDecision,
+                            reviewedHealthSha256!, null, nowUtc, cancellationToken)
+                        .ConfigureAwait(false);
+                    await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                }
+
                 throw new InvalidOperationException(
                     "The reviewed CARE operations state has no processable events.");
             }
@@ -122,6 +167,17 @@ public sealed partial class DurableCareRepository
                 ProviderCalls: 0,
                 resultingHealth);
             CareOperationsPolicy.RequireProcessResult(result);
+            if (operatorPseudonymSha256 is not null)
+            {
+                await AppendCareOperatorActionAuditAsync(
+                        connection, transaction, operatorPseudonymSha256,
+                        CareOperatorActionAuditIntegrity.ProcessedDecision,
+                        reviewedHealthSha256!,
+                        CareOperatorActionAuditIntegrity.ResultSha256(result),
+                        nowUtc, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return result;
         }

@@ -9,13 +9,22 @@ namespace DCx.GlobalService;
 
 internal sealed record SimulationCareOperationsApiOptions(
     byte[] OperatorTokenSha256,
+    string OperatorPseudonymSha256,
     bool ProcessingEnabled)
 {
     public static SimulationCareOperationsApiOptions? Load()
     {
         var apiEnabled = Environment.GetEnvironmentVariable("DCX_GLOBAL_CARE_OPERATIONS_API");
         var processingEnabled = Environment.GetEnvironmentVariable("DCX_GLOBAL_CARE_PROCESSING");
-        if (apiEnabled is null && processingEnabled is null) return null;
+        var digestText = Environment.GetEnvironmentVariable("DCX_GLOBAL_CARE_OPERATOR_TOKEN_SHA256");
+        var operatorPseudonymSha256 =
+            Environment.GetEnvironmentVariable("DCX_GLOBAL_CARE_OPERATOR_PSEUDONYM_SHA256");
+        if (apiEnabled is null && processingEnabled is null && digestText is null &&
+            operatorPseudonymSha256 is null)
+        {
+            return null;
+        }
+
         if (apiEnabled is not "1")
         {
             throw new InvalidOperationException(
@@ -27,15 +36,22 @@ internal sealed record SimulationCareOperationsApiOptions(
             throw new InvalidOperationException("DCX_GLOBAL_CARE_PROCESSING must be 1 or unset.");
         }
 
-        var digestText = Environment.GetEnvironmentVariable("DCX_GLOBAL_CARE_OPERATOR_TOKEN_SHA256");
         if (digestText is null || digestText.Length != 64 || !digestText.All(char.IsAsciiHexDigit))
         {
             throw new InvalidOperationException(
                 "DCX_GLOBAL_CARE_OPERATOR_TOKEN_SHA256 must contain a SHA-256 digest.");
         }
 
+        if (operatorPseudonymSha256 is null)
+        {
+            throw new InvalidOperationException(
+                "DCX_GLOBAL_CARE_OPERATOR_PSEUDONYM_SHA256 must contain a SHA-256 digest.");
+        }
+
         return new SimulationCareOperationsApiOptions(
             Convert.FromHexString(digestText),
+            CareOperatorActionAuditIntegrity.NormalizeOperatorPseudonymSha256(
+                operatorPseudonymSha256),
             processingEnabled == "1");
     }
 }

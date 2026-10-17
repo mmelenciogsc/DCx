@@ -102,7 +102,8 @@ if (careOperationsApiOptions is not null)
     var careRepository = await DurableCareRepository.OpenAsync(Path.Combine(dataRoot, "care"));
     careOperationsSource = new DurableCareOperationsSource(
         careRepository,
-        careOperationsApiOptions.ProcessingEnabled);
+        careOperationsApiOptions.ProcessingEnabled,
+        operatorPseudonymSha256: careOperationsApiOptions.OperatorPseudonymSha256);
     builder.Services.AddSingleton(careRepository);
     builder.Services.AddSingleton(careOperationsSource);
 }
