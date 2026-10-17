@@ -1,7 +1,7 @@
 # P10 — Contributions, governance and provenance
 
 - Status: BLOCKED (authenticated local-simulation intake/review and server-side CCB hostile-code policy pass; production publication remains unavailable)
-- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`, `f417f6e`, `0fc2649`, `bbadbca`
+- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`, `f417f6e`, `0fc2649`, `bbadbca`, `e13246b`
 - Documentation commit: recorded by the commit containing this file
 
 No contribution was sent externally or published to a production catalog.
@@ -37,6 +37,8 @@ No contribution was sent externally or published to a production catalog.
 - A versioned binary contribution envelope carries strict JSON metadata plus an optional raw artifact. Unknown metadata fields fail admission; metadata is capped at 1 MiB, artifacts at 32 MiB, and Kestrel and endpoint readers enforce the same total bound and exact declared length.
 - A default-off simulation API exposes authenticated intake, owner-scoped status and withdrawal, reviewer-scoped pending/status and approval endpoints only when `DCX_GLOBAL_CONTRIBUTION_API=1` and all role settings pass startup validation.
 - Contributor and reviewer bearer credentials are configured only as distinct SHA-256 digests. Role and pseudonymous identity come from server configuration, comparisons are constant-time, transient token buffers are zeroed, and errors contain stable policy codes rather than credentials or request bodies.
+- Every enabled contribution route is covered by a process-local fixed-window limiter before endpoint authorization/body work. Defaults are 120 requests/minute and four concurrent requests per canonical remote address; startup rejects configured values outside 10–10,000 and 1–32. A maximum 1,024 SHA-256 address partitions bounds memory; raw addresses and bearer tokens are neither retained as keys nor exposed by errors.
+- Rate, concurrency, partition-capacity and invalid-clock denials return `429` with one stable body-free code. Window state rejects non-UTC/regressed timestamps, expired inactive partitions are reclaimed, and an idempotent request lease releases concurrency even when the endpoint fails.
 - A CKB can propagate only after authoritative rescan and reviewer approval. Raw CCB packages can enter quarantine, but approval fails closed unless the explicit Linux sandbox configuration and every hash-pinned executable are present.
 - The service admits only a bounded regular non-reparse signing-key file, reads it without write sharing and zeroes the private-key byte buffer immediately after repository initialization.
 - A separately gated hosted worker continuously polls a bounded ready-intent batch. It cannot start unless the contribution API is explicitly enabled; the poll interval is constrained to 100–60,000 ms, and health reports worker activation separately.
@@ -56,16 +58,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 ## Measured result
 
-- Locked native Release build: 0 warnings, 0 errors; 1.12 seconds in the recorded dedicated run.
-- P10 tests: passed 38, failed 0, skipped 0; about 9 seconds in the recorded native gate.
-- Current full suite after pre-sandbox CCB queue hardening: passed 186, failed 0, skipped 0; about 7 seconds.
+- Locked native Release build: 0 warnings, 0 errors; 1.29 seconds in the recorded dedicated run.
+- P10 tests: passed 40, failed 0, skipped 0; about 9 seconds in the recorded native gate.
+- Current full suite after simulation API pressure hardening: passed 188, failed 0, skipped 0; about 8 seconds.
 - Eligible CKB item: quarantined, absent from catalog before review, approved into a signed release, synchronized by a client, then withdrawn/deprecated.
 - Secret/PII/dummy item: remained quarantined and reviewer publication failed closed.
 - Receipt: one qualified event; replay, contributor self-use and invalid integrity excluded.
 - Native UIA: all five consent/attestation controls initially unchecked, preparation disabled, and no-upload state accessible.
 - WSL-hosted Ubuntu local simulation: Bubblewrap 0.6.1 SHA-256 `bf6cf3d4456665f5d80c14eb79a76e0ce87b39a0883e614a161658b4ec33492c`; static BusyBox SHA-256 `b3c1009e1b5c927e537487c80639cdf404f69e3eb49371d9be5d841672be3ff9`.
 - Benign transformation passed. Host/repository and `/etc`/`/usr` reads, an external network request, root write, inherited secret environment, outside-quarantine workspace, symlink, workspace-digest substitution, timeout and output overflow were denied.
-- Latest hostile-sandbox evidence: `artifacts/test-results/p10-09e36a1d66174188a5c14a54210404cd/sandbox-evidence.json` (generated and intentionally not committed).
+- Latest hostile-sandbox evidence: `artifacts/test-results/p10-46e523d1f4d6471991f66a10242149ae/sandbox-evidence.json` (generated and intentionally not committed).
 - Schema-v2 success path executed two declared tests, persisted two passing evidence rows, published the exact artifact into a signed release, synchronized it to a separate global replica and lazily retrieved byte-identical content.
 - Denial coverage includes missing executor, package/digest/metadata mismatch, undeclared files/fields, invalid UTF-8/base64/null input, malicious entrypoint or test-input text, expected-output mismatch and post-intake quarantine tampering.
 - Cross-database crash simulations pre-commit approval and withdrawal releases, then verify governance retries reuse sequences 1 and 2 and synchronize one correctly deprecated resource rather than producing duplicate releases.
@@ -80,20 +82,22 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - CCB approval returned a durable queue job before executing zero sandbox tests; the worker later executed both declared tests and published once. Two concurrent governance instances claimed that work once, with two total test executions rather than four.
 - Missing worker prevented API-path CCB approval. Output mismatch dead-lettered with a stable code and body-free status; reviewer retry was explicit. Malformed review leases/rows failed closed, and a 20-crash attempt limit required remediation before successful review.
 - Persisted scanner codes containing the policy namespace separator (`.`) are now admitted and exposed as codes; credential and PII values remain absent.
+- A real child Kestrel process returned `401` for the first ten missing-credential requests and then a stable `rate_limited` `429` for the eleventh request in the same minute. Deterministic unit coverage also verifies concurrency denial, idempotent release, per-address isolation, window reset and fail-closed non-UTC/regressed time. Captured diagnostics contained neither configured bearer credential.
 
 ## Changed files in the latest milestone
 
 - Bounded transport codec: `src/DCx.Core/Contributions/ContributionTransportCodec.cs`.
 - Default-off authenticated endpoints and optional hash-pinned sandbox configuration: `server/DCx.GlobalService/SimulationContributionApi.cs`.
+- Bounded process-local request/concurrency policy: `server/DCx.GlobalService/SimulationContributionRateLimiter.cs`.
 - Governance status/pending queries and owner-bound withdrawal: `server/DCx.GlobalService/ContributionGovernanceService.cs`.
 - Service wiring, request bound and private-key admission/zeroing: `server/DCx.GlobalService/Program.cs`.
 - Hosted polling and fail-closed configuration: `server/DCx.GlobalService/ContributionPublicationWorker.cs`.
 - Durable pre-sandbox CCB jobs, leases, status and remediation: `server/DCx.GlobalService/ContributionCcbReviewQueue.cs`.
-- Child-process and codec/governance coverage: `tests/DCx.Core.Tests/Contributions/ContributionApiE2eTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionPolicyTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionGovernanceTests.cs`, `tests/DCx.Core.Tests/GlobalKnowledge/GlobalServiceE2eTests.cs`.
+- Child-process, limiter and codec/governance coverage: `tests/DCx.Core.Tests/Contributions/ContributionApiE2eTests.cs`, `tests/DCx.Core.Tests/Contributions/SimulationContributionRateLimiterTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionPolicyTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionGovernanceTests.cs`, `tests/DCx.Core.Tests/GlobalKnowledge/GlobalServiceE2eTests.cs`.
 
 ## Blocker and limits
 
-- The new API is a loopback/container simulation using static hash-configured bearer roles. It is not a production identity system: there is no TLS termination, OAuth/OIDC or mTLS identity, credential rotation/revocation lifecycle, rate limiting, public ingress policy, administrative audit surface or account recovery.
+- The new API is a loopback/container simulation using static hash-configured bearer roles. Its limiter is in-memory, resets on restart, partitions the direct peer rather than trusted-proxy identity, and is neither shared nor coordinated across nodes. It is not a production identity/ingress system: there is no TLS termination, OAuth/OIDC or mTLS identity, credential rotation/revocation lifecycle, distributed ingress throttling, public ingress policy, administrative audit surface or account recovery.
 - There is intentionally still no Windows-client upload action. Local preparation remains no-upload until an approved deployment, production identity design and accessible human review flow exist.
 - The current runtime profile accepts only exact, bounded BusyBox-shell packages with a two-component closed SBOM. It has no language-specific reproducible builder images or general dependency-lock resolver.
 - This local WSL run is development evidence, not execution on the owner's Ubuntu 24.04 server. WSL is not and will not be an end-user requirement.

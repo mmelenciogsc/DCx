@@ -4,7 +4,7 @@ This configuration is for controlled local/process testing only. It is not a pro
 
 ## Default state
 
-The global service requires its existing `DCX_GLOBAL_SIMULATION=1` gate. Contribution routes are additionally absent unless `DCX_GLOBAL_CONTRIBUTION_API=1`. With the contribution gate off, `/health` reports `contributionApi: false` and `contributionWorker: false`, while `/api/contributions/*` returns `404`.
+The global service requires its existing `DCX_GLOBAL_SIMULATION=1` gate. Contribution routes are additionally absent unless `DCX_GLOBAL_CONTRIBUTION_API=1`. With the contribution gate off, `/health` reports `contributionApi: false`, `contributionRateLimit: false` and `contributionWorker: false`, while `/api/contributions/*` returns `404`.
 
 ## Required simulation settings
 
@@ -17,8 +17,14 @@ Supply secrets through an ephemeral process environment or an approved secret ma
 | `DCX_GLOBAL_CONTRIBUTOR_PSEUDONYM` | 1–128 character server-bound identifier using letters, digits, `:`, `.`, `_` or `-` |
 | `DCX_GLOBAL_REVIEWER_TOKEN_SHA256` | 64-hex SHA-256 digest of a different high-entropy bearer token |
 | `DCX_GLOBAL_REVIEWER_ID` | 1–128 character server-bound reviewer identifier using the same alphabet |
+| `DCX_GLOBAL_CONTRIBUTION_REQUESTS_PER_MINUTE` | Optional integer from 10 through 10,000; default 120 |
+| `DCX_GLOBAL_CONTRIBUTION_MAX_CONCURRENT` | Optional integer from 1 through 32; default 4 |
 
 The raw bearer tokens are sent only in the HTTP `Authorization: Bearer` header. Contributor and reviewer digest values must differ. Requests use media type `application/vnd.dcx.contribution.v1+binary`; the repository codec is the canonical encoder. Do not manually serialize a production client from this provisional contract.
+
+With the API enabled, `/health` reports `contributionRateLimit: true`. Every contribution route shares a fixed one-minute window and concurrency bound per canonical direct-peer address. The process stores only a SHA-256 partition key, never the raw address or bearer token. It caps memory at 1,024 partitions and returns `429` with one stable code (`rate_limited`, `contribution_busy`, `rate_limit_capacity` or `rate_limit_time_invalid`) without reflecting credentials, addresses or request bodies.
+
+This is process-local simulation protection. State resets on restart, is not synchronized across instances, and deliberately ignores forwarded-address headers. Do not treat it as production reverse-proxy trust, distributed rate limiting or abuse prevention.
 
 ## Optional publication worker
 

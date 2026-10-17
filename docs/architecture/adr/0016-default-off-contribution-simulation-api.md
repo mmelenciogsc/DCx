@@ -19,5 +19,5 @@ Admit CCB artifacts into quarantine but fail approval closed unless the server h
 
 - Real child-Kestrel tests cover missing/invalid/wrong-role credentials, identity mismatch, idempotent intake, approval replay, malicious quarantine, signed synchronization and owner withdrawal.
 - The default server remains read-only for contribution purposes and returns `404` for contribution routes.
-- Static hash-configured bearer credentials provide deterministic simulation evidence only. They do not provide production TLS, user lifecycle, OAuth/OIDC or mTLS identity, rate limiting, ingress policy, credential rotation/revocation, operator audit or account recovery.
+- Static hash-configured bearer credentials provide deterministic simulation evidence only. ADR 0019 adds bounded process-local pressure controls, but neither decision provides production TLS, user lifecycle, OAuth/OIDC or mTLS identity, distributed proxy-aware rate limiting, ingress policy, credential rotation/revocation, operator audit or account recovery.
 - No user content is uploaded by the Windows UI and no production service is enabled by this decision.
