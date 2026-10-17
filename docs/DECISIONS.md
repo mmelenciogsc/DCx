@@ -43,5 +43,6 @@
 | [0039](architecture/adr/0039-explicit-failed-payout-item-remediation.md) | Remediate only exact failed payout items through an expiring separately approved lineage | Accepted for durable uncredentialed sandbox validation; operator/provider acceptance blocked | 2026-10-17 |
 | [0040](architecture/adr/0040-durable-verified-webhook-dependency-quarantine.md) | Quarantine only officially verified events whose durable subscription or sale dependency has not arrived | Accepted for uncredentialed handler-backed validation; production operations/provider acceptance blocked | 2026-10-17 |
 | [0041](architecture/adr/0041-fixture-only-accessible-care-operations.md) | Validate accessible aggregate CARE operations through a default-unavailable, generated-data-only source | Accepted for native generated-data validation; authenticated production operations blocked | 2026-10-18 |
+| [0042](architecture/adr/0042-lock-scoped-durable-care-operations.md) | Bind exact reviewed aggregate state to bounded durable local replay under one repository lock | Accepted for single-repository local validation; authenticated distributed operations blocked | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

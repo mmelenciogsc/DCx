@@ -20,3 +20,4 @@ The window exposes a focusable heading, read-only aggregate summary, assertive s
 - Automated native UIA can validate keyboard, focus, approval and announcement behavior without PayPal credentials, data or calls.
 - This does not authenticate an operator, connect to the Ubuntu service, schedule work, notify contributors, dispose blocked events or authorize a payment/payout.
 - A production source requires a separate approved authenticated admin transport, authorization/role policy, audit/retention policy, server-side stale-review enforcement, scheduler/alerting and human JAWS/NVDA/Narrator acceptance.
+- ADR 0042 adds server-side stale-review enforcement for one local repository instance without changing the normal desktop source or satisfying authenticated/distributed production operations.
