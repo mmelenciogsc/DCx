@@ -23,5 +23,6 @@
 | [0019](architecture/adr/0019-bounded-simulation-contribution-pressure.md) | Bound simulation contribution requests without credential-derived partitions | Accepted for local simulation | 2026-10-17 |
 | [0020](architecture/adr/0020-controlled-update-admission.md) | Require dual manifest/package trust before inert update staging | Accepted for pre-install admission only | 2026-10-17 |
 | [0021](architecture/adr/0021-causal-entitlement-ordering.md) | Reduce entitlement events by occurrence time with deactivation-safe ties | Accepted for local sandbox | 2026-10-17 |
+| [0022](architecture/adr/0022-digest-bound-local-model-inference.md) | Bind local inference to a unique model name and SHA-256 digest before and after execution | Accepted for installed local models | 2026-10-17 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
