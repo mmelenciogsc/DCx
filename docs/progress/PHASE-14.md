@@ -32,7 +32,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 exact-namespace release/readiness tests: passed 10, failed 0, skipped 0; about 1 second. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
-- Current committed-source expanded full suite: passed 262, failed 0, skipped 0; about 6 seconds.
+- Current committed-source expanded full suite: passed 273, failed 0, skipped 0; about 9 seconds.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -40,7 +40,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 - Decision: `NO_GO`.
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled consent state, blocker list, metric-definition list and refresh action. The validator confirmed that no control named `Activate production` exists.
-- Evidence: `artifacts/test-results/p14-15efc25f84df42438fd746360f7d24ae/go-no-go.json` with `p14-readiness.trx` beside it, generated from application source subsequently committed unchanged at `54f66bc` and intentionally not committed.
+- Evidence: `artifacts/test-results/p14-706e90540c21499292134fd03636def5/go-no-go.json` with `p14-readiness.trx` beside it, generated from committed source at `0e37e85` and intentionally not committed.
 
 ## Changed files in the latest milestone
 
