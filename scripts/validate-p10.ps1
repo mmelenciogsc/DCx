@@ -37,6 +37,17 @@ function Find-Window([int]$processId, [string]$automationId) {
     }) | Select-Object -First 1
 }
 
+function Convert-ToWslPath([string]$path) {
+    $canonical = [IO.Path]::GetFullPath($path)
+    if ($canonical -notmatch '^([A-Za-z]):\\(.*)$') {
+        throw "The native path cannot be mapped to the local WSL mount: $canonical"
+    }
+
+    $drive = $Matches[1].ToLowerInvariant()
+    $relative = $Matches[2].Replace('\', '/')
+    return "/mnt/$drive/$relative"
+}
+
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 Push-Location $repoRoot
 try {
@@ -46,6 +57,27 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Release build failed with exit code $LASTEXITCODE." }
     dotnet test $tests --configuration Release --no-build --no-restore --filter "FullyQualifiedName~Contributions"
     if ($LASTEXITCODE -ne 0) { throw "P10 contribution tests failed with exit code $LASTEXITCODE." }
+
+    $wslRepoRoot = Convert-ToWslPath $repoRoot
+    $wslRunRoot = Convert-ToWslPath $runRoot
+    & wsl.exe -- bash "$wslRepoRoot/scripts/validate-p10-sandbox.sh" "$wslRunRoot"
+    if ($LASTEXITCODE -ne 0) { throw "P10 hostile CCB sandbox validation failed with exit code $LASTEXITCODE." }
+    $sandboxEvidencePath = Join-Path $runRoot "sandbox-evidence.json"
+    $sandboxEvidence = Get-Content -LiteralPath $sandboxEvidencePath -Raw | ConvertFrom-Json
+    if ($sandboxEvidence.policy_version -ne "dcx-ccb-bwrap-v1" -or
+        $sandboxEvidence.workspace_digest_enforced -ne $true -or
+        $sandboxEvidence.host_files_hidden -ne $true -or
+        $sandboxEvidence.system_files_hidden -ne $true -or
+        $sandboxEvidence.network_denied -ne $true -or
+        $sandboxEvidence.root_write_denied -ne $true -or
+        $sandboxEvidence.environment_cleared -ne $true -or
+        $sandboxEvidence.non_root_uid -ne 65534 -or
+        $sandboxEvidence.outside_workspace_denied -ne $true -or
+        $sandboxEvidence.symlink_denied -ne $true -or
+        $sandboxEvidence.timeout_enforced -ne $true -or
+        $sandboxEvidence.output_limit_enforced -ne $true) {
+        throw "P10 hostile CCB sandbox evidence failed closed-policy assertions."
+    }
 
     $env:DCX_DATA_ROOT = Join-Path $runRoot "data"
     $process = Start-Process $exe -PassThru
@@ -75,6 +107,10 @@ try {
         "Rights license and sensitive-data attestations initially unchecked=True"
         "Prepare action disabled without all gates=True"
         "No-upload status exposed through UIA=True"
+        "Hostile CCB namespace sandbox=PASS"
+        "CCB host/system filesystem and network denial=PASS"
+        "CCB non-root, clean-environment and resource limits=PASS"
+        "CCB sandbox evidence=$sandboxEvidencePath"
         "P10 contribution governance validation=PASS"
     }
     finally {
