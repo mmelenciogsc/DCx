@@ -37,6 +37,8 @@ An already-installed Whisper backend may be registered in the same window by sel
 
 The files/media viewer can directly transcribe an admitted local WAV through that exact binding. It exposes cancellation and a read-only accessible transcript but does not persist or export transcript text. MP3/MP4 extraction is deliberately unavailable until a separately approved, digest/license-bound extraction boundary is implemented.
 
+The local-model window also supports review and registration of an already-installed FFmpeg executable plus its complete license and real Windows signature status. This is registration only: current frame extraction has not yet migrated from its legacy `PATH` lookup, and MP3/MP4 transcription extraction remains disabled. Do not bundle or approve the measured unsigned GPLv3 host build for distribution without owner and legal review.
+
 The recorded development host has one approved vision fixture alias but no installed embedding model or real Whisper backend. Do not add either dependency without owner approval and recorded source, version, license, digest, resource and quality evidence. A malformed selection file fails closed; it must not be replaced with an environment-variable bypass. Run P06 with PowerShell 7 because its native evidence loads the .NET production assembly:
 
 ```powershell

@@ -24,6 +24,7 @@ $dataRoot = Join-Path $runRoot "data"
 $model = Join-Path $runRoot "fixture-model.bin"
 $runtimeLicense = Join-Path $runRoot "runtime-license.txt"
 $modelLicense = Join-Path $runRoot "model-license.md"
+$ffmpegLicense = Join-Path $runRoot "ffmpeg-license.txt"
 $audio = Join-Path $runRoot "fixture.wav"
 $timeoutAudio = Join-Path $runRoot "timeout.wav"
 $evidencePath = Join-Path $runRoot "whisper-registration-evidence.json"
@@ -76,6 +77,7 @@ New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 [IO.File]::WriteAllText($model, "fixture whisper model")
 [IO.File]::WriteAllText($runtimeLicense, "Fixture runtime license.`r`nComplete second line.")
 [IO.File]::WriteAllText($modelLicense, "Fixture model license.`nComplete second line.")
+[IO.File]::WriteAllText($ffmpegLicense, "Fixture FFmpeg license.`nComplete second line.")
 [IO.File]::WriteAllBytes($audio, [byte[]]@(
     [byte][char]'R', [byte][char]'I', [byte][char]'F', [byte][char]'F', 4, 0, 0, 0,
     [byte][char]'W', [byte][char]'A', [byte][char]'V', [byte][char]'E'))
@@ -85,6 +87,7 @@ $executableDigest = (Get-FileHash -LiteralPath $fakeWhisper -Algorithm SHA256).H
 $modelDigest = (Get-FileHash -LiteralPath $model -Algorithm SHA256).Hash.ToLowerInvariant()
 $runtimeLicenseDigest = (Get-FileHash -LiteralPath $runtimeLicense -Algorithm SHA256).Hash.ToLowerInvariant()
 $modelLicenseDigest = (Get-FileHash -LiteralPath $modelLicense -Algorithm SHA256).Hash.ToLowerInvariant()
+$ffmpegLicenseDigest = (Get-FileHash -LiteralPath $ffmpegLicense -Algorithm SHA256).Hash.ToLowerInvariant()
 
 $env:DCX_DATA_ROOT = $dataRoot
 $env:DCX_OFFLINE_STARTUP = "1"
@@ -120,6 +123,10 @@ try {
     $current = Find-ById $localModelsWindow "CurrentWhisperBackend"
     if ($null -eq $current -or $current.Current.Name -ne "Transcription: none selected.") {
         throw "The initial empty Whisper registration was not exposed accessibly."
+    }
+    $currentFfmpeg = Find-ById $localModelsWindow "CurrentFfmpegBackend"
+    if ($null -eq $currentFfmpeg -or $currentFfmpeg.Current.Name -ne "Media processor: none selected.") {
+        throw "The initial empty FFmpeg registration was not exposed accessibly."
     }
 
     Set-Value $localModelsWindow "WhisperExecutablePath" $fakeWhisper
@@ -288,6 +295,71 @@ try {
             [System.Windows.Automation.ValuePattern]::Pattern).Current.Value)) {
         throw "The unavailable backend path retained stale transcript text."
     }
+
+    Set-Value $localModelsWindow "FfmpegExecutablePath" $fakeWhisper
+    Set-Value $localModelsWindow "FfmpegLicensePath" $ffmpegLicense
+    Invoke-ById $localModelsWindow "ReviewFfmpegBackendButton" | Out-Null
+    $ffmpegDetails = Wait-For {
+        $candidate = Find-ById $localModelsWindow "FfmpegBackendDetails"
+        if ($null -ne $candidate -and
+            $candidate.Current.Name -like "*SHA-256 $executableDigest*" -and
+            $candidate.Current.Name -like "*License SHA-256 $ffmpegLicenseDigest*" -and
+            $candidate.Current.Name -like "*Windows signature status NotSigned*" -and
+            $candidate.Current.Name -like "*does not create publisher authenticity*") { $candidate }
+    } "The exact FFmpeg digests and real unsigned status were not exposed for review."
+    $ffmpegLicenseElement = Find-ById $localModelsWindow "FfmpegLicenseText"
+    $ffmpegLicenseValue = $ffmpegLicenseElement.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    if ($ffmpegLicenseValue -notlike "*FFMPEG LICENSE*" -or
+        $ffmpegLicenseValue -notlike "*Fixture FFmpeg license*" -or
+        $ffmpegLicenseValue -notlike "*Complete second line.*") {
+        throw "The complete FFmpeg license was not exposed through UI Automation."
+    }
+    $ffmpegApproval = Find-ById $localModelsWindow "ApproveFfmpegBackendBox"
+    $ffmpegApprovalToggle = $ffmpegApproval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+    if ($ffmpegApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "FFmpeg approval did not default to unchecked."
+    }
+    $ffmpegActionIds = @(
+        "BrowseFfmpegExecutableButton", "BrowseFfmpegLicenseButton", "ReviewFfmpegBackendButton",
+        "ApproveFfmpegBackendBox", "SaveFfmpegBackendButton", "ClearFfmpegBackendButton")
+    $ffmpegAccessKeys = @()
+    foreach ($automationId in $ffmpegActionIds) {
+        $action = Find-ById $localModelsWindow $automationId
+        if ($null -eq $action -or -not $action.Current.IsKeyboardFocusable -or
+            [string]::IsNullOrWhiteSpace($action.Current.AccessKey)) {
+            throw "The $automationId action lacks a keyboard-focusable access key."
+        }
+        $ffmpegAccessKeys += $action.Current.AccessKey
+    }
+    if (@($ffmpegAccessKeys | Sort-Object -Unique).Count -ne $ffmpegAccessKeys.Count) {
+        throw "FFmpeg registration actions expose duplicate access keys."
+    }
+    Invoke-ById $localModelsWindow "SaveFfmpegBackendButton" | Out-Null
+    $null = Wait-For {
+        $status = Find-ById $localModelsWindow "LocalModelsStatus"
+        $null -ne $status -and $status.Current.Name -like "FFmpeg registration was not saved.*"
+    } "Saving FFmpeg without explicit approval did not fail closed."
+    $ffmpegApprovalToggle.Toggle()
+    Invoke-ById $localModelsWindow "SaveFfmpegBackendButton" | Out-Null
+    $currentFfmpeg = Wait-For {
+        $candidate = Find-ById $localModelsWindow "CurrentFfmpegBackend"
+        if ($null -ne $candidate -and $candidate.Current.Name -like "Media processor: DCx.FakeWhisperCli.exe.*" -and
+            $candidate.Current.Name -like "*Executable digest $executableDigest*" -and
+            $candidate.Current.Name -like "*Windows signature status NotSigned*") { $candidate }
+    } "The approved hash-pinned FFmpeg registration was not exposed."
+    if ($ffmpegApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "FFmpeg approval was not reset after saving."
+    }
+    Invoke-ById $localModelsWindow "ClearFfmpegBackendButton" | Out-Null
+    $null = Wait-For {
+        $candidate = Find-ById $localModelsWindow "CurrentFfmpegBackend"
+        $null -ne $candidate -and $candidate.Current.Name -eq "Media processor: none selected."
+    } "The FFmpeg registration was not cleared."
+    if (-not (Test-Path -LiteralPath $fakeWhisper -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $ffmpegLicense -PathType Leaf)) {
+        throw "Clearing FFmpeg registration deleted a source file."
+    }
     $sourceFiles = @($fakeWhisper, $model, $runtimeLicense, $modelLicense)
     if (@($sourceFiles | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }).Count -ne 0) {
         throw "Clearing registration deleted a source file."
@@ -312,6 +384,12 @@ try {
         accessible_viewer_cancellation = $true
         canceled_partial_transcript_retained = $false
         cleared_backend_consumer_denied = $true
+        ffmpeg_registration_native_uia = "pass"
+        ffmpeg_approval_default_unchecked = $true
+        ffmpeg_complete_license_exposed = $true
+        ffmpeg_real_windows_status = "NotSigned"
+        ffmpeg_save_without_approval_denied = $true
+        ffmpeg_source_files_preserved = $true
         transcript_focus_after_completion = $true
         cleared_registration = $true
         source_files_preserved = $true
@@ -326,6 +404,7 @@ try {
     "UI-approved production adapter transcript=$($transcription.Text)"
     "Accessible viewer WAV transcription and focus=PASS"
     "Accessible viewer WAV cancellation=PASS"
+    "Accessible FFmpeg exact-file/license/signature registration=PASS"
     "Clear registration preserves source files=PASS"
     "Whisper download/install action absent=PASS"
     "Whisper registration evidence=$evidencePath"

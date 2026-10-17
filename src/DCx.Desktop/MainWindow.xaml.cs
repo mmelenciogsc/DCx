@@ -57,6 +57,7 @@ public partial class MainWindow : Window
     private CrashDiagnosticsWindow? _crashDiagnosticsWindow;
     private Task<LocalModelSelectionStore>? _localModelSelectionStore;
     private Task<WhisperBackendSelectionStore>? _whisperBackendSelectionStore;
+    private Task<FfmpegBackendSelectionStore>? _ffmpegBackendSelectionStore;
     private BrowserTabState? _pausedWebVideoTab;
     private Uri? _pausedWebVideoPage;
     private bool _browserStartupInProgress;
@@ -1048,7 +1049,8 @@ public partial class MainWindow : Window
 
             _localModelsWindow = new LocalModelsWindow(
                 await GetLocalModelSelectionStoreAsync(),
-                await GetWhisperBackendSelectionStoreAsync())
+                await GetWhisperBackendSelectionStoreAsync(),
+                await GetFfmpegBackendSelectionStoreAsync())
             {
                 Owner = this,
             };
@@ -1218,6 +1220,9 @@ public partial class MainWindow : Window
 
     private Task<WhisperBackendSelectionStore> GetWhisperBackendSelectionStoreAsync() =>
         _whisperBackendSelectionStore ??= WhisperBackendSelectionStore.OpenAsync(ApplicationDataRoot.Resolve());
+
+    private Task<FfmpegBackendSelectionStore> GetFfmpegBackendSelectionStoreAsync() =>
+        _ffmpegBackendSelectionStore ??= FfmpegBackendSelectionStore.OpenAsync(ApplicationDataRoot.Resolve());
 
     private Uri? GetNewTabAddress() => _offlineStartup ? null : StartPage;
 

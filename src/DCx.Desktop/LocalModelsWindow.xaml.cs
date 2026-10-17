@@ -14,17 +14,22 @@ public partial class LocalModelsWindow : Window
     private readonly LocalModelSelectionStore store;
     private readonly WhisperBackendSelectionStore whisperStore;
     private readonly WhisperBackendReviewer whisperReviewer = new();
+    private readonly FfmpegBackendSelectionStore ffmpegStore;
+    private readonly FfmpegBackendReviewer ffmpegReviewer = new();
     private readonly CancellationTokenSource lifetime = new();
     private CandidateRow? reviewedCandidate;
     private string? reviewedLicenseSha256;
     private WhisperBackendReview? reviewedWhisperBackend;
+    private FfmpegBackendReview? reviewedFfmpegBackend;
 
     public LocalModelsWindow(
         LocalModelSelectionStore store,
-        WhisperBackendSelectionStore whisperStore)
+        WhisperBackendSelectionStore whisperStore,
+        FfmpegBackendSelectionStore ffmpegStore)
     {
         this.store = store ?? throw new ArgumentNullException(nameof(store));
         this.whisperStore = whisperStore ?? throw new ArgumentNullException(nameof(whisperStore));
+        this.ffmpegStore = ffmpegStore ?? throw new ArgumentNullException(nameof(ffmpegStore));
         InitializeComponent();
         Loaded += async (_, _) => await RefreshAsync();
         Closed += (_, _) => lifetime.Cancel();
@@ -243,6 +248,85 @@ public partial class LocalModelsWindow : Window
         }
     }
 
+    private void OnFfmpegInputChanged(object sender, TextChangedEventArgs e) => ResetFfmpegReview();
+
+    private void OnBrowseFfmpegExecutableClick(object sender, RoutedEventArgs e) =>
+        BrowseInto(FfmpegExecutablePath, "Executable files (*.exe)|*.exe", "Select an already-installed FFmpeg executable");
+
+    private void OnBrowseFfmpegLicenseClick(object sender, RoutedEventArgs e) =>
+        BrowseInto(FfmpegLicensePath, "License text (*.txt;*.md)|*.txt;*.md|All files (*.*)|*.*", "Select the FFmpeg license");
+
+    private async void OnReviewFfmpegBackendClick(object sender, RoutedEventArgs e)
+    {
+        ResetFfmpegReview();
+        SetFfmpegControlsEnabled(false);
+        SetStatus("Reviewing and hashing local FFmpeg files and reading real Windows signature status. Nothing is downloaded, installed, or uploaded.");
+        try
+        {
+            var review = await ffmpegReviewer.ReviewAsync(
+                FfmpegExecutablePath.Text, FfmpegLicensePath.Text, DateTimeOffset.UtcNow, lifetime.Token);
+            reviewedFfmpegBackend = review;
+            SetFfmpegReview(review);
+            SetStatus("The exact FFmpeg files, complete license, and Windows signature status are ready for review. Registration remains unchanged until explicit approval.");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch
+        {
+            SetFfmpegDetails("The local FFmpeg files or Windows signature status could not be reviewed safely. Registration was not changed.");
+            SetFfmpegLicense("No approved FFmpeg license review is available.");
+            SetStatus("FFmpeg review failed closed. Confirm distinct regular local files, supported names, size limits, and UTF-8 license text.");
+        }
+        finally { SetFfmpegControlsEnabled(true); }
+    }
+
+    private async void OnSaveFfmpegBackendClick(object sender, RoutedEventArgs e)
+    {
+        if (reviewedFfmpegBackend is null || FfmpegApprovalBox.IsChecked != true)
+        {
+            SetStatus("FFmpeg registration was not saved. Complete review and check the explicit approval box first.");
+            FfmpegApprovalBox.Focus();
+            return;
+        }
+        SetFfmpegControlsEnabled(false);
+        SetStatus("Revalidating exact FFmpeg files and Windows signature status before saving.");
+        try
+        {
+            var rechecked = await ffmpegReviewer.ReviewAsync(
+                FfmpegExecutablePath.Text, FfmpegLicensePath.Text, DateTimeOffset.UtcNow, lifetime.Token);
+            if (!reviewedFfmpegBackend.Binding.HasSameIdentity(rechecked.Binding))
+                throw new InvalidOperationException("The reviewed FFmpeg identity changed.");
+            await ffmpegStore.SetAsync(rechecked.Binding, true, lifetime.Token);
+            reviewedFfmpegBackend = rechecked;
+            FfmpegApprovalBox.IsChecked = false;
+            SetFfmpegReview(rechecked);
+            await UpdateFfmpegSelectionAsync();
+            SetStatus("The exact hash-pinned FFmpeg registration was saved. Nothing was downloaded, installed, bundled, or uploaded.");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch
+        {
+            ResetFfmpegReview();
+            SetStatus("An FFmpeg file or signature result could not be revalidated, so registration was not saved. Review both files again.");
+        }
+        finally { SetFfmpegControlsEnabled(true); }
+    }
+
+    private async void OnClearFfmpegBackendClick(object sender, RoutedEventArgs e)
+    {
+        SetFfmpegControlsEnabled(false);
+        SetStatus("Clearing only the DCx FFmpeg registration. Source files will be preserved.");
+        try
+        {
+            await ffmpegStore.ClearAsync(lifetime.Token);
+            ResetFfmpegReview();
+            await UpdateFfmpegSelectionAsync();
+            SetStatus("The FFmpeg registration was cleared. No executable, license, or other local file was deleted or uninstalled.");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch { SetStatus("The FFmpeg registration could not be cleared. No local file was changed."); }
+        finally { SetFfmpegControlsEnabled(true); }
+    }
+
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
     private async Task RefreshAsync()
@@ -257,6 +341,7 @@ public partial class LocalModelsWindow : Window
         try
         {
             await UpdateWhisperSelectionAsync();
+            await UpdateFfmpegSelectionAsync();
             using var client = new OllamaLocalClient(OllamaOrigin, TimeSpan.FromSeconds(30));
             var models = await client.ListModelsAsync(lifetime.Token);
             var counts = models
@@ -381,6 +466,17 @@ public partial class LocalModelsWindow : Window
         AutomationProperties.SetName(CurrentWhisperText, value);
     }
 
+    private async Task UpdateFfmpegSelectionAsync()
+    {
+        var binding = (await ffmpegStore.GetStateAsync(lifetime.Token)).Backend;
+        var value = binding is null
+            ? "Media processor: none selected."
+            : $"Media processor: {System.IO.Path.GetFileName(binding.ExecutablePath)}. Executable digest {binding.ExecutableSha256}. " +
+              $"License digest {binding.LicenseSha256}. Windows signature status {binding.AuthenticodeStatus}. Approved {binding.ApprovedUtc:u}.";
+        CurrentFfmpegText.Text = value;
+        AutomationProperties.SetName(CurrentFfmpegText, value);
+    }
+
     private void SetControlsEnabled(bool enabled)
     {
         RefreshButton.IsEnabled = enabled;
@@ -404,6 +500,18 @@ public partial class LocalModelsWindow : Window
         WhisperApprovalBox.IsEnabled = enabled && reviewedWhisperBackend is not null;
         SaveWhisperBackendButton.IsEnabled = enabled && reviewedWhisperBackend is not null;
         ClearWhisperBackendButton.IsEnabled = enabled;
+    }
+
+    private void SetFfmpegControlsEnabled(bool enabled)
+    {
+        FfmpegExecutablePath.IsEnabled = enabled;
+        FfmpegLicensePath.IsEnabled = enabled;
+        BrowseFfmpegExecutableButton.IsEnabled = enabled;
+        BrowseFfmpegLicenseButton.IsEnabled = enabled;
+        ReviewFfmpegBackendButton.IsEnabled = enabled;
+        FfmpegApprovalBox.IsEnabled = enabled && reviewedFfmpegBackend is not null;
+        SaveFfmpegBackendButton.IsEnabled = enabled && reviewedFfmpegBackend is not null;
+        ClearFfmpegBackendButton.IsEnabled = enabled;
     }
 
     private void BrowseInto(TextBox target, string filter, string title)
@@ -450,6 +558,37 @@ public partial class LocalModelsWindow : Window
     }
 
     private void SetWhisperLicense(string value) => WhisperLicenseText.Text = value;
+
+    private void ResetFfmpegReview()
+    {
+        reviewedFfmpegBackend = null;
+        if (FfmpegApprovalBox is null) return;
+        FfmpegApprovalBox.IsChecked = false;
+        FfmpegApprovalBox.IsEnabled = false;
+        SaveFfmpegBackendButton.IsEnabled = false;
+        SetFfmpegDetails("Enter an existing executable and license path, then review them.");
+        SetFfmpegLicense("Complete FFmpeg license text will appear after review.");
+    }
+
+    private void SetFfmpegReview(FfmpegBackendReview review)
+    {
+        var binding = review.Binding;
+        var signer = binding.AuthenticodeStatus == "Valid"
+            ? $"Signer {binding.SignerSubject}. Signer certificate SHA-256 {binding.SignerCertificateSha256}."
+            : "No valid publisher signature was established. Explicit approval does not create publisher authenticity.";
+        SetFfmpegDetails(
+            $"Executable: {System.IO.Path.GetFileName(binding.ExecutablePath)}, {review.ExecutableBytes:N0} bytes, SHA-256 {binding.ExecutableSha256}. " +
+            $"License SHA-256 {binding.LicenseSha256}. Windows signature status {binding.AuthenticodeStatus}. {signer}");
+        SetFfmpegLicense("FFMPEG LICENSE — COMPLETE TEXT\n\n" + review.LicenseText);
+    }
+
+    private void SetFfmpegDetails(string value)
+    {
+        FfmpegBackendDetails.Text = value;
+        AutomationProperties.SetName(FfmpegBackendDetails, value);
+    }
+
+    private void SetFfmpegLicense(string value) => FfmpegLicenseText.Text = value;
 
     private static void SetCurrent(TextBlock target, string capability, ApprovedLocalModelBinding? binding)
     {

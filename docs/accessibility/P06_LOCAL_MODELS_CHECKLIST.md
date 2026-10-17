@@ -21,5 +21,7 @@ Run separately with the installed JAWS, NVDA and Narrator versions. Use only an 
 15. Change any reviewed path and confirm approval/review are invalidated. Clear registration and confirm every selected executable/model/license file remains on disk.
 16. With an approved real backend, open an admitted WAV in **Files and media**. Confirm **Transcribe WAV** pauses playback, announces processing, keeps **Cancel transcription** available, and focuses the completed read-only transcript without reading process diagnostics.
 17. Cancel a long transcription and confirm no partial text remains. Clear the registration and invoke transcription again; confirm the unavailable guidance is announced and stale transcript text is absent. Record MP3/MP4 transcription as unavailable rather than inferring extraction support.
+18. In the FFmpeg group, review an approved fixture executable and complete license. Confirm exact digests, size, real Windows signature status and the publisher/legal warning are announced; approval begins unchecked and save-before-approval fails closed.
+19. Save and clear the fixture binding. Confirm approval resets, the current media-processor identity/status is announced, source files remain, and no download/install/bundle action exists. Do not approve the real unsigned host candidate without owner/legal review.
 
 P06 remains blocked until this human gate and the separate real Whisper/embedding gates pass.

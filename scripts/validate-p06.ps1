@@ -54,6 +54,8 @@ try {
         $whisperRegistrationEvidence.accessible_viewer_cancellation -ne $true -or
         $whisperRegistrationEvidence.canceled_partial_transcript_retained -ne $false -or
         $whisperRegistrationEvidence.cleared_backend_consumer_denied -ne $true -or
+        $whisperRegistrationEvidence.ffmpeg_registration_native_uia -ne "pass" -or
+        $whisperRegistrationEvidence.ffmpeg_real_windows_status -ne "NotSigned" -or
         $whisperRegistrationEvidence.transcript_focus_after_completion -ne $true -or
         $whisperRegistrationEvidence.download_or_install_action_exposed -ne $false -or
         $whisperRegistrationEvidence.source_files_preserved -ne $true -or
@@ -209,6 +211,20 @@ if (-not $unloaded) { throw "The selected Ollama model did not unload within the
 
 $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue | Select-Object -First 1
 $whisper = Get-Command whisper-cli -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($null -eq $ffmpeg) { throw "The installed FFmpeg inventory candidate is unavailable." }
+$ffmpegLicensePath = Join-Path (Split-Path -Parent (Split-Path -Parent $ffmpeg.Source)) "LICENSE"
+if (-not (Test-Path -LiteralPath $ffmpegLicensePath -PathType Leaf)) {
+    throw "The installed FFmpeg inventory candidate has no co-located license file."
+}
+$ffmpegReview = [DCx.Core.LocalModels.FfmpegBackendReviewer]::new().ReviewAsync(
+    $ffmpeg.Source,
+    $ffmpegLicensePath,
+    [DateTimeOffset]::UtcNow,
+    [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+if ($ffmpegReview.LicenseText -notmatch "GNU GENERAL PUBLIC LICENSE" -or
+    $ffmpegReview.Binding.AuthenticodeStatus -ne "NotSigned") {
+    throw "The installed FFmpeg license or real Windows signature evidence changed."
+}
 $manifest = [ordered]@{
     captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
     gpu_name = $gpuParts[0]
@@ -232,6 +248,11 @@ $manifest = [ordered]@{
     ollama_total_duration_ns = [long]$response.total_duration
     wall_duration_ms = $wallMilliseconds
     ffmpeg_available = $null -ne $ffmpeg
+    ffmpeg_executable_bytes = [long]$ffmpegReview.ExecutableBytes
+    ffmpeg_executable_sha256 = [string]$ffmpegReview.Binding.ExecutableSha256
+    ffmpeg_license_sha256 = [string]$ffmpegReview.Binding.LicenseSha256
+    ffmpeg_authenticode_status = [string]$ffmpegReview.Binding.AuthenticodeStatus
+    ffmpeg_registration_candidate_approved = $false
     whisper_backend_available = $null -ne $whisper
     installed_embedding_models = @($embeddingModels)
     whisper_adapter_fixture_passed = $true
@@ -260,6 +281,8 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Measured prompt tokens=$($manifest.measured_prompt_tokens); output tokens=$($manifest.measured_output_tokens)"
 "Ollama duration ns=$($manifest.ollama_total_duration_ns); wall ms=$wallMilliseconds"
 "FFmpeg available=$($manifest.ffmpeg_available)"
+"FFmpeg bytes=$($manifest.ffmpeg_executable_bytes); SHA-256=$($manifest.ffmpeg_executable_sha256)"
+"FFmpeg license SHA-256=$($manifest.ffmpeg_license_sha256); Windows status=$($manifest.ffmpeg_authenticode_status); approved=False"
 "Whisper backend available=$($manifest.whisper_backend_available)"
 "Installed embedding models=$(@($manifest.installed_embedding_models).Count)"
 "Hash-pinned Whisper adapter fixture=PASS"

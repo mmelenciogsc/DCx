@@ -52,6 +52,12 @@
                                    TextWrapping="Wrap"
                                    AutomationProperties.AutomationId="CurrentWhisperBackend"
                                    AutomationProperties.Name="Transcription: none selected." />
+                        <TextBlock x:Name="CurrentFfmpegText"
+                                   Margin="0,8,0,0"
+                                   Text="Media processor: none selected."
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="CurrentFfmpegBackend"
+                                   AutomationProperties.Name="Media processor: none selected." />
                     </StackPanel>
                 </GroupBox>
 
@@ -261,6 +267,78 @@
                                     AutomationProperties.Name="Clear Whisper backend registration"
                                     AutomationProperties.HelpText="Clears only the DCx registration. It does not delete or uninstall any file."
                                     Click="OnClearWhisperBackendClick" />
+                        </WrapPanel>
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Margin="0,20,0,0" Header="Already-installed FFmpeg media processor">
+                    <StackPanel Margin="12,8">
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="Register an existing local FFmpeg executable and its complete license. DCx does not download, install, or bundle FFmpeg. Review includes real Windows signature status. A digest match does not establish publisher authenticity, legal distribution clearance, or media safety." />
+                        <Label Margin="0,10,0,0" Padding="0,0,0,4"
+                               Target="{Binding ElementName=FfmpegExecutablePath}"
+                               Content="_1 FFmpeg executable (.exe)" />
+                        <DockPanel LastChildFill="True">
+                            <Button x:Name="BrowseFfmpegExecutableButton" DockPanel.Dock="Right"
+                                    MinWidth="100" MinHeight="34" Margin="8,0,0,0"
+                                    Content="_2 Browse FFmpeg..."
+                                    AutomationProperties.AutomationId="BrowseFfmpegExecutableButton"
+                                    AutomationProperties.Name="Browse for already-installed FFmpeg executable"
+                                    Click="OnBrowseFfmpegExecutableClick" />
+                            <TextBox x:Name="FfmpegExecutablePath" MinHeight="34" Padding="6"
+                                     AutomationProperties.AutomationId="FfmpegExecutablePath"
+                                     AutomationProperties.Name="Already-installed FFmpeg executable path"
+                                     TextChanged="OnFfmpegInputChanged" />
+                        </DockPanel>
+                        <Label Margin="0,10,0,0" Padding="0,0,0,4"
+                               Target="{Binding ElementName=FfmpegLicensePath}"
+                               Content="_3 FFmpeg license file" />
+                        <DockPanel LastChildFill="True">
+                            <Button x:Name="BrowseFfmpegLicenseButton" DockPanel.Dock="Right"
+                                    MinWidth="100" MinHeight="34" Margin="8,0,0,0"
+                                    Content="_4 Browse FFmpeg license..."
+                                    AutomationProperties.AutomationId="BrowseFfmpegLicenseButton"
+                                    AutomationProperties.Name="Browse for FFmpeg license file"
+                                    Click="OnBrowseFfmpegLicenseClick" />
+                            <TextBox x:Name="FfmpegLicensePath" MinHeight="34" Padding="6"
+                                     AutomationProperties.AutomationId="FfmpegLicensePath"
+                                     AutomationProperties.Name="FFmpeg license path"
+                                     TextChanged="OnFfmpegInputChanged" />
+                        </DockPanel>
+                        <Button x:Name="ReviewFfmpegBackendButton" Width="210" MinHeight="36"
+                                Margin="0,14,0,0" HorizontalAlignment="Left"
+                                Content="_5 Review media processor"
+                                AutomationProperties.AutomationId="ReviewFfmpegBackendButton"
+                                AutomationProperties.Name="Review exact FFmpeg executable, license, and Windows signature status"
+                                Click="OnReviewFfmpegBackendClick" />
+                        <TextBlock x:Name="FfmpegBackendDetails" Margin="0,12,0,0"
+                                   Text="Enter an existing executable and license path, then review them."
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="FfmpegBackendDetails"
+                                   AutomationProperties.Name="Enter an existing executable and license path, then review them." />
+                        <TextBox x:Name="FfmpegLicenseText" MinHeight="120" MaxHeight="240"
+                                 Margin="0,12,0,0" Padding="8" IsReadOnly="True" AcceptsReturn="True"
+                                 TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                 Text="Complete FFmpeg license text will appear after review."
+                                 AutomationProperties.AutomationId="FfmpegLicenseText"
+                                 AutomationProperties.Name="Complete FFmpeg license text" />
+                        <CheckBox x:Name="FfmpegApprovalBox" Margin="0,14,0,0" FontWeight="SemiBold"
+                                  IsEnabled="False"
+                                  Content="_6 I reviewed the exact digests, complete license, and signature status and approve this registration"
+                                  AutomationProperties.AutomationId="ApproveFfmpegBackendBox"
+                                  AutomationProperties.Name="I reviewed the exact FFmpeg digests, complete license, and signature status and approve this registration" />
+                        <WrapPanel Margin="0,14,0,0">
+                            <Button x:Name="SaveFfmpegBackendButton" MinWidth="180" MinHeight="36"
+                                    Margin="0,0,10,0" IsEnabled="False" Content="_7 Save media processor"
+                                    AutomationProperties.AutomationId="SaveFfmpegBackendButton"
+                                    AutomationProperties.Name="Save approved FFmpeg registration"
+                                    Click="OnSaveFfmpegBackendClick" />
+                            <Button x:Name="ClearFfmpegBackendButton" MinWidth="180" MinHeight="36"
+                                    Content="_8 Clear media processor"
+                                    AutomationProperties.AutomationId="ClearFfmpegBackendButton"
+                                    AutomationProperties.Name="Clear FFmpeg registration"
+                                    AutomationProperties.HelpText="Clears only the DCx registration and never deletes FFmpeg or its license."
+                                    Click="OnClearFfmpegBackendClick" />
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>
