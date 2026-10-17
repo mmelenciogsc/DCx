@@ -52,8 +52,14 @@ public sealed class WhisperCliTranscriber
             throw new ArgumentException("The Whisper language must be a short ASCII language tag.", nameof(language));
         }
 
-        await VerifyPinnedFileAsync(executablePath, configuration.ExecutableSha256, cancellationToken).ConfigureAwait(false);
-        await VerifyPinnedFileAsync(modelPath, configuration.ModelSha256, cancellationToken).ConfigureAwait(false);
+        await using var executableLease = await OpenVerifiedPinnedFileAsync(
+            executablePath,
+            configuration.ExecutableSha256,
+            cancellationToken).ConfigureAwait(false);
+        await using var modelLease = await OpenVerifiedPinnedFileAsync(
+            modelPath,
+            configuration.ModelSha256,
+            cancellationToken).ConfigureAwait(false);
 
         var operationRoot = Path.Combine(Path.GetTempPath(), "DCx", "whisper", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(operationRoot);
@@ -208,15 +214,42 @@ public sealed class WhisperCliTranscriber
         }
     }
 
-    private static async Task VerifyPinnedFileAsync(
+    private static async Task<FileStream> OpenVerifiedPinnedFileAsync(
         string path,
         string expectedSha256,
         CancellationToken cancellationToken)
     {
-        var actual = await ComputeSha256Async(path, cancellationToken).ConfigureAwait(false);
-        if (!string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase))
+        FileStream? lease = null;
+        try
         {
-            throw new InvalidOperationException("A pinned local Whisper executable or model failed SHA-256 verification.");
+            var file = new FileInfo(path);
+            if (!file.Exists || file.Length <= 0 || (file.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException("A pinned local Whisper executable or model is unavailable or unsafe.");
+            }
+
+            lease = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                128 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var actual = Convert.ToHexStringLower(
+                await SHA256.HashDataAsync(lease, cancellationToken).ConfigureAwait(false));
+            if (!string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("A pinned local Whisper executable or model failed SHA-256 verification.");
+            }
+
+            lease.Position = 0;
+            var result = lease;
+            lease = null;
+            return result;
+        }
+        finally
+        {
+            if (lease is not null) await lease.DisposeAsync().ConfigureAwait(false);
         }
     }
 

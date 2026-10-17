@@ -54,8 +54,9 @@ public sealed class MediaFrameDescriptionService
             if (process.ExitCode != 0 || !File.Exists(framePath))
                 throw new InvalidOperationException($"Frame extraction failed. {await errorTask}");
 
-            using var httpClient = new HttpClient { BaseAddress = new Uri("http://localhost:11434/"), Timeout = TimeSpan.FromMinutes(3) };
-            var ollama = new OllamaLocalClient(httpClient);
+            using var ollama = new OllamaLocalClient(
+                new Uri("http://localhost:11434/"),
+                TimeSpan.FromMinutes(3));
             return await ollama.DescribeImageAsync(
                 model,
                 framePath,

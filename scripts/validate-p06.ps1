@@ -85,6 +85,10 @@ $body = @{
 $started = Get-Date
 $response = Invoke-RestMethod -Method Post -Uri "http://localhost:11434/api/chat" -ContentType "application/json" -Body $body -TimeoutSec 180
 $wallMilliseconds = [long]((Get-Date) - $started).TotalMilliseconds
+$responseModel = [string]$response.model
+if ($responseModel -ne $model -or $response.done -ne $true) {
+    throw "The installed vision model returned a mismatched or incomplete response."
+}
 $answer = $response.message.content
 if ($answer -notmatch "(?i)blue" -or $answer -notmatch "(?i)red" -or $answer -notmatch "(?i)DCX\s*42") {
     throw "The installed vision model failed the fixture accuracy gate. Response: $answer"
@@ -123,7 +127,9 @@ $manifest = [ordered]@{
     installed_embedding_models = @($embeddingModels)
     whisper_adapter_fixture_passed = $true
     ollama_embedding_adapter_fixture_passed = $true
-    local_model_contract_tests = 17
+    ollama_redirects_disabled = $true
+    whisper_pinned_files_locked_during_execution = $true
+    local_model_contract_tests = 22
 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding utf8
 
@@ -139,7 +145,9 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Whisper backend available=$($manifest.whisper_backend_available)"
 "Installed embedding models=$(@($manifest.installed_embedding_models).Count)"
 "Hash-pinned Whisper adapter fixture=PASS"
+"Pinned Whisper executable/model execution leases=PASS"
 "Bounded Ollama embedding adapter fixture=PASS"
+"Ollama redirect/cookie/proxy denial and response-origin validation=PASS"
 "Low-resource and local-first fallback tests=PASS"
 "Model unload requested=PASS"
 "Hardware manifest=$manifestPath"

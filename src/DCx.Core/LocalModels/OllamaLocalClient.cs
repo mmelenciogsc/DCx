@@ -1,9 +1,10 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
 namespace DCx.Core.LocalModels;
 
-public sealed class OllamaLocalClient
+public sealed class OllamaLocalClient : IDisposable
 {
     private const long MaximumImageBytes = 20 * 1024 * 1024;
     private const int MaximumModelNameCharacters = 256;
@@ -12,22 +13,59 @@ public sealed class OllamaLocalClient
     private const int MaximumEmbeddingInputCharacters = 8192;
     private const int MaximumEmbeddingDimensions = 8192;
     private const int MaximumResponseBytes = 16 * 1024 * 1024;
+    private const int MaximumVisionResponseCharacters = 32 * 1024;
+    private static readonly byte[] PngSignature = [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    private static readonly byte[] JpegSignature = [0xFF, 0xD8, 0xFF];
     private readonly HttpClient _httpClient;
+    private readonly Uri _baseAddress;
 
-    public OllamaLocalClient(HttpClient httpClient)
+    public OllamaLocalClient(Uri baseAddress, TimeSpan? timeout = null)
+        : this(new HttpClient(CreateHardenedHandler(), disposeHandler: true), baseAddress, timeout)
+    {
+    }
+
+    internal OllamaLocalClient(HttpMessageHandler handler, Uri baseAddress, TimeSpan? timeout = null)
+        : this(new HttpClient(handler, disposeHandler: true), baseAddress, timeout)
+    {
+    }
+
+    private OllamaLocalClient(HttpClient httpClient, Uri baseAddress, TimeSpan? timeout)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        var baseAddress = httpClient.BaseAddress
-            ?? throw new ArgumentException("Ollama HttpClient requires a base address.", nameof(httpClient));
-        if (baseAddress.Scheme != Uri.UriSchemeHttp || !baseAddress.IsLoopback)
+        ArgumentNullException.ThrowIfNull(baseAddress);
+        if (!baseAddress.IsAbsoluteUri || baseAddress.Scheme != Uri.UriSchemeHttp || !baseAddress.IsLoopback ||
+            baseAddress.AbsolutePath != "/" || !string.IsNullOrEmpty(baseAddress.Query) ||
+            !string.IsNullOrEmpty(baseAddress.Fragment) || !string.IsNullOrEmpty(baseAddress.UserInfo))
         {
-            throw new ArgumentException("DCx permits the Ollama adapter only on loopback HTTP.", nameof(httpClient));
+            _httpClient.Dispose();
+            throw new ArgumentException("DCx permits the Ollama adapter only at a loopback HTTP origin.", nameof(baseAddress));
         }
+
+        var boundedTimeout = timeout ?? TimeSpan.FromMinutes(3);
+        if (boundedTimeout < TimeSpan.FromSeconds(1) || boundedTimeout > TimeSpan.FromMinutes(5))
+        {
+            _httpClient.Dispose();
+            throw new ArgumentOutOfRangeException(nameof(timeout), "The Ollama timeout must be between one second and five minutes.");
+        }
+
+        _httpClient.BaseAddress = baseAddress;
+        _httpClient.Timeout = boundedTimeout;
+        _baseAddress = baseAddress;
     }
+
+    internal static SocketsHttpHandler CreateHardenedHandler() => new()
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        UseProxy = false,
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+        AutomaticDecompression = DecompressionMethods.None,
+    };
 
     public async Task<IReadOnlyList<LocalModelDescriptor>> ListModelsAsync(CancellationToken cancellationToken = default)
     {
         using var response = await _httpClient.GetAsync("api/tags", cancellationToken);
+        EnsureLoopbackResponse(response);
         response.EnsureSuccessStatusCode();
         using var document = await ReadBoundedJsonAsync(response.Content, cancellationToken).ConfigureAwait(false);
         var models = new List<LocalModelDescriptor>();
@@ -59,6 +97,7 @@ public sealed class OllamaLocalClient
             "api/show",
             new { model, verbose = false },
             cancellationToken).ConfigureAwait(false);
+        EnsureLoopbackResponse(response);
         response.EnsureSuccessStatusCode();
         using var document = await ReadBoundedJsonAsync(response.Content, cancellationToken).ConfigureAwait(false);
         var root = document.RootElement;
@@ -97,6 +136,7 @@ public sealed class OllamaLocalClient
             "api/embed",
             new { model, input = inputs, truncate = false, keep_alive = 0 },
             cancellationToken).ConfigureAwait(false);
+        EnsureLoopbackResponse(response);
         response.EnsureSuccessStatusCode();
         using var document = await ReadBoundedJsonAsync(response.Content, cancellationToken).ConfigureAwait(false);
         var root = document.RootElement;
@@ -161,7 +201,24 @@ public sealed class OllamaLocalClient
             throw new ArgumentException("The image must exist and be between 1 byte and 20 MiB.", nameof(imagePath));
         }
 
-        var image = Convert.ToBase64String(await File.ReadAllBytesAsync(file.FullName, cancellationToken));
+        var imageBytes = new byte[checked((int)file.Length)];
+        await using (var stream = new FileStream(
+                         file.FullName,
+                         FileMode.Open,
+                         FileAccess.Read,
+                         FileShare.Read,
+                         128 * 1024,
+                         FileOptions.Asynchronous | FileOptions.SequentialScan))
+        {
+            await stream.ReadExactlyAsync(imageBytes, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!HasSupportedImageSignature(imageBytes))
+        {
+            throw new ArgumentException("The image must be PNG, JPEG or WebP data.", nameof(imagePath));
+        }
+
+        var image = Convert.ToBase64String(imageBytes);
         var body = new
         {
             model,
@@ -171,15 +228,33 @@ public sealed class OllamaLocalClient
             options = new { temperature = 0, num_predict = 160 },
         };
         using var response = await _httpClient.PostAsJsonAsync("api/chat", body, cancellationToken);
+        EnsureLoopbackResponse(response);
         response.EnsureSuccessStatusCode();
         using var document = await ReadBoundedJsonAsync(response.Content, cancellationToken).ConfigureAwait(false);
         var root = document.RootElement;
+        if (!root.TryGetProperty("model", out var responseModel) ||
+            !string.Equals(responseModel.GetString(), model, StringComparison.Ordinal) ||
+            !root.TryGetProperty("done", out var done) || done.ValueKind != JsonValueKind.True ||
+            !root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object ||
+            !message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.String)
+        {
+            throw new InvalidOperationException("The Ollama vision response does not match the completed request.");
+        }
+
+        var text = content.GetString();
+        if (string.IsNullOrWhiteSpace(text) || text.Length > MaximumVisionResponseCharacters)
+        {
+            throw new InvalidOperationException("The Ollama vision response text is empty or outside its limit.");
+        }
+
         return new OllamaVisionResult(
-            root.GetProperty("message").GetProperty("content").GetString() ?? string.Empty,
+            text,
             root.TryGetProperty("prompt_eval_count", out var promptTokens) ? promptTokens.GetInt32() : 0,
             root.TryGetProperty("eval_count", out var outputTokens) ? outputTokens.GetInt32() : 0,
             root.TryGetProperty("total_duration", out var duration) ? duration.GetInt64() : 0);
     }
+
+    public void Dispose() => _httpClient.Dispose();
 
     private static void ValidateModelName(string model)
     {
@@ -189,6 +264,22 @@ public sealed class OllamaLocalClient
             throw new ArgumentException("The Ollama model name is invalid.", nameof(model));
         }
     }
+
+    private void EnsureLoopbackResponse(HttpResponseMessage response)
+    {
+        var responseUri = response.RequestMessage?.RequestUri;
+        if (responseUri is null || !responseUri.IsAbsoluteUri || responseUri.Scheme != Uri.UriSchemeHttp ||
+            !responseUri.IsLoopback || !string.Equals(responseUri.Host, _baseAddress.Host, StringComparison.OrdinalIgnoreCase) ||
+            responseUri.Port != _baseAddress.Port)
+        {
+            throw new InvalidOperationException("The Ollama response escaped the approved loopback HTTP origin.");
+        }
+    }
+
+    private static bool HasSupportedImageSignature(ReadOnlySpan<byte> bytes) =>
+        bytes.StartsWith(PngSignature) ||
+        bytes.StartsWith(JpegSignature) ||
+        bytes.Length >= 12 && bytes.StartsWith("RIFF"u8) && bytes[8..].StartsWith("WEBP"u8);
 
     private static async Task<JsonDocument> ReadBoundedJsonAsync(
         HttpContent content,

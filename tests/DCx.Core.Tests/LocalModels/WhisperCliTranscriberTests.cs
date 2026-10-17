@@ -59,6 +59,24 @@ public sealed class WhisperCliTranscriberTests : IDisposable
         Assert.True(DateTimeOffset.UtcNow - started < TimeSpan.FromSeconds(5));
     }
 
+    [Fact]
+    public async Task VerifiedFiles_RemainReadLockedThroughProcessExecution()
+    {
+        Directory.CreateDirectory(root);
+        var executable = FixtureExecutable();
+        var model = Path.Combine(root, "fixture-model.bin");
+        var audio = Path.Combine(root, "timeout.wav");
+        await File.WriteAllBytesAsync(model, "fixture model"u8.ToArray());
+        await File.WriteAllBytesAsync(audio, WaveBytes());
+        var transcriber = await CreateAsync(executable, model, TimeSpan.FromMilliseconds(750));
+
+        var transcription = transcriber.TranscribeWavAsync(audio);
+        await Task.Delay(200);
+
+        await Assert.ThrowsAsync<IOException>(() => File.WriteAllBytesAsync(model, "replacement"u8.ToArray()));
+        await Assert.ThrowsAsync<TimeoutException>(() => transcription);
+    }
+
     public void Dispose()
     {
         TestDirectory.DeleteIfExists(root);
