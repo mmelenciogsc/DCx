@@ -95,6 +95,22 @@ public sealed class WhisperCliTranscriberTests : IDisposable
         await Assert.ThrowsAsync<TimeoutException>(() => transcription);
     }
 
+    [Theory]
+    [InlineData("control.wav")]
+    [InlineData("invalid-utf8.wav")]
+    public async Task UnsafeTranscriptText_FailsClosed(string audioName)
+    {
+        Directory.CreateDirectory(root);
+        var executable = FixtureExecutable();
+        var model = Path.Combine(root, "fixture-model.bin");
+        var audio = Path.Combine(root, audioName);
+        await File.WriteAllBytesAsync(model, "fixture model"u8.ToArray());
+        await File.WriteAllBytesAsync(audio, WaveBytes());
+        var transcriber = await CreateAsync(executable, model, TimeSpan.FromSeconds(5));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => transcriber.TranscribeWavAsync(audio));
+    }
+
     public void Dispose()
     {
         TestDirectory.DeleteIfExists(root);

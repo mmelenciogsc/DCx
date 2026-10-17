@@ -18,13 +18,20 @@ public partial class ContentViewerWindow : Window
     private readonly OfficeTextExtractor _officeTextExtractor = new();
     private readonly MediaFrameDescriptionService _frameDescriptionService = new();
     private readonly LocalModelSelectionStore _localModelSelectionStore;
+    private readonly WhisperBackendSelectionStore _whisperBackendSelectionStore;
     private CancellationTokenSource? _frameDescriptionCancellation;
     private CancellationTokenSource? _webVideoCancellation;
+    private CancellationTokenSource? _transcriptionCancellation;
+    private string? _currentMediaPath;
 
-    public ContentViewerWindow(LocalModelSelectionStore localModelSelectionStore)
+    public ContentViewerWindow(
+        LocalModelSelectionStore localModelSelectionStore,
+        WhisperBackendSelectionStore whisperBackendSelectionStore)
     {
         _localModelSelectionStore = localModelSelectionStore
             ?? throw new ArgumentNullException(nameof(localModelSelectionStore));
+        _whisperBackendSelectionStore = whisperBackendSelectionStore
+            ?? throw new ArgumentNullException(nameof(whisperBackendSelectionStore));
         InitializeComponent();
         Closed += (_, _) =>
         {
@@ -34,6 +41,7 @@ public partial class ContentViewerWindow : Window
             _webVideoCancellation?.Cancel();
             _webVideoCancellation?.Dispose();
             _webVideoCancellation = null;
+            _transcriptionCancellation?.Cancel();
         };
     }
 
@@ -61,10 +69,16 @@ public partial class ContentViewerWindow : Window
 
     private void OpenLocalFile(string path)
     {
+        var previousTranscription = _transcriptionCancellation;
+        _transcriptionCancellation = null;
+        previousTranscription?.Cancel();
+        _currentMediaPath = null;
         MediaViewer.Stop();
         MediaViewer.Source = null;
         DescribeFrameButton.IsEnabled = false;
+        UpdateTranscriptionControls();
         FrameDescriptionText.Text = string.Empty;
+        MediaTranscriptText.Clear();
         ImageViewer.Source = null;
         DocumentText.Clear();
         var admission = _contentPolicy.Evaluate(path);
@@ -105,8 +119,10 @@ public partial class ContentViewerWindow : Window
                 break;
             case ContentKind.Audio:
             case ContentKind.Video:
+                _currentMediaPath = admission.CanonicalPath;
                 MediaViewer.Source = new Uri(admission.CanonicalPath);
                 DescribeFrameButton.IsEnabled = admission.Kind == ContentKind.Video;
+                UpdateTranscriptionControls();
                 ContentTabs.SelectedIndex = 2;
                 MediaViewer.Focus();
                 break;
@@ -127,7 +143,12 @@ public partial class ContentViewerWindow : Window
                 return;
         }
 
-        SetStatus($"Opened {Path.GetFileName(admission.CanonicalPath)} as {admission.Kind}. Media is paused until Play is activated.");
+        var mediaNotice = admission.Kind is ContentKind.Audio or ContentKind.Video
+            ? IsCurrentWav()
+                ? " Media is paused until Play is activated. Approved local WAV transcription is available."
+                : " Media is paused until Play is activated. Direct transcription currently supports admitted WAV files only."
+            : string.Empty;
+        SetStatus($"Opened {Path.GetFileName(admission.CanonicalPath)} as {admission.Kind}.{mediaNotice}");
     }
 
     private void OnListFolderClick(object sender, RoutedEventArgs e)
@@ -192,6 +213,74 @@ public partial class ContentViewerWindow : Window
         if (MediaViewer.Source is null) return;
         MediaViewer.Stop();
         SetStatus("Media stopped.");
+    }
+
+    private async void OnTranscribeWavClick(object sender, RoutedEventArgs e)
+    {
+        if (!IsCurrentWav() || _currentMediaPath is null) return;
+        MediaViewer.Pause();
+        _transcriptionCancellation?.Cancel();
+        var operation = new CancellationTokenSource();
+        _transcriptionCancellation = operation;
+        UpdateTranscriptionControls();
+        MediaTranscriptText.Clear();
+        SetStatus("Media paused. Checking the approved local Whisper registration.");
+        try
+        {
+            var binding = (await _whisperBackendSelectionStore.GetStateAsync(operation.Token)).Backend;
+            if (binding is null)
+            {
+                SetStatus("No local Whisper backend is registered. Open Local models, review the exact executable, model and two licenses, then explicitly approve registration.");
+                return;
+            }
+
+            SetStatus("Media paused. The approved local Whisper backend is transcribing the selected WAV. Cancel transcription remains available.");
+            var transcriber = binding.CreateTranscriber(TimeSpan.FromMinutes(10));
+            var result = await transcriber.TranscribeWavAsync(_currentMediaPath, cancellationToken: operation.Token);
+            MediaTranscriptText.Text = result.Text;
+            var workingSet = result.PeakWorkingSetBytes is > 0
+                ? $" Peak working set {result.PeakWorkingSetBytes.Value / 1024d / 1024d:0.0} MiB."
+                : " Peak working set was unavailable for this process duration.";
+            SetStatus($"WAV transcription complete in {result.Elapsed.TotalSeconds:0.###} seconds.{workingSet} Media remains paused.");
+            MediaTranscriptText.Focus();
+        }
+        catch (OperationCanceledException)
+        {
+            if (ReferenceEquals(_transcriptionCancellation, operation))
+                SetStatus("WAV transcription canceled. Media remains paused and no partial transcript was retained.");
+        }
+        catch (TimeoutException)
+        {
+            if (ReferenceEquals(_transcriptionCancellation, operation))
+                SetStatus("WAV transcription exceeded its approved time limit and was stopped. Media remains paused.");
+        }
+        catch (ArgumentException)
+        {
+            if (ReferenceEquals(_transcriptionCancellation, operation))
+                SetStatus("WAV transcription was blocked because a selected file or approved binding is invalid. Media remains paused.");
+        }
+        catch
+        {
+            if (ReferenceEquals(_transcriptionCancellation, operation))
+                SetStatus("WAV transcription failed safely without exposing process diagnostics. Review the exact approved backend files. Media remains paused.");
+        }
+        finally
+        {
+            if (ReferenceEquals(_transcriptionCancellation, operation))
+            {
+                _transcriptionCancellation = null;
+                UpdateTranscriptionControls();
+            }
+            operation.Dispose();
+        }
+    }
+
+    private void OnCancelTranscriptionClick(object sender, RoutedEventArgs e)
+    {
+        if (_transcriptionCancellation is null) return;
+        _transcriptionCancellation.Cancel();
+        CancelTranscriptionButton.IsEnabled = false;
+        SetStatus("Canceling local WAV transcription. Media remains paused.");
     }
 
     private async void OnDescribeFrameClick(object sender, RoutedEventArgs e)
@@ -342,6 +431,16 @@ public partial class ContentViewerWindow : Window
             "The page did not allow programmatic resume. Use the page's own accessible playback control.",
         _ => "The web video frame operation was blocked safely. The video may remain paused.",
     };
+
+    private bool IsCurrentWav() =>
+        _currentMediaPath is not null &&
+        string.Equals(Path.GetExtension(_currentMediaPath), ".wav", StringComparison.OrdinalIgnoreCase);
+
+    private void UpdateTranscriptionControls()
+    {
+        TranscribeWavButton.IsEnabled = _transcriptionCancellation is null && IsCurrentWav();
+        CancelTranscriptionButton.IsEnabled = _transcriptionCancellation is not null;
+    }
 
     private void SetStatus(string message) => ContentStatusText.Text = message;
 }

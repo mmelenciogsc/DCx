@@ -19,5 +19,7 @@ Run separately with the installed JAWS, NVDA and Narrator versions. Use only an 
 13. With the deterministic fake CLI fixture only, confirm approval begins unchecked and disabled until review. Review the four files; read both complete license texts, all four digests, sizes and the warning that identity/accuracy are not established.
 14. Invoke save before approval and confirm the live status refuses it and moves focus to approval. Approve and save; confirm approval resets, the current transcription binding is announced, and no download/install action exists.
 15. Change any reviewed path and confirm approval/review are invalidated. Clear registration and confirm every selected executable/model/license file remains on disk.
+16. With an approved real backend, open an admitted WAV in **Files and media**. Confirm **Transcribe WAV** pauses playback, announces processing, keeps **Cancel transcription** available, and focuses the completed read-only transcript without reading process diagnostics.
+17. Cancel a long transcription and confirm no partial text remains. Clear the registration and invoke transcription again; confirm the unavailable guidance is announced and stale transcript text is absent. Record MP3/MP4 transcription as unavailable rather than inferring extraction support.
 
 P06 remains blocked until this human gate and the separate real Whisper/embedding gates pass.

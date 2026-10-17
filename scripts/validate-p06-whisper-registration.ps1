@@ -25,6 +25,7 @@ $model = Join-Path $runRoot "fixture-model.bin"
 $runtimeLicense = Join-Path $runRoot "runtime-license.txt"
 $modelLicense = Join-Path $runRoot "model-license.md"
 $audio = Join-Path $runRoot "fixture.wav"
+$timeoutAudio = Join-Path $runRoot "timeout.wav"
 $evidencePath = Join-Path $runRoot "whisper-registration-evidence.json"
 $previousDataRoot = $env:DCX_DATA_ROOT
 $previousOfflineStartup = $env:DCX_OFFLINE_STARTUP
@@ -78,6 +79,7 @@ New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 [IO.File]::WriteAllBytes($audio, [byte[]]@(
     [byte][char]'R', [byte][char]'I', [byte][char]'F', [byte][char]'F', 4, 0, 0, 0,
     [byte][char]'W', [byte][char]'A', [byte][char]'V', [byte][char]'E'))
+[IO.File]::Copy($audio, $timeoutAudio)
 
 $executableDigest = (Get-FileHash -LiteralPath $fakeWhisper -Algorithm SHA256).Hash.ToLowerInvariant()
 $modelDigest = (Get-FileHash -LiteralPath $model -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -207,6 +209,64 @@ try {
         throw "The UI-approved binding did not execute through the production Whisper adapter."
     }
 
+    Invoke-ById $mainWindow "ContentViewerButton" | Out-Null
+    $contentViewer = Wait-For {
+        Find-WindowByProcessAndId $process.Id "ContentViewerWindow"
+    } "The accessible files and media viewer did not open."
+    Set-Value $contentViewer "FilePathBox" $timeoutAudio
+    Invoke-ById $contentViewer "OpenFileButton" | Out-Null
+    $transcribeButton = Wait-For {
+        $candidate = Find-ById $contentViewer "TranscribeWavButton"
+        if ($null -ne $candidate -and $candidate.Current.IsEnabled) { $candidate }
+    } "The admitted WAV did not expose the local transcription action."
+    $cancelButton = Find-ById $contentViewer "CancelTranscriptionButton"
+    if ($null -eq $cancelButton -or $cancelButton.Current.IsEnabled) {
+        throw "Cancel transcription was enabled before an operation began."
+    }
+    $transcribeAccessKey = $transcribeButton.Current.AccessKey
+    if (-not $transcribeButton.Current.IsKeyboardFocusable -or
+        [string]::IsNullOrWhiteSpace($transcribeAccessKey)) {
+        throw "The WAV transcription action lacks a keyboard-focusable access key."
+    }
+    $transcribeButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $cancelButton = Wait-For {
+        $candidate = Find-ById $contentViewer "CancelTranscriptionButton"
+        if ($null -ne $candidate -and $candidate.Current.IsEnabled) { $candidate }
+    } "Cancel transcription did not become available during local processing."
+    if (-not $cancelButton.Current.IsKeyboardFocusable -or
+        [string]::IsNullOrWhiteSpace($cancelButton.Current.AccessKey) -or
+        $cancelButton.Current.AccessKey -eq $transcribeAccessKey) {
+        throw "The active cancel-transcription action lacks a distinct keyboard access key."
+    }
+    $cancelButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $status = Find-ById $contentViewer "ContentStatusText"
+        $null -ne $status -and $status.Current.Name -like "WAV transcription canceled.*"
+    } "User cancellation did not stop local WAV transcription."
+    $canceledTranscript = Find-ById $contentViewer "MediaTranscriptText"
+    if (-not [string]::IsNullOrEmpty($canceledTranscript.GetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern).Current.Value)) {
+        throw "A canceled local transcription retained partial transcript text."
+    }
+
+    Set-Value $contentViewer "FilePathBox" $audio
+    Invoke-ById $contentViewer "OpenFileButton" | Out-Null
+    $transcribeButton = Wait-For {
+        $candidate = Find-ById $contentViewer "TranscribeWavButton"
+        if ($null -ne $candidate -and $candidate.Current.IsEnabled) { $candidate }
+    } "The replacement WAV did not expose transcription after cancellation."
+    $transcribeButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $status = Find-ById $contentViewer "ContentStatusText"
+        $null -ne $status -and $status.Current.Name -like "WAV transcription complete in *Media remains paused."
+    } "The accessible local WAV transcription did not complete."
+    $transcriptElement = Find-ById $contentViewer "MediaTranscriptText"
+    $viewerTranscript = $transcriptElement.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    if ($viewerTranscript -ne "DCx transcription fixture 42." -or -not $transcriptElement.Current.HasKeyboardFocus) {
+        throw "The completed local transcript was not exposed and focused through UI Automation."
+    }
+
     Invoke-ById $localModelsWindow "ClearWhisperBackendButton" | Out-Null
     $null = Wait-For {
         $candidate = Find-ById $localModelsWindow "CurrentWhisperBackend"
@@ -214,6 +274,20 @@ try {
     } "The Whisper registration was not cleared."
     $cleared = $store.GetStateAsync([Threading.CancellationToken]::None).GetAwaiter().GetResult()
     if ($null -ne $cleared.Backend) { throw "The persisted Whisper binding remained after clear." }
+    $transcribeButton = Wait-For {
+        $candidate = Find-ById $contentViewer "TranscribeWavButton"
+        if ($null -ne $candidate -and $candidate.Current.IsEnabled) { $candidate }
+    } "The admitted WAV action became inaccessible after registration was cleared."
+    $transcribeButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $status = Find-ById $contentViewer "ContentStatusText"
+        $null -ne $status -and $status.Current.Name -like "No local Whisper backend is registered.*"
+    } "The viewer did not report the cleared Whisper registration."
+    $clearedTranscript = Find-ById $contentViewer "MediaTranscriptText"
+    if (-not [string]::IsNullOrEmpty($clearedTranscript.GetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern).Current.Value)) {
+        throw "The unavailable backend path retained stale transcript text."
+    }
     $sourceFiles = @($fakeWhisper, $model, $runtimeLicense, $modelLicense)
     if (@($sourceFiles | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }).Count -ne 0) {
         throw "Clearing registration deleted a source file."
@@ -234,6 +308,11 @@ try {
         model_license_sha256 = $modelLicenseDigest
         download_or_install_action_exposed = $false
         production_adapter_transcript = $transcription.Text
+        accessible_viewer_wav_transcript = $viewerTranscript
+        accessible_viewer_cancellation = $true
+        canceled_partial_transcript_retained = $false
+        cleared_backend_consumer_denied = $true
+        transcript_focus_after_completion = $true
         cleared_registration = $true
         source_files_preserved = $true
         publisher_authenticity_validated = $false
@@ -245,6 +324,8 @@ try {
     "Complete runtime/model licenses UIA=PASS"
     "Exact four-file digest review UIA=PASS"
     "UI-approved production adapter transcript=$($transcription.Text)"
+    "Accessible viewer WAV transcription and focus=PASS"
+    "Accessible viewer WAV cancellation=PASS"
     "Clear registration preserves source files=PASS"
     "Whisper download/install action absent=PASS"
     "Whisper registration evidence=$evidencePath"

@@ -15,11 +15,14 @@ Registration rejects network/device paths, reparse files or ancestors, unsupport
 
 The UI provides unique keyboard access keys and stable UI Automation identifiers. It has no download or install action and explicitly states that digest review does not prove publisher authenticity, legal suitability or transcription accuracy.
 
+The files/media viewer consumes only this persisted binding for direct admitted-WAV transcription. It pauses media, keeps a cancel action enabled during processing, retains no partial transcript on cancellation, and places successful bounded text in a read-only accessible transcript field. Invalid UTF-8 and unsupported control characters fail closed. Clearing the binding makes the consumer unavailable immediately. MP3/MP4 audio extraction is not authorized by this decision and remains explicitly unavailable.
+
 ## Consequences
 
 - A user can review, approve, retain and revoke an exact already-installed backend without environment editing.
 - Any executable, model or license-byte change invalidates the approved identity before use.
 - Native UIA and a fake CLI prove consent, persistence and broker wiring without claiming speech-recognition quality.
+- Native UIA also proves consumer cancellation, cleared-binding denial and transcript focus, but the fixed fake transcript remains broker evidence rather than accuracy evidence.
 - P06 remains blocked until the owner authorizes real dependency acquisition or identifies an existing approved backend, and real speech accuracy, provenance, license, resource, cancellation and offline-performance gates pass.
 
 ## Alternatives rejected

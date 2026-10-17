@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace DCx.Core.LocalModels;
 
@@ -21,6 +22,7 @@ public sealed record WhisperTranscriptionResult(
 
 public sealed class WhisperCliTranscriber
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly WhisperCliConfiguration configuration;
     private readonly string executablePath;
     private readonly string modelPath;
@@ -142,8 +144,45 @@ public sealed class WhisperCliTranscriber
                 throw new InvalidOperationException("The local Whisper transcript is missing or outside its size limit.");
             }
 
-            var text = (await File.ReadAllTextAsync(output.FullName, cancellationToken).ConfigureAwait(false)).Trim();
-            if (string.IsNullOrWhiteSpace(text)) throw new InvalidOperationException("The local Whisper transcript is empty.");
+            string text;
+            byte[] transcriptBytes;
+            await using (var transcriptLease = new FileStream(
+                             output.FullName,
+                             FileMode.Open,
+                             FileAccess.Read,
+                             FileShare.Read,
+                             64 * 1024,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                if (transcriptLease.Length is <= 0 ||
+                    transcriptLease.Length > configuration.MaximumTranscriptBytes)
+                {
+                    throw new InvalidOperationException("The local Whisper transcript is outside its size limit.");
+                }
+                transcriptBytes = new byte[checked((int)transcriptLease.Length)];
+                await transcriptLease.ReadExactlyAsync(transcriptBytes, cancellationToken).ConfigureAwait(false);
+            }
+            try
+            {
+                text = StrictUtf8.GetString(transcriptBytes)
+                    .TrimStart('\uFEFF')
+                    .Replace("\r\n", "\n", StringComparison.Ordinal)
+                    .Replace('\r', '\n')
+                    .Trim();
+            }
+            catch (DecoderFallbackException exception)
+            {
+                throw new InvalidOperationException("The local Whisper transcript is not valid UTF-8 text.", exception);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(transcriptBytes);
+            }
+            if (string.IsNullOrWhiteSpace(text) || text.Any(character =>
+                    char.IsControl(character) && character is not ('\n' or '\t')))
+            {
+                throw new InvalidOperationException("The local Whisper transcript is empty or contains unsupported control characters.");
+            }
             return new WhisperTranscriptionResult(text, started.Elapsed, peakWorkingSetBytes);
         }
         finally

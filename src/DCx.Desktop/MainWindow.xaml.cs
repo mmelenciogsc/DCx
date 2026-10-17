@@ -1072,7 +1072,9 @@ public partial class MainWindow : Window
 
         try
         {
-            _contentViewerWindow = new ContentViewerWindow(await GetLocalModelSelectionStoreAsync())
+            _contentViewerWindow = new ContentViewerWindow(
+                await GetLocalModelSelectionStoreAsync(),
+                await GetWhisperBackendSelectionStoreAsync())
             {
                 Owner = this,
             };

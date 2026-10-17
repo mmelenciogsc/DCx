@@ -107,29 +107,53 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <MediaElement x:Name="MediaViewer" LoadedBehavior="Manual" UnloadedBehavior="Stop"
                                   Stretch="Uniform" ScrubbingEnabled="True"
                                   AutomationProperties.AutomationId="MediaViewer"
                                   AutomationProperties.Name="Local audio or video" />
                     <WrapPanel Grid.Row="1" Margin="8">
-                        <Button MinWidth="80" Margin="0,0,8,0" Content="Play"
+                        <Button MinWidth="80" Margin="0,0,8,0" Content="_Play"
                                 AutomationProperties.AutomationId="MediaPlayButton" Click="OnMediaPlayClick" />
-                        <Button MinWidth="80" Margin="0,0,8,0" Content="Pause"
+                        <Button MinWidth="80" Margin="0,0,8,0" Content="Pa_use"
                                 AutomationProperties.AutomationId="MediaPauseButton" Click="OnMediaPauseClick" />
-                        <Button MinWidth="80" Content="Stop"
+                        <Button MinWidth="80" Content="_Stop"
                                 AutomationProperties.AutomationId="MediaStopButton" Click="OnMediaStopClick" />
                         <Button x:Name="DescribeFrameButton" MinWidth="150" Margin="8,0,0,0"
-                                Content="Describe frame" IsEnabled="False"
+                                Content="_Describe frame" IsEnabled="False"
                                 AutomationProperties.AutomationId="DescribeFrameButton"
                                 AutomationProperties.Name="Pause and describe current video frame"
                                 AutomationProperties.HelpText="Uses the optional paused-frame question above. The local video remains paused for follow-up questions."
                                 Click="OnDescribeFrameClick" />
+                        <Button x:Name="TranscribeWavButton" MinWidth="160" Margin="8,0,0,0"
+                                Content="_Transcribe WAV" IsEnabled="False"
+                                AutomationProperties.AutomationId="TranscribeWavButton"
+                                AutomationProperties.Name="Pause and transcribe selected WAV audio"
+                                AutomationProperties.HelpText="Uses only the explicitly approved local Whisper backend. MP3 and MP4 extraction is not yet available."
+                                Click="OnTranscribeWavClick" />
+                        <Button x:Name="CancelTranscriptionButton" MinWidth="160" Margin="8,0,0,0"
+                                Content="C_ancel transcription" IsEnabled="False"
+                                AutomationProperties.AutomationId="CancelTranscriptionButton"
+                                AutomationProperties.Name="Cancel local WAV transcription"
+                                Click="OnCancelTranscriptionClick" />
                     </WrapPanel>
                     <TextBlock x:Name="FrameDescriptionText" Grid.Row="2" Margin="8,0,8,8" TextWrapping="Wrap"
                                AutomationProperties.AutomationId="FrameDescriptionText"
                                AutomationProperties.Name="{Binding Text, RelativeSource={RelativeSource Self}}"
                                AutomationProperties.LiveSetting="Assertive" />
+                    <GroupBox Grid.Row="3" Margin="8,0,8,8" Header="Local WAV transcript">
+                        <TextBox x:Name="MediaTranscriptText"
+                                 MinHeight="90"
+                                 MaxHeight="200"
+                                 Padding="6"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 AutomationProperties.AutomationId="MediaTranscriptText"
+                                 AutomationProperties.Name="Local WAV transcript text" />
+                    </GroupBox>
                 </Grid>
             </TabItem>
             <TabItem Header="Folder" AutomationProperties.Name="Folder contents">

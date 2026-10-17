@@ -32,5 +32,16 @@ else if (!Path.GetFileName(audio).StartsWith("instant", StringComparison.Ordinal
     await Task.Delay(TimeSpan.FromMilliseconds(75));
 }
 
-await File.WriteAllTextAsync($"{outputPrefix}.txt", "DCx transcription fixture 42.");
+if (Path.GetFileName(audio).StartsWith("control", StringComparison.OrdinalIgnoreCase))
+{
+    await File.WriteAllTextAsync($"{outputPrefix}.txt", "DCx\u0001transcript");
+}
+else if (Path.GetFileName(audio).StartsWith("invalid-utf8", StringComparison.OrdinalIgnoreCase))
+{
+    await File.WriteAllBytesAsync($"{outputPrefix}.txt", [0xff, 0xfe, 0xfd]);
+}
+else
+{
+    await File.WriteAllTextAsync($"{outputPrefix}.txt", "DCx transcription fixture 42.");
+}
 return 0;

@@ -51,6 +51,10 @@ try {
     if ($whisperRegistrationEvidence.native_uia -ne "pass" -or
         $whisperRegistrationEvidence.approval_default_unchecked -ne $true -or
         $whisperRegistrationEvidence.save_without_approval_denied -ne $true -or
+        $whisperRegistrationEvidence.accessible_viewer_cancellation -ne $true -or
+        $whisperRegistrationEvidence.canceled_partial_transcript_retained -ne $false -or
+        $whisperRegistrationEvidence.cleared_backend_consumer_denied -ne $true -or
+        $whisperRegistrationEvidence.transcript_focus_after_completion -ne $true -or
         $whisperRegistrationEvidence.download_or_install_action_exposed -ne $false -or
         $whisperRegistrationEvidence.source_files_preserved -ne $true -or
         $whisperRegistrationEvidence.real_backend_accuracy_validated -ne $false) {

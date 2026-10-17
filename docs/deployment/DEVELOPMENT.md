@@ -35,6 +35,8 @@ The current P06 gate expects a Windows-native Ollama service at the loopback ori
 
 An already-installed Whisper backend may be registered in the same window by selecting the local executable, model, runtime license and model license. Read both complete licenses and all four SHA-256 values, then check the default-off approval and save. Saving revalidates all four files; clearing removes only DCx state, not the selected files. DCx does not download or install Whisper from this surface, and registration alone does not establish publisher authenticity, license suitability or accuracy.
 
+The files/media viewer can directly transcribe an admitted local WAV through that exact binding. It exposes cancellation and a read-only accessible transcript but does not persist or export transcript text. MP3/MP4 extraction is deliberately unavailable until a separately approved, digest/license-bound extraction boundary is implemented.
+
 The recorded development host has one approved vision fixture alias but no installed embedding model or real Whisper backend. Do not add either dependency without owner approval and recorded source, version, license, digest, resource and quality evidence. A malformed selection file fails closed; it must not be replaced with an environment-variable bypass. Run P06 with PowerShell 7 because its native evidence loads the .NET production assembly:
 
 ```powershell
