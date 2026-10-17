@@ -61,8 +61,8 @@ public sealed class ReleaseReadinessTests
         Assert.Equal(7, result.BlockingCriticalAndMajorIssues);
         Assert.Contains(result.Issues, issue => issue.Id == "p10-ccb-sandbox");
         var paypal = Assert.Single(result.Issues, issue => issue.Id == "p11-paypal");
-        Assert.Contains("validated out-of-order-event quarantine", paypal.NextAction, StringComparison.Ordinal);
-        Assert.Contains("production scheduling", paypal.NextAction, StringComparison.Ordinal);
+        Assert.Contains("blocked-event closure/requeue", paypal.NextAction, StringComparison.Ordinal);
+        Assert.Contains("external notification and escalation", paypal.NextAction, StringComparison.Ordinal);
     }
 
     private static ReleaseReadinessIssue Issue(ReadinessDisposition disposition) => new(
