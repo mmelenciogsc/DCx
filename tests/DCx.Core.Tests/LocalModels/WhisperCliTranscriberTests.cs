@@ -21,7 +21,24 @@ public sealed class WhisperCliTranscriberTests : IDisposable
 
         Assert.Equal("DCx transcription fixture 42.", result.Text);
         Assert.True(result.Elapsed < TimeSpan.FromSeconds(5));
-        Assert.True(result.PeakWorkingSetBytes > 0);
+        Assert.True(result.PeakWorkingSetBytes is > 0);
+    }
+
+    [Fact]
+    public async Task InstantProcess_NeverFabricatesZeroByteWorkingSetMeasurement()
+    {
+        Directory.CreateDirectory(root);
+        var executable = FixtureExecutable();
+        var model = Path.Combine(root, "fixture-model.bin");
+        var audio = Path.Combine(root, "instant.wav");
+        await File.WriteAllBytesAsync(model, "fixture whisper model"u8.ToArray());
+        await File.WriteAllBytesAsync(audio, WaveBytes());
+        var transcriber = await CreateAsync(executable, model, TimeSpan.FromSeconds(5));
+
+        var result = await transcriber.TranscribeWavAsync(audio);
+
+        Assert.Equal("DCx transcription fixture 42.", result.Text);
+        Assert.True(result.PeakWorkingSetBytes is null or > 0);
     }
 
     [Fact]

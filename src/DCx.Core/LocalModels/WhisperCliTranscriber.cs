@@ -15,7 +15,7 @@ public sealed record WhisperCliConfiguration(
 public sealed record WhisperTranscriptionResult(
     string Text,
     TimeSpan Elapsed,
-    long PeakWorkingSetBytes);
+    long? PeakWorkingSetBytes);
 
 public sealed class WhisperCliTranscriber
 {
@@ -275,16 +275,17 @@ public sealed class WhisperCliTranscriber
         }
     }
 
-    private static async Task<long> MonitorWorkingSetAsync(Process process)
+    private static async Task<long?> MonitorWorkingSetAsync(Process process)
     {
-        long maximum = 0;
+        long? maximum = null;
         while (true)
         {
             try
             {
-                if (process.HasExited) return maximum;
                 process.Refresh();
-                maximum = Math.Max(maximum, process.WorkingSet64);
+                var sample = Math.Max(process.WorkingSet64, process.PeakWorkingSet64);
+                if (sample > 0) maximum = Math.Max(maximum ?? 0, sample);
+                if (process.HasExited) return maximum;
             }
             catch (InvalidOperationException)
             {

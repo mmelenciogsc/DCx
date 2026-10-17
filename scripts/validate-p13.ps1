@@ -6,9 +6,12 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $solution = Join-Path $repoRoot "DCx.slnx"
 $desktopProject = Join-Path $repoRoot "src\DCx.Desktop\DCx.Desktop.csproj"
 $tests = Join-Path $repoRoot "tests\DCx.Core.Tests\DCx.Core.Tests.csproj"
+$msixBuilder = Join-Path $repoRoot "scripts\build-unsigned-msix.ps1"
 $runRoot = Join-Path $repoRoot "artifacts\test-results\p13-$([Guid]::NewGuid().ToString('N'))"
 $publishOne = Join-Path $runRoot "publish-a"
 $publishTwo = Join-Path $runRoot "publish-b"
+$msixOne = Join-Path $runRoot "DCx-local-validation-a.msix"
+$msixTwo = Join-Path $runRoot "DCx-local-validation-b.msix"
 $reliabilityTrx = Join-Path $runRoot "p13-reliability.trx"
 $packageTrustTrx = Join-Path $runRoot "p13-package-trust.trx"
 $previousDataRoot = $env:DCX_DATA_ROOT
@@ -248,6 +251,8 @@ Push-Location $repoRoot
 try {
     dotnet restore $solution --locked-mode
     if ($LASTEXITCODE -ne 0) { throw "Locked restore failed with exit code $LASTEXITCODE." }
+    dotnet restore $desktopProject --locked-mode --runtime win-x64
+    if ($LASTEXITCODE -ne 0) { throw "Locked win-x64 restore failed with exit code $LASTEXITCODE." }
     dotnet build $solution --configuration Release --no-restore
     if ($LASTEXITCODE -ne 0) { throw "Release build failed with exit code $LASTEXITCODE." }
     dotnet test $tests --configuration Release --no-build --no-restore --filter "FullyQualifiedName~Reliability" `
@@ -283,10 +288,44 @@ try {
         throw "P13 package-trust TRX counters were not exactly 21 passed and zero failed or unexecuted."
     }
 
-    dotnet publish $desktopProject --configuration Release --no-build --no-restore --self-contained false --output $publishOne
-    if ($LASTEXITCODE -ne 0) { throw "First framework-dependent publish failed with exit code $LASTEXITCODE." }
-    dotnet publish $desktopProject --configuration Release --no-build --no-restore --self-contained false --output $publishTwo
-    if ($LASTEXITCODE -ne 0) { throw "Second framework-dependent publish failed with exit code $LASTEXITCODE." }
+    dotnet publish $desktopProject --configuration Release --runtime win-x64 --no-restore --self-contained true --output $publishOne
+    if ($LASTEXITCODE -ne 0) { throw "First self-contained x64 publish failed with exit code $LASTEXITCODE." }
+    dotnet publish $desktopProject --configuration Release --runtime win-x64 --no-build --no-restore --self-contained true --output $publishTwo
+    if ($LASTEXITCODE -ne 0) { throw "Second self-contained x64 publish failed with exit code $LASTEXITCODE." }
+
+    $msixEvidenceOne = & $msixBuilder `
+        -PayloadRoot $publishOne `
+        -StagingRoot (Join-Path $runRoot "msix-staging-a") `
+        -PackagePath $msixOne `
+        -EvidencePath (Join-Path $runRoot "msix-evidence-a.json")
+    $msixEvidenceTwo = & $msixBuilder `
+        -PayloadRoot $publishTwo `
+        -StagingRoot (Join-Path $runRoot "msix-staging-b") `
+        -PackagePath $msixTwo `
+        -EvidencePath (Join-Path $runRoot "msix-evidence-b.json")
+    foreach ($msixEvidence in @($msixEvidenceOne, $msixEvidenceTwo)) {
+        if ($msixEvidence.package_identity -ne "DCx.AgenticBrowser.LocalValidation" -or
+            $msixEvidence.package_publisher -ne "CN=DCx Local Validation" -or
+            $msixEvidence.package_version -ne "1.0.0.0" -or
+            $msixEvidence.architecture -ne "x64" -or
+            $msixEvidence.dotnet_runtime_version -ne "10.0.12" -or
+            -not $msixEvidence.dotnet_self_contained -or
+            -not $msixEvidence.semantic_validation -or
+            -not $msixEvidence.canonical_zip_timestamps -or
+            -not $msixEvidence.makeappx_unpack_validation -or
+            $msixEvidence.package_authenticode_status -ne "NotSigned" -or
+            $msixEvidence.webview2_runtime_bundled -or
+            -not $msixEvidence.webview2_evergreen_required -or
+            $msixEvidence.signing_attempted -or
+            $msixEvidence.install_attempted -or
+            $msixEvidence.production_actions -ne 0) {
+            throw "An MSIX staging output was not self-contained, semantically valid and inert."
+        }
+    }
+    if ($msixEvidenceOne.package_sha256 -ne $msixEvidenceTwo.package_sha256 -or
+        $msixEvidenceOne.package_length -ne $msixEvidenceTwo.package_length) {
+        throw "The two MSIX staging outputs were not reproducible, self-contained, semantically valid and inert."
+    }
     $manifestOne = Get-FileManifest $publishOne
     $manifestTwo = Get-FileManifest $publishTwo
     $manifestDifference = Compare-Object $manifestOne $manifestTwo -Property path, length, sha256
@@ -331,6 +370,7 @@ try {
     $defenderExecutableSha256 = (Get-FileHash -LiteralPath $defenderPath -Algorithm SHA256).Hash.ToLowerInvariant()
     Invoke-DefenderNoRemediationScan $defenderPath $publishOne
     Invoke-DefenderNoRemediationScan $defenderPath $zipOne
+    Invoke-DefenderNoRemediationScan $defenderPath $msixOne
 
     $nugetAuditRaw = dotnet list $desktopProject package --vulnerable --include-transitive --format json | Out-String
     if ($LASTEXITCODE -ne 0 -or [Text.Encoding]::UTF8.GetByteCount($nugetAuditRaw) -gt 1048576) {
@@ -400,6 +440,32 @@ try {
             url = $licenseUrl
         }
     }
+    foreach ($runtimePackage in @(
+        [ordered]@{
+            name = "Microsoft.NETCore.App.Runtime.win-x64"
+            license_files = "Licenses/dotnet-runtime-LICENSE.txt; Licenses/dotnet-runtime-THIRD-PARTY-NOTICES.txt"
+        },
+        [ordered]@{
+            name = "Microsoft.WindowsDesktop.App.Runtime.win-x64"
+            license_files = "Licenses/windows-desktop-runtime-LICENSE.txt"
+        })) {
+        $components += [ordered]@{
+            type = "framework"
+            name = $runtimePackage.name
+            version = $msixEvidenceOne.dotnet_runtime_version
+            purl = "pkg:nuget/$([uri]::EscapeDataString($runtimePackage.name))@$([uri]::EscapeDataString($msixEvidenceOne.dotnet_runtime_version))"
+            scope = "required"
+            licenses = @([ordered]@{ expression = "MIT" })
+            properties = @([ordered]@{ name = "dcx:dependency-kind"; value = "self-contained-runtime" })
+        }
+        $licenseInventory += [ordered]@{
+            package = $runtimePackage.name
+            version = $msixEvidenceOne.dotnet_runtime_version
+            type = "file"
+            value = $runtimePackage.license_files
+            url = ""
+        }
+    }
     $bom = [ordered]@{
         bomFormat = "CycloneDX"
         specVersion = "1.6"
@@ -420,11 +486,53 @@ try {
         -not $isGenerated -and $textExtensions -contains $_.Extension.ToLowerInvariant()
     } | ForEach-Object { $_.FullName })
     $fixtureMatches = Invoke-SecretScan $trackedSource "tracked source"
-    $publishedFiles = @(Get-ChildItem -LiteralPath $publishOne -File -Recurse | ForEach-Object { $_.FullName })
-    Invoke-PublishedBinarySecretScan $publishedFiles
+    $publishedFiles = @(Get-ChildItem -LiteralPath $publishOne -File -Recurse)
+    $publishedTextExtensions = @('.json', '.config', '.xml', '.txt', '.md', '.ps1', '.cmd', '.bat', '.yml', '.yaml')
+    $publishedSecretScanFiles = @($publishedFiles | Where-Object {
+        $_.Name.StartsWith('DCx.', [StringComparison]::OrdinalIgnoreCase) -or
+        $_.Name.Equals('DCx.exe', [StringComparison]::OrdinalIgnoreCase) -or
+        $publishedTextExtensions -contains $_.Extension.ToLowerInvariant()
+    } | ForEach-Object { $_.FullName })
+    foreach ($requiredOwnedBinary in @('DCx.exe', 'DCx.dll', 'DCx.Core.dll')) {
+        if (-not ($publishedSecretScanFiles | Where-Object {
+            [IO.Path]::GetFileName($_).Equals($requiredOwnedBinary, [StringComparison]::OrdinalIgnoreCase)
+        })) {
+            throw "A required DCx-owned published binary was omitted from secret scanning."
+        }
+    }
+    Invoke-PublishedBinarySecretScan $publishedSecretScanFiles
 
     $publishedExe = Join-Path $publishOne "DCx.exe"
     $signature = Get-AuthenticodeSignature -FilePath $publishedExe
+    [Reflection.Assembly]::LoadFrom((Join-Path $publishOne "DCx.Core.dll")) | Out-Null
+    $manifestInspector = [DCx.Core.Deployment.MsixManifestInspector]::new()
+    $actualMsixIdentity = $manifestInspector.InspectAsync(
+        $msixOne,
+        [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    $actualSignatureProbe = [DCx.Core.Deployment.WindowsPowerShellAuthenticodeProbe]::new()
+    $actualMsixSignature = $actualSignatureProbe.InspectAsync(
+        $msixOne,
+        [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    $actualTrustVerifier = [DCx.Core.Deployment.MsixPackageTrustVerifier]::new(
+        $actualSignatureProbe,
+        $manifestInspector)
+    $actualMsixTrust = $actualTrustVerifier.VerifyAsync(
+        $msixOne,
+        [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    $zeroSha256 = [string]::new([char]'0', 64)
+    if ($actualMsixIdentity.PackageIdentityName -ne "DCx.AgenticBrowser.LocalValidation" -or
+        $actualMsixIdentity.PublisherId -ne "CN=DCx Local Validation" -or
+        $actualMsixIdentity.Version -ne "1.0.0.0" -or
+        $actualMsixSignature.Status -ne "NotSigned" -or
+        $null -ne $actualMsixSignature.SignerSubject -or
+        $null -ne $actualMsixSignature.SignerCertificateSha256 -or
+        $actualMsixTrust.SignatureValid -or
+        $actualMsixTrust.PackageIdentityName -ne $actualMsixIdentity.PackageIdentityName -or
+        $actualMsixTrust.PublisherId -ne $actualMsixIdentity.PublisherId -or
+        $actualMsixTrust.Version -ne $actualMsixIdentity.Version -or
+        $actualMsixTrust.SignerCertificateSha256 -ne $zeroSha256) {
+        throw "The actual unsigned MSIX identity or real Windows trust denial was not exact."
+    }
     $env:DCX_DATA_ROOT = Join-Path $runRoot "offline-data"
     $env:DCX_OFFLINE_STARTUP = "1"
     New-Item -ItemType Directory -Path (Join-Path $env:DCX_DATA_ROOT "Browser") -Force | Out-Null
@@ -570,15 +678,35 @@ try {
         defender_signer_certificate_sha256 = $defenderSignerSha256
         defender_publish_scan_no_remediation = $true
         defender_zip_scan_no_remediation = $true
+        defender_msix_scan_no_remediation = $true
         nuget_vulnerability_audit_source = [string]$nugetAudit.sources[0]
         nuget_vulnerabilities = $vulnerabilityCount
         publish_file_count = $manifestOne.Count
         publish_bytes = [long](($manifestOne | Measure-Object length -Sum).Sum)
+        dotnet_self_contained = $true
+        dotnet_runtime_version = [string]$msixEvidenceOne.dotnet_runtime_version
         reproducible_publish = $true
         reproducible_portable_zip = $true
         portable_zip_sha256 = $zipHashOne
+        reproducible_unsigned_msix = $true
+        msix_package_identity = [string]$msixEvidenceOne.package_identity
+        msix_package_publisher = [string]$msixEvidenceOne.package_publisher
+        msix_package_version = [string]$msixEvidenceOne.package_version
+        msix_package_length = [long]$msixEvidenceOne.package_length
+        msix_package_sha256 = [string]$msixEvidenceOne.package_sha256
+        msix_makeappx_version = [string]$msixEvidenceOne.makeappx_version
+        msix_makeappx_sha256 = [string]$msixEvidenceOne.makeappx_sha256
+        msix_makeappx_signer_certificate_sha256 = [string]$msixEvidenceOne.makeappx_signer_certificate_sha256
+        msix_makeappx_semantic_and_unpack_validation = $true
+        msix_authenticode_status = [string]$actualMsixSignature.Status
+        msix_real_trust_denial = (-not [bool]$actualMsixTrust.SignatureValid)
+        msix_signing_attempted = $false
+        msix_install_attempted = $false
+        webview2_runtime_bundled = $false
+        webview2_evergreen_required = $true
         sbom_components = $components.Count
         license_records = $licenseInventory.Count
+        published_secret_scan_files = $publishedSecretScanFiles.Count
         allowed_fake_secret_fixture_matches = $fixtureMatches
         unexpected_secret_matches = 0
         authenticode_status = [string]$signature.Status
@@ -605,12 +733,18 @@ try {
     "P13 bounded MSIX manifest and Windows Authenticode tests=PASS ($packageTrustTestsPassed/$packageTrustTestsPassed)"
     "P13 unsigned or incomplete synthetic MSIX trust denial=PASS"
     "P13 Microsoft Defender current signatures and trusted scanner=PASS"
-    "P13 Microsoft Defender publish and ZIP no-remediation scans=PASS"
+    "P13 Microsoft Defender publish, ZIP and MSIX no-remediation scans=PASS"
     "P13 NuGet direct and transitive vulnerabilities=$vulnerabilityCount"
-    "Reproducible framework-dependent publish files=$($manifestOne.Count)"
+    "Reproducible self-contained x64 publish files=$($manifestOne.Count)"
+    "Self-contained .NET runtime=$($msixEvidenceOne.dotnet_runtime_version)"
     "Reproducible portable staging ZIP SHA-256=$zipHashOne"
+    "Reproducible semantic unsigned MSIX SHA-256=$($msixEvidenceOne.package_sha256)"
+    "Unsigned MSIX MakeAppx semantic/unpack validation=PASS"
+    "Unsigned MSIX real Windows trust denial=PASS ($($actualMsixSignature.Status))"
+    "WebView2 Evergreen Runtime required and not bundled=PASS"
     "CycloneDX components=$($components.Count)"
     "Third-party license records=$($licenseInventory.Count)"
+    "DCx-owned binary and published text secret-scan files=$($publishedSecretScanFiles.Count)"
     "Unexpected secret matches=0"
     "Known synthetic scanner-fixture matches=$fixtureMatches"
     "Authenticode status=$($signature.Status)"

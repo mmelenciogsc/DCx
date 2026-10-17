@@ -1,0 +1,7 @@
+# MSIX local-validation source
+
+This manifest is the auditable input for an x64, per-user, medium-integrity packaged classic WPF application. `scripts/build-unsigned-msix.ps1` adds deterministic generated PNG assets and a self-contained .NET payload, then invokes the installed Microsoft Windows SDK `MakeAppx.exe` with semantic validation enabled.
+
+`DCx.AgenticBrowser.LocalValidation` and `CN=DCx Local Validation` are deliberately nonproduction identities. The generated package is deliberately unsigned, must fail DCx signature trust, and must not be installed, registered, distributed or submitted. A production identity can be selected only with the future signing/Store authority and must remain exactly bound to its certificate publisher.
+
+The payload embeds .NET Core and Windows Desktop runtime files and their available license notices. It does not bundle or install WebView2. The tested Windows 11 path uses the Evergreen WebView2 Runtime already present on the device; an approved installer/bootstrap path and clean-VM evidence remain required.

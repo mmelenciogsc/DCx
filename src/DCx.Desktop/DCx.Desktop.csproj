@@ -2,6 +2,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>DCx</AssemblyName>
@@ -12,4 +13,3 @@
     <ProjectReference Include="..\DCx.Core\DCx.Core.csproj" />
   </ItemGroup>
 </Project>
-
