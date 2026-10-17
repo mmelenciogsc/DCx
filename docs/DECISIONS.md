@@ -53,5 +53,6 @@
 | [0049](architecture/adr/0049-bounded-local-model-quality-evaluation.md) | Score local transcription/retrieval quality and resources without retaining raw observations | Accepted for deterministic evaluation; real Whisper/embedding acceptance blocked | 2026-10-18 |
 | [0050](architecture/adr/0050-approval-bound-local-model-benchmark-runs.md) | Bind benchmark execution to exact approved backend, fixture and policy digests | Accepted for core execution; accessible workflow governed by 0051 | 2026-10-18 |
 | [0051](architecture/adr/0051-accessible-local-benchmark-review.md) | Admit strict local benchmark manifests through one accessible exact-review approval | Accepted for fixture-backed local execution; real backend acceptance blocked | 2026-10-18 |
+| [0052](architecture/adr/0052-exact-ollama-embedding-benchmark.md) | Bind Ollama embedding benchmarks to exact runtime, loaded resources and confirmed unload | Accepted for already-installed approved models; real model acceptance blocked | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

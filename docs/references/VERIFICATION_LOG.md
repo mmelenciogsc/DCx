@@ -21,6 +21,10 @@ Checked 2026-10-17 from the development host.
 | Ollama local API | https://docs.ollama.com/api/introduction | HTTP 200; local base URL `http://localhost:11434/api` requires no cloud key. |
 | Ollama vision | https://docs.ollama.com/capabilities/vision | HTTP 200; REST image input is base64 in a message `images` array. |
 | Ollama chat schema | https://docs.ollama.com/api/chat | HTTP 200; request/response fields, deterministic options, token/duration metrics and `keep_alive` verified. |
+| Ollama runtime version | https://docs.ollama.com/api-reference/get-version | Checked 2026-10-18; official OpenAPI documents unauthenticated loopback `GET /api/version` and a string `version` response. |
+| Ollama running models | https://docs.ollama.com/api/ps | Checked 2026-10-18; official OpenAPI documents loaded-model name/digest, `size`, `size_vram` and expiry fields. |
+| Ollama embeddings | https://docs.ollama.com/api/embed | Checked 2026-10-18; official OpenAPI documents bounded input arrays, `truncate`, `keep_alive`, embeddings and duration/token counters. |
+| Ollama unload | https://docs.ollama.com/api/generate | Checked 2026-10-18; official OpenAPI documents `keep_alive: 0` as immediate unload. The installed loopback 0.40.0 runtime returned `done:true` and `done_reason:"unload"` for an already-installed digest-qualified model; no model was installed or pulled. |
 | whisper.cpp | https://github.com/ggml-org/whisper.cpp | HTTP 200; upstream project exists, but no local Windows backend is installed and no binary/model license/hash has been approved. |
 | FFmpeg documentation | https://ffmpeg.org/documentation.html | Timed out again on 2026-10-17 with a bounded HTTPS-only request. The installed binary/version/configuration, complete co-located GPLv3 license, SHA-256 values and real Windows `NotSigned` result were inspected locally; the candidate remains unapproved and unbundled. |
 | SQLite documentation | https://www.sqlite.org/docs.html | HTTP 200; selected as the embedded transactional metadata/FTS5 engine for the per-profile private store. |

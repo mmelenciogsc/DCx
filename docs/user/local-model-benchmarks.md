@@ -2,7 +2,7 @@
 
 DCx can review and run bounded local-model quality fixtures without downloading a model or changing a production selection. Open **Local models**, then **Open quality benchmark review**. Browse to a local JSON manifest, review every digest and threshold, and check the approval box for one run. Approval starts unchecked, expires after 20 minutes, and is revoked by a path change or any completed, canceled, or failed run.
 
-Transcription runs require an already-registered, explicitly approved Whisper backend. Embedding manifests can be reviewed, but execution remains unavailable until DCx has an approved production embedding adapter and resource probe. A passing fixture does not establish publisher authenticity, licensing rights, general accuracy, or production suitability.
+Transcription runs require an already-registered, explicitly approved Whisper backend. Embedding runs require an already-installed, explicitly approved, digest-qualified Ollama embedding model. DCx binds its reviewed license digest and Ollama runtime version, refuses a preloaded benchmark model, measures elapsed time plus Ollama-reported loaded-model and GPU bytes, then explicitly unloads it and requires three consecutive absent observations. A passing fixture does not establish publisher authenticity, licensing rights, general accuracy, or production suitability.
 
 ## Transcription schema version 1
 
@@ -75,3 +75,5 @@ All WAV paths must be unique relative paths beneath the manifest directory. WAVs
 ## Retained evidence
 
 DCx replaces the latest evidence file for each benchmark type beneath the current user's private application-data directory. It retains only aggregate metrics, failure codes, timestamps, and approval/backend/suite/policy digests. It does not retain fixture paths, reference transcripts, generated transcripts, corpus text, queries, relevance identifiers, or vectors. Cancellation never replaces prior completed evidence.
+
+For embedding evidence, the schema's `peakWorkingSetBytes` field contains the Ollama `/api/ps` loaded-model `size` value. It is a conservative model-memory policy value, not an operating-system process peak-working-set measurement. `peakGpuBytes` contains Ollama's `size_vram`. The review and result UI label both values as loaded memory.
