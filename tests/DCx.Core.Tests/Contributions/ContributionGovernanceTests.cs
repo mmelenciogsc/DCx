@@ -96,26 +96,161 @@ public sealed class ContributionGovernanceTests : IDisposable
         var qualified = await governance.EvaluateUsageAsync(
             receipt,
             signature,
-            new AuthoritativeUsageContext(true, "consumer:other", integrityKey, now));
+            UsageContext(receipt, "consumer:other", integrityKey));
         var replay = await governance.EvaluateUsageAsync(
             receipt,
             signature,
-            new AuthoritativeUsageContext(true, "consumer:other", integrityKey, now));
+            UsageContext(receipt, "consumer:other", integrityKey));
         var selfReceipt = receipt with { ReceiptId = "receipt:self", Nonce = "usage-nonce-self-123456" };
         var selfUse = await governance.EvaluateUsageAsync(
             selfReceipt,
             UsageReceiptPolicy.Sign(selfReceipt, integrityKey),
-            new AuthoritativeUsageContext(true, candidate.ContributorPseudonym, integrityKey, now));
+            UsageContext(selfReceipt, candidate.ContributorPseudonym, integrityKey));
         var badReceipt = receipt with { ReceiptId = "receipt:bad", Nonce = "usage-nonce-bad-1234567" };
         var badIntegrity = await governance.EvaluateUsageAsync(
             badReceipt,
             "not-base64",
-            new AuthoritativeUsageContext(true, "consumer:other", integrityKey, now));
+            UsageContext(badReceipt, "consumer:other", integrityKey));
 
         Assert.True(qualified.Qualified);
         Assert.Equal("replay", replay.Code);
         Assert.Equal("self_use", selfUse.Code);
         Assert.Equal("integrity_invalid", badIntegrity.Code);
+    }
+
+    [Fact]
+    public async Task UsageReceipts_BindAuthoritativeIdentityAndAtomicallyEnforceDailyCap()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "usage-race-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "usage-race-governance");
+        var first = await ContributionGovernanceService.OpenAsync(governanceRoot, registry);
+        var candidate = Candidate(
+            "candidate:usage-race",
+            "resource:usage-race",
+            "A receipt fixture that binds authoritative installation and entitlement identities.");
+        var prepared = Prepare(candidate, "nonce-usage-race-123456");
+        await first.IntakeAsync(prepared, now);
+        await first.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now);
+        var second = await ContributionGovernanceService.OpenAsync(governanceRoot, registry);
+        var integrityKey = Enumerable.Repeat((byte)29, 32).ToArray();
+        const string installation = "installation:bound";
+        const string entitlement = "entitlement:bound";
+
+        var forgedInstallation = UsageReceipt(
+            "receipt:forged-installation",
+            "usage-nonce-forged-installation",
+            candidate,
+            "installation:forged",
+            entitlement);
+        var forgedInstallationDecision = await first.EvaluateUsageAsync(
+            forgedInstallation,
+            UsageReceiptPolicy.Sign(forgedInstallation, integrityKey),
+            UsageContext(
+                forgedInstallation,
+                "consumer:other",
+                integrityKey,
+                installation,
+                entitlement));
+        var forgedEntitlement = UsageReceipt(
+            "receipt:forged-entitlement",
+            "usage-nonce-forged-entitlement",
+            candidate,
+            installation,
+            "entitlement:forged");
+        var forgedEntitlementDecision = await first.EvaluateUsageAsync(
+            forgedEntitlement,
+            UsageReceiptPolicy.Sign(forgedEntitlement, integrityKey),
+            UsageContext(
+                forgedEntitlement,
+                "consumer:other",
+                integrityKey,
+                installation,
+                entitlement));
+
+        Assert.Equal("identity_mismatch", forgedInstallationDecision.Code);
+        Assert.Equal("identity_mismatch", forgedEntitlementDecision.Code);
+        var invalidContext = await Assert.ThrowsAsync<ContributionPolicyException>(() =>
+            first.EvaluateUsageAsync(
+                forgedEntitlement,
+                UsageReceiptPolicy.Sign(forgedEntitlement, integrityKey),
+                UsageContext(forgedEntitlement, "consumer:other", integrityKey[..16])));
+        Assert.Equal("usage_context_invalid", invalidContext.Code);
+
+        var shared = UsageReceipt(
+            "receipt:shared-race",
+            "usage-nonce-shared-race",
+            candidate,
+            installation,
+            entitlement);
+        var sharedSignature = UsageReceiptPolicy.Sign(shared, integrityKey);
+        var sharedResults = await Task.WhenAll(
+            first.EvaluateUsageAsync(
+                shared,
+                sharedSignature,
+                UsageContext(shared, "consumer:other", integrityKey)),
+            second.EvaluateUsageAsync(
+                shared,
+                sharedSignature,
+                UsageContext(shared, "consumer:other", integrityKey)));
+        Assert.Single(sharedResults, result => result.Qualified);
+        Assert.Single(sharedResults, result => result.Code == "replay");
+
+        for (var index = 0; index < 98; index++)
+        {
+            var receipt = UsageReceipt(
+                $"receipt:cap-{index:D3}",
+                $"usage-nonce-cap-{index:D3}",
+                candidate,
+                installation,
+                entitlement);
+            var decision = await first.EvaluateUsageAsync(
+                receipt,
+                UsageReceiptPolicy.Sign(receipt, integrityKey),
+                UsageContext(receipt, "consumer:other", integrityKey));
+            Assert.True(decision.Qualified);
+        }
+
+        var capA = UsageReceipt(
+            "receipt:cap-final-a",
+            "usage-nonce-cap-final-a",
+            candidate,
+            installation,
+            entitlement);
+        var capB = UsageReceipt(
+            "receipt:cap-final-b",
+            "usage-nonce-cap-final-b",
+            candidate,
+            installation,
+            entitlement);
+        var capResults = await Task.WhenAll(
+            first.EvaluateUsageAsync(
+                capA,
+                UsageReceiptPolicy.Sign(capA, integrityKey),
+                UsageContext(capA, "consumer:other", integrityKey)),
+            second.EvaluateUsageAsync(
+                capB,
+                UsageReceiptPolicy.Sign(capB, integrityKey),
+                UsageContext(capB, "consumer:other", integrityKey)));
+        Assert.Single(capResults, result => result.Qualified);
+        Assert.Single(capResults, result => result.Code == "rate_anomaly");
+
+        await using var connection = await OpenGovernanceConnectionAsync(governanceRoot);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*),
+                   SUM(CASE WHEN qualified = 1 THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN decision_code = 'identity_mismatch' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN decision_code = 'rate_anomaly' THEN 1 ELSE 0 END)
+            FROM usage_receipts;
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(103, reader.GetInt64(0));
+        Assert.Equal(100, reader.GetInt64(1));
+        Assert.Equal(2, reader.GetInt64(2));
+        Assert.Equal(1, reader.GetInt64(3));
     }
 
     [Fact]
@@ -1057,6 +1192,37 @@ public sealed class ContributionGovernanceTests : IDisposable
             approval,
             now);
     }
+
+    private QualifiedUsageReceipt UsageReceipt(
+        string receiptId,
+        string nonce,
+        ContributionCandidate candidate,
+        string installationPseudonym,
+        string entitlementId) =>
+        new(
+            receiptId,
+            installationPseudonym,
+            entitlementId,
+            candidate.ResourceId,
+            candidate.Version,
+            nonce,
+            now,
+            true,
+            "verified-success");
+
+    private AuthoritativeUsageContext UsageContext(
+        QualifiedUsageReceipt receipt,
+        string actorPseudonym,
+        byte[] integrityKey,
+        string? installationPseudonym = null,
+        string? entitlementId = null) =>
+        new(
+            true,
+            actorPseudonym,
+            installationPseudonym ?? receipt.InstallationPseudonym,
+            entitlementId ?? receipt.EntitlementId,
+            integrityKey,
+            now);
 
     private static string PublicationOperationId(string action, string submissionId) =>
         $"contribution-{action}:{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(submissionId)))}";

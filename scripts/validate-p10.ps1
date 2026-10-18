@@ -464,6 +464,8 @@ try {
         "Hostile CCB namespace sandbox=PASS"
         "CCB host/system filesystem and network denial=PASS"
         "CCB non-root, clean-environment and resource limits=PASS"
+        "Usage-receipt authoritative installation and entitlement binding=PASS"
+        "Usage-receipt cross-instance replay and daily-cap transaction=PASS"
         "CCB sandbox evidence=$sandboxEvidencePath"
         "P10 contribution tests=PASS ($contributionTestsPassed/$contributionTestsPassed)"
         "P10 contribution governance validation=PASS"

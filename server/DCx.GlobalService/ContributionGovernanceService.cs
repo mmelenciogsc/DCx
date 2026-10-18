@@ -13,6 +13,8 @@ namespace DCx.GlobalService;
 public sealed record AuthoritativeUsageContext(
     bool EntitlementActive,
     string ActorPseudonym,
+    string InstallationPseudonym,
+    string EntitlementId,
     byte[] InstallationIntegrityKey,
     DateTimeOffset NowUtc);
 
@@ -686,31 +688,57 @@ public sealed partial class ContributionGovernanceService
     {
         ArgumentNullException.ThrowIfNull(receipt);
         ArgumentNullException.ThrowIfNull(authoritative);
+        if (!IsBoundedIdentity(authoritative.ActorPseudonym) ||
+            !IsBoundedIdentity(authoritative.InstallationPseudonym) ||
+            !IsBoundedIdentity(authoritative.EntitlementId) ||
+            authoritative.InstallationIntegrityKey is not { Length: >= 32 and <= 128 } ||
+            authoritative.NowUtc.Offset != TimeSpan.Zero)
+        {
+            throw new ContributionPolicyException("usage_context_invalid");
+        }
+
+        if (!UsageReceiptPolicy.Verify(receipt, integritySignature, authoritative.InstallationIntegrityKey))
+        {
+            return new UsageReceiptDecision(false, "integrity_invalid");
+        }
+
         await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-            var replay = await ReceiptExistsAsync(connection, receipt, cancellationToken).ConfigureAwait(false);
-            var contribution = await ReadApprovedResourceAsync(connection, receipt.ResourceId, receipt.ResourceVersion, cancellationToken)
+            await using var transaction = connection.BeginTransaction(deferred: false);
+            var replay = await ReceiptExistsAsync(connection, transaction, receipt, cancellationToken)
                 .ConfigureAwait(false);
-            var prior = await CountQualifiedForDayAsync(connection, receipt, cancellationToken).ConfigureAwait(false);
+            var contribution = await ReadApprovedResourceAsync(
+                    connection,
+                    transaction,
+                    receipt.ResourceId,
+                    receipt.ResourceVersion,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            var prior = await CountQualifiedForDayAsync(connection, transaction, receipt, cancellationToken)
+                .ConfigureAwait(false);
             var context = new UsageReceiptContext(
                 authoritative.EntitlementActive,
                 contribution is not null,
                 contribution is not null && contribution.ContributorPseudonym == authoritative.ActorPseudonym,
+                authoritative.InstallationPseudonym,
+                authoritative.EntitlementId,
                 prior,
                 replay.Receipt,
                 replay.Nonce,
                 authoritative.NowUtc);
-            if (!UsageReceiptPolicy.Verify(receipt, integritySignature, authoritative.InstallationIntegrityKey))
+            var decision = UsageReceiptPolicy.Evaluate(receipt, context);
+            if (decision.Code == "replay")
             {
-                return new UsageReceiptDecision(false, "integrity_invalid");
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return decision;
             }
 
-            var decision = UsageReceiptPolicy.Evaluate(receipt, context);
             var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = """
-                INSERT OR IGNORE INTO usage_receipts(
+                INSERT INTO usage_receipts(
                     receipt_id, nonce, installation_pseudonym, entitlement_id, resource_id, resource_version,
                     occurred_utc, qualified, decision_code)
                 VALUES($receipt, $nonce, $installation, $entitlement, $resource, $version, $occurred, $qualified, $decision);
@@ -724,7 +752,12 @@ public sealed partial class ContributionGovernanceService
             command.Parameters.AddWithValue("$occurred", receipt.OccurredUtc.ToUniversalTime().ToString("O"));
             command.Parameters.AddWithValue("$qualified", decision.Qualified ? 1 : 0);
             command.Parameters.AddWithValue("$decision", decision.Code);
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+            {
+                throw new ContributionPolicyException("usage_receipt_write_failed");
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return decision;
         }
         finally
@@ -2034,11 +2067,13 @@ public sealed partial class ContributionGovernanceService
 
     private static async Task<SubmissionRow?> ReadApprovedResourceAsync(
         SqliteConnection connection,
+        SqliteTransaction transaction,
         string resourceId,
         string version,
         CancellationToken cancellationToken)
     {
         var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT candidate_sha256, candidate_json, state, contributor_pseudonym FROM contributions WHERE resource_id = $resource AND version = $version AND state = $approved LIMIT 1;";
         command.Parameters.AddWithValue("$resource", resourceId);
         command.Parameters.AddWithValue("$version", version);
@@ -2051,10 +2086,12 @@ public sealed partial class ContributionGovernanceService
 
     private static async Task<(bool Receipt, bool Nonce)> ReceiptExistsAsync(
         SqliteConnection connection,
+        SqliteTransaction transaction,
         QualifiedUsageReceipt receipt,
         CancellationToken cancellationToken)
     {
         var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT receipt_id, nonce FROM usage_receipts WHERE receipt_id = $receipt OR nonce = $nonce;";
         command.Parameters.AddWithValue("$receipt", receipt.ReceiptId);
         command.Parameters.AddWithValue("$nonce", receipt.Nonce);
@@ -2072,11 +2109,13 @@ public sealed partial class ContributionGovernanceService
 
     private static async Task<int> CountQualifiedForDayAsync(
         SqliteConnection connection,
+        SqliteTransaction transaction,
         QualifiedUsageReceipt receipt,
         CancellationToken cancellationToken)
     {
         var day = receipt.OccurredUtc.UtcDateTime.Date;
         var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT COUNT(*) FROM usage_receipts
             WHERE installation_pseudonym = $installation AND resource_id = $resource AND qualified = 1

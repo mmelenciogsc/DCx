@@ -90,16 +90,35 @@ public sealed class ContributionPolicyTests
             now, true, "verified-success");
         var key = Enumerable.Repeat((byte)42, 32).ToArray();
         var signature = UsageReceiptPolicy.Sign(receipt, key);
-        var eligible = new UsageReceiptContext(true, true, false, 0, false, false, now);
+        var eligible = new UsageReceiptContext(
+            true,
+            true,
+            false,
+            receipt.InstallationPseudonym,
+            receipt.EntitlementId,
+            0,
+            false,
+            false,
+            now);
 
         Assert.True(UsageReceiptPolicy.Verify(receipt, signature, key));
         Assert.True(UsageReceiptPolicy.Evaluate(receipt, eligible).Qualified);
         Assert.Equal("replay", UsageReceiptPolicy.Evaluate(receipt, eligible with { ReceiptIdSeen = true }).Code);
         Assert.Equal("self_use", UsageReceiptPolicy.Evaluate(receipt, eligible with { IsContributorSelfUse = true }).Code);
+        Assert.Equal("identity_mismatch", UsageReceiptPolicy.Evaluate(
+            receipt,
+            eligible with { AuthoritativeInstallationPseudonym = "installation:other" }).Code);
+        Assert.Equal("identity_mismatch", UsageReceiptPolicy.Evaluate(
+            receipt,
+            eligible with { AuthoritativeEntitlementId = "entitlement:other" }).Code);
         Assert.Equal("rate_anomaly", UsageReceiptPolicy.Evaluate(
             receipt,
             eligible with { PriorQualifiedEventsForDay = UsageReceiptPolicy.MaximumQualifiedEventsPerResourceDay }).Code);
         Assert.False(UsageReceiptPolicy.Verify(receipt with { ResourceId = "resource:other" }, signature, key));
+        Assert.False(UsageReceiptPolicy.Verify(receipt, new string('a', 129), key));
+        Assert.False(UsageReceiptPolicy.Verify(receipt, signature, key.AsSpan(0, 16)));
+        Assert.Throws<ArgumentException>(() => UsageReceiptPolicy.Sign(
+            receipt with { ReceiptId = new string('x', 129) }, key));
 
         var json = JsonSerializer.Serialize(receipt);
         Assert.DoesNotContain("prompt", json, StringComparison.OrdinalIgnoreCase);
