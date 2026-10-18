@@ -30,7 +30,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 ## Measured result
 
 - Locked native Release build: 0 warnings, 0 errors.
-- Original P07 content tests: passed 74, failed 0, skipped 0. Bounded-question policy tests: passed 5, failed 0, skipped 0. Current full native suite: passed 452, failed 0, skipped 0.
+- Original P07 content tests: passed 74, failed 0, skipped 0. Bounded-question policy tests: passed 5, failed 0, skipped 0. Current full native suite: passed 457, failed 0, skipped 0.
 - Real generated H.264 MP4: initial pause and Play/Pause passed.
 - Local frame description identified the fixture's solid blue content; video remained paused; explicit user resume passed.
 - Shared-viewport generated HTML5 video Q&A answered `Blue`; the video remained paused after narration and explicit same-page resume passed.
@@ -39,7 +39,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 - Windows OCR recognized the golden `DCX`/`42` content and returned normalized geometry.
 - Semantic repair, HTML export, real OPC DOCX export and DOCX viewer round-trip passed.
 - Native UIA script result: `P07 content viewer UIA validation=PASS`.
-- Latest passing evidence directory: `artifacts/test-results/p07-1cbd5fb08ae64159b6943aa8764b6455/` (generated from committed source through `f4810e0` and intentionally not committed). The disposable profile explicitly registered the real installed FFmpeg candidate, proved the local blue-frame result through that exact binding, and did not retain approval. It now clears all disposable Ollama, Whisper and FFmpeg state and protected anchors after the app closes; the post-gate audit found zero local-model approval anchors or synthetic raw-vault credentials. Composed P06 evidence at `artifacts/test-results/p06-7258bedcc1144d228ad54ca2a4f07d58/` contains protected approval-state warnings, WAV/MP3 transcription, real deterministic audio extraction and FFmpeg-registration/clear-denial evidence.
+- Latest passing evidence directory: `artifacts/test-results/p07-a4a8246f049945d1bef110462fbc8f37/` (generated from committed source `0518333` and intentionally not committed). The disposable profile explicitly registered the real installed FFmpeg candidate, proved the local blue-frame result through that exact binding, and did not retain approval. It clears all disposable Ollama, Whisper and FFmpeg state and protected anchors after the app closes; the post-gate audit found zero DCx test/model credentials. Composed P06 evidence at `artifacts/test-results/p06-7d6cec371b4148509e575ce62d9fe9eb/` contains the exact transfer preflight, protected approval-state warnings, WAV/MP3 transcription, deterministic audio extraction and FFmpeg-registration/clear-denial evidence.
 - One earlier committed-source run transiently failed to observe the current vision-model UIA name after the persisted-save status. No orphan DCx process remained; the immediate rerun and a later independent rerun both passed. The passing runs are the accepted gate evidence, while the isolated timing observation remains documented rather than being represented as a zero-flake claim.
 
 ## Security, accessibility and limitations
