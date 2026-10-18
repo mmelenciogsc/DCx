@@ -27,6 +27,62 @@ internal static class LocalModelStoragePathGuard
         }
     }
 
+    public static void TryDeleteTemporaryDirectory(string root, string path, string label)
+    {
+        try
+        {
+            var canonicalRoot = RequireDirectory(root, label + " root");
+            var canonical = Canonicalize(path, label);
+            if (!SamePath(Path.GetDirectoryName(canonical), canonicalRoot) || !Directory.Exists(canonical))
+            {
+                return;
+            }
+
+            RequireDirectory(canonical, label);
+            var directories = new Stack<string>();
+            var pending = new Stack<string>();
+            var files = new List<string>();
+            pending.Push(canonical);
+            while (pending.Count > 0)
+            {
+                var directory = pending.Pop();
+                RequireDirectory(directory, label);
+                directories.Push(directory);
+                foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+                {
+                    RequireContained(canonical, entry, label);
+                    var attributes = File.GetAttributes(entry);
+                    if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    {
+                        throw new InvalidOperationException($"The {label} contains an unsafe link.");
+                    }
+                    if ((attributes & FileAttributes.Directory) != 0)
+                    {
+                        pending.Push(entry);
+                    }
+                    else
+                    {
+                        files.Add(ValidateFile(entry, mustExist: true, label));
+                    }
+                }
+            }
+
+            foreach (var file in files) File.Delete(file);
+            while (directories.Count > 0)
+            {
+                var directory = directories.Pop();
+                RequireDirectory(directory, label);
+                Directory.Delete(directory, recursive: false);
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or
+                InvalidOperationException)
+        {
+            // Unsafe or replaced content is left inert rather than followed during cleanup.
+        }
+    }
+
     private static string EnsureDirectoryCore(string path, string label)
     {
         var canonical = Canonicalize(path, label);
@@ -130,6 +186,23 @@ internal static class LocalModelStoragePathGuard
 
         return canonical;
     }
+
+    private static void RequireContained(string root, string path, string label)
+    {
+        var relative = Path.GetRelativePath(root, Path.GetFullPath(path));
+        if (relative is "." or ".." || Path.IsPathFullyQualified(relative) ||
+            relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+            relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"The {label} path escaped its root.");
+        }
+    }
+
+    private static bool SamePath(string? first, string second) =>
+        first is not null && string.Equals(
+            Path.GetFullPath(first).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            Path.GetFullPath(second).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     private static void RejectReparseChain(string path, string label)
     {

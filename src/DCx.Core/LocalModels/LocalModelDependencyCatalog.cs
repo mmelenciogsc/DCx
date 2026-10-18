@@ -534,6 +534,27 @@ public sealed class LocalModelDependencyArtifactReviewer
         {
             throw new InvalidOperationException("The dependency artifact length changed during review.");
         }
+        return await ReviewLeasedAsync(candidate, canonical, stream, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<LocalModelDependencyArtifactReview> ReviewLeasedAsync(
+        PinnedLocalModelDependencyCandidate candidate,
+        string artifactPath,
+        FileStream stream,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        LocalModelDependencyCatalogLoader.ValidateCandidate(candidate);
+        var canonical = LocalModelStoragePathGuard.ValidateFile(
+            artifactPath,
+            mustExist: true,
+            "dependency artifact");
+        ValidateArtifactExtension(candidate.Kind, canonical);
+        if (!stream.CanRead || !stream.CanSeek || stream.Length != candidate.ExpectedBytes)
+        {
+            throw new InvalidOperationException("The dependency artifact lease is inconsistent with the pinned value.");
+        }
+        stream.Position = 0;
         await ValidateSignatureAsync(candidate, stream, cancellationToken).ConfigureAwait(false);
         stream.Position = 0;
         var actual = Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false));

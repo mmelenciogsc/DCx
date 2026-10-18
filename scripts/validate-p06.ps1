@@ -65,6 +65,15 @@ try {
         "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.ArtifactReview_DeniesLinkedArtifactWithoutChangingOutsideFile",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.ArtifactReview_DeniesLinkedAncestorWithoutChangingOutsideFile"
     )
+    $requiredRuntimeStagingContracts = @(
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_DeniesWithoutExplicitApprovalAndCreatesNothing",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_AuthenticatesExtractsHashesAndAtomicallyPublishesInertRuntime",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_DeniesUnsafeArchiveAndRemovesOnlyPrivatePartialState",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_DeniesReceiptCollisionAndLeavesNoPublishedOrPrivateState",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_NeverOverwritesExistingDigestBoundDestination",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_DeniesLinkedRuntimeRootWithoutWritingOutside",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_HonorsPreCanceledOperationBeforeCreatingApplicationStorage"
+    )
     $localModelResults = @($localModelsReport.TestRun.Results.UnitTestResult)
     foreach ($requiredStorageDenial in $requiredStorageDenials) {
         $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredStorageDenial })
@@ -76,6 +85,12 @@ try {
         $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredDependencyContract })
         if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
             throw "P06 did not prove required pinned-dependency contract: $requiredDependencyContract"
+        }
+    }
+    foreach ($requiredRuntimeStagingContract in $requiredRuntimeStagingContracts) {
+        $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredRuntimeStagingContract })
+        if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
+            throw "P06 did not prove required inert Whisper runtime staging contract: $requiredRuntimeStagingContract"
         }
     }
     $runtimeArchiveDenials = @($localModelResults | Where-Object {

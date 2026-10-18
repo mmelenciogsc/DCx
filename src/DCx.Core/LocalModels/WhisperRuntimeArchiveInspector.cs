@@ -145,7 +145,7 @@ internal static class WhisperRuntimeArchiveInspector
         }
     }
 
-    private static EntryReview ValidateEntry(ZipArchiveEntry entry, HashSet<string> names)
+    internal static EntryReview ValidateEntry(ZipArchiveEntry entry, HashSet<string> names)
     {
         var raw = entry.FullName;
         if (string.IsNullOrEmpty(raw) || raw.Length > MaximumPathCharacters ||
@@ -205,7 +205,7 @@ internal static class WhisperRuntimeArchiveInspector
         return ReservedDeviceNames.Contains(stem);
     }
 
-    private static uint UpdateCrc32(uint crc32, ReadOnlySpan<byte> bytes)
+    internal static uint UpdateCrc32(uint crc32, ReadOnlySpan<byte> bytes)
     {
         foreach (var value in bytes)
         {
@@ -242,5 +242,5 @@ internal static class WhisperRuntimeArchiveInspector
             upper.Contains("THIRDPARTY", StringComparison.Ordinal);
     }
 
-    private sealed record EntryReview(string CanonicalPath, string FileName, bool IsDirectory);
+    internal sealed record EntryReview(string CanonicalPath, string FileName, bool IsDirectory);
 }
