@@ -52,6 +52,10 @@ function Find-ById($root, [string]$automationId) {
     return $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
+function Require-ById($root, [string]$automationId, [string]$failureMessage) {
+    return Wait-For { Find-ById $root $automationId } $failureMessage
+}
+
 function Get-EphemeralPort {
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     try {
@@ -198,12 +202,14 @@ try {
 
     $ffmpegDigest = (Get-FileHash -LiteralPath $ffmpeg -Algorithm SHA256).Hash.ToLowerInvariant()
     $ffmpegLicenseDigest = (Get-FileHash -LiteralPath $ffmpegLicense -Algorithm SHA256).Hash.ToLowerInvariant()
-    (Find-ById $localModelsWindow "FfmpegExecutablePath").GetCurrentPattern(
+    $ffmpegExecutablePath = Require-ById $localModelsWindow "FfmpegExecutablePath" "The FFmpeg executable path field was not exposed."
+    $ffmpegLicensePath = Require-ById $localModelsWindow "FfmpegLicensePath" "The FFmpeg license path field was not exposed."
+    $reviewFfmpeg = Require-ById $localModelsWindow "ReviewFfmpegBackendButton" "The FFmpeg review action was not exposed."
+    $ffmpegExecutablePath.GetCurrentPattern(
         [System.Windows.Automation.ValuePattern]::Pattern).SetValue($ffmpeg)
-    (Find-ById $localModelsWindow "FfmpegLicensePath").GetCurrentPattern(
+    $ffmpegLicensePath.GetCurrentPattern(
         [System.Windows.Automation.ValuePattern]::Pattern).SetValue($ffmpegLicense)
-    (Find-ById $localModelsWindow "ReviewFfmpegBackendButton").GetCurrentPattern(
-        [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $reviewFfmpeg.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $ffmpegDetails = Wait-For {
         $candidate = Find-ById $localModelsWindow "FfmpegBackendDetails"
         if ($null -ne $candidate -and
@@ -211,14 +217,14 @@ try {
             $candidate.Current.Name -like "*License SHA-256 $ffmpegLicenseDigest*" -and
             $candidate.Current.Name -like "*Windows signature status*") { $candidate }
     } "The exact installed FFmpeg executable, license and signature evidence were not exposed." 160
-    $ffmpegApproval = Find-ById $localModelsWindow "ApproveFfmpegBackendBox"
+    $ffmpegApproval = Require-ById $localModelsWindow "ApproveFfmpegBackendBox" "The FFmpeg approval checkbox was not exposed."
     $ffmpegApprovalToggle = $ffmpegApproval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
     if ($ffmpegApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
         throw "FFmpeg approval did not default to unchecked."
     }
     $ffmpegApprovalToggle.Toggle()
-    (Find-ById $localModelsWindow "SaveFfmpegBackendButton").GetCurrentPattern(
-        [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $saveFfmpeg = Require-ById $localModelsWindow "SaveFfmpegBackendButton" "The FFmpeg save action was not exposed."
+    $saveFfmpeg.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $currentFfmpeg = Wait-For {
         $candidate = Find-ById $localModelsWindow "CurrentFfmpegBackend"
         if ($null -ne $candidate -and
@@ -241,20 +247,23 @@ try {
     } "The files and media viewer button was not exposed after closing local model settings."
     $openViewer.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $viewer = Wait-For { Find-WindowByProcessAndId $process.Id "ContentViewerWindow" } "The content viewer did not open."
-    $status = Find-ById $viewer "ContentStatusText"
-
-    $filePath = Find-ById $viewer "FilePathBox"
+    $status = Require-ById $viewer "ContentStatusText" "The content-viewer status was not exposed."
+    $filePath = Require-ById $viewer "FilePathBox" "The content-viewer file path was not exposed."
+    $openFile = Require-ById $viewer "OpenFileButton" "The content-viewer open-file action was not exposed."
+    $folderPath = Require-ById $viewer "FolderPathBox" "The folder path field was not exposed."
+    $listFolder = Require-ById $viewer "ListFolderButton" "The folder-list action was not exposed."
+    $youtube = Require-ById $viewer "YouTubeUrlBox" "The YouTube URL field was not exposed."
+    $openYouTube = Require-ById $viewer "OpenYouTubeButton" "The YouTube handoff action was not exposed."
     $filePath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($textFixture)
-    (Find-ById $viewer "OpenFileButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $openFile.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $documentText = Wait-For { Find-ById $viewer "DocumentText" } "The accessible text surface did not appear."
     $textValue = $documentText.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
     if ($textValue -notmatch "Accessible fixture line one" -or $textValue -notmatch "Second line") {
         throw "The text fixture was not exposed through UI Automation."
     }
 
-    $folderPath = Find-ById $viewer "FolderPathBox"
     $folderPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($runRoot)
-    (Find-ById $viewer "ListFolderButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $listFolder.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $folderItems = Wait-For { Find-ById $viewer "FolderItems" } "Folder contents were not exposed."
     $listItemCondition = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -262,34 +271,36 @@ try {
     $listed = $folderItems.FindAll([System.Windows.Automation.TreeScope]::Descendants, $listItemCondition)
     if ($listed.Count -lt 2) { throw "The folder listing did not contain the created fixtures." }
 
-    $filePath = Find-ById $viewer "FilePathBox"
     $filePath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($videoFixture)
-    (Find-ById $viewer "OpenFileButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $openFile.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $status.Current.Name -like "Opened media-fixture.mp4 as Video*" } "The local MP4 did not open in paused state."
-    (Find-ById $viewer "MediaPlayButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $mediaPlay = Require-ById $viewer "MediaPlayButton" "The media Play action was not exposed after opening video."
+    $mediaPause = Require-ById $viewer "MediaPauseButton" "The media Pause action was not exposed after opening video."
+    $describeFrame = Require-ById $viewer "DescribeFrameButton" "The local-frame description action was not exposed after opening video."
+    $mediaPlay.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $status.Current.Name -eq "Media playing." } "The media Play action failed."
-    (Find-ById $viewer "MediaPauseButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $mediaPause.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $status.Current.Name -eq "Media paused." } "The media Pause action failed."
-    (Find-ById $viewer "DescribeFrameButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $describeFrame.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $status.Current.Name -like "Frame description complete.*" } "The local VLM frame description did not complete." 300
     $frameDescription = Wait-For {
         $candidate = Find-ById $viewer "FrameDescriptionText"
         if ($null -ne $candidate -and [string]$candidate.Current.Name -match "(?i)blue") { $candidate }
     } "The frame description did not identify the solid blue fixture." 30
     $frameDescriptionValue = [string]$frameDescription.Current.Name
-    (Find-ById $viewer "MediaPlayButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $mediaPlay.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $status.Current.Name -eq "Media playing." } "The user could not resume after frame description."
-    (Find-ById $viewer "MediaPauseButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $mediaPause.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 
     $filePath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($audioFixture)
-    (Find-ById $viewer "OpenFileButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $openFile.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $status.Current.Name -like "Opened audio-fixture.wav as Audio*" } "The local WAV did not open in paused state."
-    (Find-ById $viewer "MediaPlayButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $mediaPlay.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $status.Current.Name -eq "Media playing." } "The audio Play action failed."
-    (Find-ById $viewer "MediaPauseButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $mediaPause.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 
     $filePath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($scanImage)
-    (Find-ById $viewer "OpenFileButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $openFile.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     try {
         $null = Wait-For { $status.Current.Name -like "Opened scanned-source.png as Image*" } "The local PNG did not open in the image viewer."
     }
@@ -297,15 +308,14 @@ try {
         throw "The local PNG did not open in the image viewer. Status=$($status.Current.Name)"
     }
 
-    $youtube = Find-ById $viewer "YouTubeUrlBox"
     $youtube.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ")
-    (Find-ById $viewer "OpenYouTubeButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $openYouTube.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $status.Current.Name -like "YouTube URL blocked.*" } "A lookalike YouTube host was not blocked."
 
     $youtube.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("https://youtu.be/dQw4w9WgXcQ?t=42")
-    (Find-ById $viewer "OpenYouTubeButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $openYouTube.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $status.Current.Name -like "Validated YouTube video opened*" } "The canonical YouTube handoff was not initiated."
-    $tabs = Find-ById $mainWindow "BrowserTabs"
+    $tabs = Require-ById $mainWindow "BrowserTabs" "The shared-browser tab strip was not exposed."
     $tabCondition = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::TabItem)
@@ -315,18 +325,18 @@ try {
 
     $address.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue(
         ([Uri]::new([Uri]$webOrigin, "web-video")).AbsoluteUri)
-    (Find-ById $mainWindow "GoButton").GetCurrentPattern(
-        [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $goButton = Require-ById $mainWindow "GoButton" "The main-browser Go action was not exposed."
+    $goButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For {
         $address.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq
             ([Uri]::new([Uri]$webOrigin, "web-video")).AbsoluteUri
     } "The deterministic web-video fixture did not load in the shared browser."
     Start-Sleep -Milliseconds 750
-    $frameQuestion = Find-ById $viewer "FrameQuestionBox"
+    $frameQuestion = Require-ById $viewer "FrameQuestionBox" "The web-video frame question field was not exposed."
     $frameQuestion.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue(
         "What color fills the paused video?")
-    $askWebVideo = Find-ById $viewer "AskWebVideoFrameButton"
-    $resumeWebVideo = Find-ById $viewer "ResumeWebVideoButton"
+    $askWebVideo = Require-ById $viewer "AskWebVideoFrameButton" "The web-video frame question action was not exposed."
+    $resumeWebVideo = Require-ById $viewer "ResumeWebVideoButton" "The web-video resume action was not exposed."
     if ($resumeWebVideo.Current.IsEnabled) {
         throw "Web-video resume was enabled before DCx paused a video."
     }
@@ -353,30 +363,33 @@ try {
     } "The web video did not resume after explicit user action."
 
     $filePath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($pdfFixture)
-    (Find-ById $viewer "OpenFileButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $openFile.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $wizard = Wait-For { Find-WindowByProcessAndId $process.Id "ScannedPdfWizardWindow" } "The scanned PDF wizard did not open."
-    (Find-ById $wizard "RecognizePdfButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    $wizardStatus = Find-ById $wizard "WizardStatusText"
+    $recognizePdf = Require-ById $wizard "RecognizePdfButton" "The scanned-PDF recognition action was not exposed."
+    $wizardStatus = Require-ById $wizard "WizardStatusText" "The scanned-PDF wizard status was not exposed."
+    $recognizePdf.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $wizardStatus.Current.Name -like "OCR complete.*" } "Windows OCR did not complete and validate geometry." 100
-    $blocks = Find-ById $wizard "OcrBlocksList"
+    $blocks = Require-ById $wizard "OcrBlocksList" "The recognized OCR block list was not exposed."
     $ocrItems = $blocks.FindAll([System.Windows.Automation.TreeScope]::Descendants, $listItemCondition)
     $ocrText = @($ocrItems | ForEach-Object { $_.Current.Name }) -join " "
     if ($ocrText -notmatch "(?i)DCX" -or $ocrText -notmatch "42") { throw "OCR golden text was not exposed accessibly: $ocrText" }
 
     $ocrItems[0].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
-    $repairLabel = Find-ById $wizard "RepairLabelBox"
+    $repairLabel = Require-ById $wizard "RepairLabelBox" "The semantic repair label field was not exposed."
     $repairLabel.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("Document title graphic")
-    $repairRole = Find-ById $wizard "RepairRoleBox"
+    $repairRole = Require-ById $wizard "RepairRoleBox" "The semantic repair role picker was not exposed."
     $repairRole.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
     $imageRole = Wait-For {
         $items = $repairRole.FindAll([System.Windows.Automation.TreeScope]::Descendants, $listItemCondition)
         @($items | Where-Object { $_.Current.Name -eq "ImageDescription" }) | Select-Object -First 1
     } "The semantic role options were not exposed accessibly."
     $imageRole.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
-    (Find-ById $wizard "ApplyRepairButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $applyRepair = Require-ById $wizard "ApplyRepairButton" "The semantic repair action was not exposed."
+    $applyRepair.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $wizardStatus.Current.Name -like "Semantic repair applied*" } "The semantic repair was not applied."
 
-    (Find-ById $wizard "ExportHtmlButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $exportHtml = Require-ById $wizard "ExportHtmlButton" "The semantic HTML export action was not exposed."
+    $exportHtml.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $htmlExport = Join-Path $exportRoot "scanned-source-accessible.html"
     $null = Wait-For {
         (Test-Path $htmlExport) -and $wizardStatus.Current.Name -like "Semantic HTML exported:*"
@@ -385,7 +398,8 @@ try {
     if ($htmlContents -notmatch "<main><h1>scanned-source</h1>") { throw "HTML export lacks semantic main/title structure." }
     if ($htmlContents -notmatch '<figure role="img" aria-label="Document title graphic">') { throw "HTML export lacks the reviewed image semantic repair." }
 
-    (Find-ById $wizard "ExportDocxButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $exportDocx = Require-ById $wizard "ExportDocxButton" "The structured DOCX export action was not exposed."
+    $exportDocx.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $docxExport = Join-Path $exportRoot "scanned-source-accessible.docx"
     $null = Wait-For {
         (Test-Path $docxExport) -and $wizardStatus.Current.Name -like "Structured DOCX exported:*"
@@ -398,9 +412,9 @@ try {
     finally { $archive.Dispose() }
 
     $filePath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($docxExport)
-    (Find-ById $viewer "OpenFileButton").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $openFile.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $status.Current.Name -like "Opened scanned-source-accessible.docx as Word*" } "The exported DOCX did not reopen in the accessible viewer."
-    $documentText = Find-ById $viewer "DocumentText"
+    $documentText = Require-ById $viewer "DocumentText" "The reopened DOCX text surface was not exposed."
     $docxText = $documentText.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
     if ($docxText -notmatch "(?i)DCX" -or $docxText -notmatch "42") { throw "The structured DOCX did not round-trip its OCR text." }
 
