@@ -82,5 +82,6 @@
 | [0078](architecture/adr/0078-provider-neutral-care-contributor-dashboard.md) | Expose CARE contributor status through a provider-neutral read-only contract | Accepted for generated local validation; production contributor service remains blocked | 2026-10-18 |
 | [0079](architecture/adr/0079-derive-care-dashboard-from-verified-ledger.md) | Derive CARE contributor status from the verified authoritative ledger | Accepted for server-side local validation; production contributor transport remains blocked | 2026-10-18 |
 | [0080](architecture/adr/0080-default-off-care-contributor-loopback.md) | Prove CARE contributor transport through a default-off subject-bound loopback simulation | Accepted for local process-boundary validation; production identity and transport remain blocked | 2026-10-18 |
+| [0081](architecture/adr/0081-compose-care-contributor-native-fixture.md) | Compose the authenticated CARE ledger with the native dashboard only in an isolated fixture | Accepted for native local validation; production contributor authentication remains blocked | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

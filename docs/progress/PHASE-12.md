@@ -1,7 +1,7 @@
 # P12 — Full vertical end-to-end flows
 
 - Status: BLOCKED (nine cross-phase local fixtures pass; required live/provider/installer acceptance remains absent)
-- Implementation commits: `1c51f9d`, `10ac274`, `10e07d5`, `84e7f23`, `ee7d8bf`, `7b0a03b`; P07 export-race fix `0ccf5e8`
+- Implementation commits: `1c51f9d`, `10ac274`, `10e07d5`, `84e7f23`, `ee7d8bf`, `7b0a03b`; P07 export-race fix `0ccf5e8`; current composed source `1caed88`
 - Documentation commit: recorded by the commit containing this file
 
 ## Reproduction and evidence
@@ -24,7 +24,7 @@ The recorded run passed nine composed validators with zero production actions:
 8. Local, explicitly non-Facebook manual-login/old-post search through the live WebView2 UIA tree plus sandbox-shaped report to genuine OOXML XLSX.
 9. Exact digest-bound `.msix` request review with typed Windows deployment API preview, initially unchecked approval, denial, revalidation, cancellation and zero installer child processes.
 
-Measured composed result: `P12 fixture scenarios passed=9`. Evidence manifest: `artifacts/test-results/p12-7c00f57f67f34957951d5e0798b16bcc/fixture-scenarios.json` (generated and intentionally not committed). All nine validators exited 0; production actions remained 0. Focused package-review evidence: `artifacts/test-results/p12-package-approval-52495810641f4cf9837b66f41521dc6c/`, with 12/12 exact policy tests and native UIA (generated and intentionally not committed).
+Measured composed result: `P12 fixture scenarios passed=9`. Evidence manifest: `artifacts/test-results/p12-912b46b79f3043d8867ee87d75eda7eb/fixture-scenarios.json` (generated from source `1caed88` and intentionally not committed). All nine validators exited 0; production actions remained 0. Its P11 composition includes 122/122 finance tests plus the authenticated child-Kestrel/SQLite-to-native-dashboard UIA gate. Focused package-review evidence remains generated and intentionally not committed.
 
 The XLSX fixture has a frozen header, filter, numeric currency cells, semantic text round-trip and formula-injection denial through inline strings. It makes zero QuickBooks network calls. The social fixture exposes a dated post, meaningful image alternative text and labeled video, but is deliberately not described as Facebook compatibility.
 
@@ -32,6 +32,7 @@ The successful package-review UI fixture uses an injected synthetic trust adapte
 
 ## Changed files in the latest milestone
 
+- Current composed CARE fixture: isolated desktop startup/source lifecycle in `src/DCx.Desktop/App.xaml.cs` and `src/DCx.Desktop/CareContributorDashboardWindow.xaml.cs`; child Kestrel/SQLite plus native UIA orchestration in `scripts/validate-p11-contributor-loopback-ui.ps1`; disposal regression in `tests/DCx.Core.Tests/Finance/LoopbackCareContributorDashboardSourceTests.cs`.
 - Exact package review and inert receipt policy: `src/DCx.Core/Deployment/PackageInstallReview.cs`.
 - Accessible review window and validation-only startup route: `src/DCx.Desktop/PackageInstallReviewWindow.xaml`, `src/DCx.Desktop/PackageInstallReviewWindow.xaml.cs`, `src/DCx.Desktop/App.xaml.cs`.
 - Policy/denial and native UIA gates: `tests/DCx.Core.Tests/Deployment/PackageInstallReviewTests.cs`, `scripts/validate-p12-package-approval.ps1`, `scripts/validate-p12-fixtures.ps1`.

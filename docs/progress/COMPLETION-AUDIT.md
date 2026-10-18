@@ -19,7 +19,7 @@ Authoritative inputs: `DCx_Codex_Handoff_Kit/README.md`, `DCX_PRODUCT_ARCHITECTU
 | P08 | Private isolated CKB/CCB, vector/metadata/artifact stores, provenance and hostile artifact denial | [PHASE-08.md](PHASE-08.md) | Automated local/native gate achieved. |
 | P09 | Authoritative global service plus signed incremental two-client synchronization and local replica separation | [PHASE-09.md](PHASE-09.md) | Partial. Signed loopback service/client and hostile storage gates pass. Approved Docker/Compose deployment, production key custody and stronger same-user isolation remain blocked. |
 | P10 | Default-off item review, scanning, sandbox validation, governance, publication, withdrawals and fraud-resistant receipts | [PHASE-10.md](PHASE-10.md) | Partial authenticated local simulation. Production identity/attestation, hardened deployed sandbox and publication authority remain blocked. |
-| P11 | Subscription/webhook/accounting/CARE/Net60/holds/refunds, payout sandbox, immutable audit and transparent contributor status | [PHASE-11.md](PHASE-11.md) | Partial protected local sandbox. Schema-v14 close approval, exact allocations/liability, recipient workflow, operations and a default-off subject-bound loopback transport over the integrity-verified contributor projection pass 121/121 plus native UIA. Production contributor identity/TLS/deployment, credentials, exact plan, merchant/recipient eligibility, production policy and authorized sandbox acceptance remain blocked. |
+| P11 | Subscription/webhook/accounting/CARE/Net60/holds/refunds, payout sandbox, immutable audit and transparent contributor status | [PHASE-11.md](PHASE-11.md) | Partial protected local sandbox. Schema-v14 close approval, exact allocations/liability, recipient workflow, operations, subject-bound transport and an isolated real ledger-to-native-window composition pass 122/122 plus native UIA. Production contributor identity/TLS/deployment, credentials, exact plan, merchant/recipient eligibility, production policy and authorized sandbox acceptance remain blocked. |
 | P12 | Reproducible full vertical flows plus separate live/human acceptance | [PHASE-12.md](PHASE-12.md) | Partial. Nine safe fixtures pass; live Facebook/QuickBooks/YouTube, real signed install, deployed CCB and real PayPal acceptance remain absent. |
 | P13 | Signed install/update/uninstall lifecycle on clean Windows, WebView2 bootstrap, scans, recovery and human AT signoff | [PHASE-13.md](PHASE-13.md) | Partial. Reproducible unsigned artifacts, Defender/NuGet/trust denial, offline startup and recovery pass. Signing identity, clean VM, independent assessment and human AT remain blocked. |
 | P14 | Opt-in pilot, admin/metrics/runbooks/policies/approvals, all major issues triaged and explicit go/no-go | [PHASE-14.md](PHASE-14.md) | Local controls pass, but pilot/admin/provider/policy gates remain incomplete. Current decision is `NO_GO`; seven blockers and production activation false. |
@@ -34,10 +34,11 @@ Authoritative inputs: `DCx_Codex_Handoff_Kit/README.md`, `DCX_PRODUCT_ARCHITECTU
 
 ## Current exact-source checkpoint
 
-- Implementation: `eca0617`.
-- Full Windows suite: 535 passed, 0 failed, 0 skipped.
-- P11: `artifacts/test-results/p11-6cd9d108b3cf486e8ad96c4b38f53fbe/`; 121/121 plus native UIA.
-- P13: `artifacts/test-results/p13-6f0aa2e6684240099c734a6cb3414813/`; 23/23 reliability, 21/21 trust, Defender clean, NuGet advisories 0 and unsigned trust denied.
-- P14: `artifacts/test-results/p14-b1fae16c0e124cccb2b065bc689c5db7/`; 10/10, seven blockers, `NO_GO`, activation false.
+- Implementation: `1caed88`.
+- Full Windows suite: 536 passed, 0 failed, 0 skipped.
+- P11: `artifacts/test-results/p11-d3df22d921c44cab86695cdb9638c2e9/`; 122/122 plus generated and authenticated-ledger native UIA.
+- P12: `artifacts/test-results/p12-912b46b79f3043d8867ee87d75eda7eb/`; nine composed fixtures and zero production actions.
+- P13: `artifacts/test-results/p13-b0ee5af2aa5444c698e7b946c6929988/`; 23/23 reliability, 21/21 trust, Defender clean, NuGet advisories 0 and unsigned trust denied.
+- P14: `artifacts/test-results/p14-d0bd24864a714265864ba06371d078d5/`; 10/10, seven blockers, `NO_GO`, activation false.
 
 Evidence directories are ignored build artifacts and are intentionally not committed. The phase records are the durable reproduction index.
