@@ -2,7 +2,7 @@
 
 - Status: BLOCKED / NO_GO (local readiness controls pass; pilot and production activation are off)
 - Product implementation commit: `9745e33`
-- Evidence-retention commit: `7f6e707`; current exact validation source: `e66dc3a`
+- Evidence-retention commit: `7f6e707`; current exact validation source: `69aabc0`
 - Documentation commit: recorded by the commit containing this file
 
 No pilot was started, no telemetry was collected, no user was enrolled, and no production service or payment was activated.
@@ -36,7 +36,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 exact-namespace release/readiness tests: passed 11, failed 0, skipped 0. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
-- Current exact-source expanded full suite: passed 566, failed 0, skipped 0; native Windows with zero build warnings/errors.
+- Current exact-source expanded full suite: passed 576, failed 0, skipped 0; native Windows with zero build warnings/errors.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -45,7 +45,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled/zero-bucket consent state, blocker list, metric-definition list and refresh action. It proved separate initially unchecked opt-in and stop/purge approvals, successful local enable, focused completion, approval reset, successful stop/purge back to zero buckets, focused purge completion and five distinct access keys. The validator confirmed that no control named `Activate production` exists.
 - The P11 readiness gate was rerun after composing the default-off contributor process transport with the native dashboard under a separate validation-only startup gate. It proves a read-only digest-authenticated token-to-subject mapping, operator/contributor role separation, hardened literal-loopback transport, real ledger projection and native focus/keyboard behavior. P11 remains blocking because this is not production contributor identity, MFA/TLS/credential rotation/multi-subject authorization/deployment, and production close/adjustment/hold/dispute/tax authority, exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider plus closure/requeue policy, centralized audit, deployed distributed fencing, external alert delivery/human acknowledgment/escalation and authorized provider acceptance remain absent.
-- Evidence: `artifacts/test-results/p14-4bd177ae7c8141fd9ad629224463239a/`, generated from exact source `e66dc3a` and intentionally not committed. It contains `go-no-go.json`, `p14-readiness.trx` and the retained `native-readiness-uia.json` consent/focus/access-key/privacy-boundary transcript. The exact-source full suite passes 566/566 with zero build warnings/errors.
+- Evidence: `artifacts/test-results/p14-e21a1c9afd8b4fb7b4dc6ce59836358e/`, generated from exact source `69aabc0` and intentionally not committed. It contains `go-no-go.json`, `p14-readiness.trx` and the retained `native-readiness-uia.json` consent/focus/access-key/privacy-boundary transcript. The exact-source full suite passes 576/576 with zero build warnings/errors.
 
 ## Changed files in the latest milestone
 

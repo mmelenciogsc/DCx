@@ -30,6 +30,8 @@ Updated/checkpointed: 2026-10-17. The Codex agent must open the URLs, capture da
 
 ## Local inference / media / formats
 - https://docs.ollama.com/ — actual local install, supported backends, quantized model APIs, vision and embeddings.
+- https://docs.ollama.com/troubleshooting — official experimental `OLLAMA_LLM_LIBRARY` override guidance.
+- https://github.com/ollama/ollama/blob/main/LICENSE — Ollama source license; verify exact installed/distributed artifacts separately.
 - https://github.com/ggml-org/whisper.cpp — offline speech inference; licenses and build instructions.
 - https://ffmpeg.org/documentation.html — media pipelines.
 - https://mozilla.github.io/pdf.js/ — PDF viewing.
