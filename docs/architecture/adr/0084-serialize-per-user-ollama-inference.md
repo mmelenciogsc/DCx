@@ -1,6 +1,6 @@
 # ADR 0084: Serialize per-user Ollama inference
 
-- Status: Accepted for cooperative DCx local-model operations; external-client isolation remains blocked
+- Status: Accepted for cooperative DCx local-model operations; shared-runtime detection is extended by ADR 0089 while exclusive external-client isolation remains blocked
 - Date: 2026-10-19
 
 ## Context
@@ -21,7 +21,7 @@ The normal local-model path guard applies. A lock path that is a directory, a re
 - Normal embedding and vision calls hold the lease across all identity checks, inference and unload work.
 - Benchmark resource and unload evidence belongs to one complete DCx operation rather than an interleaving DCx operation.
 - Cancellation while queued does not enter the provider boundary; release and abnormal process exit permit later recovery.
-- The lock is advisory. An unrelated Ollama client can ignore it, so a controlled quiet period or stronger runtime isolation remains required for production acceptance measurements.
+- The lock is advisory. ADR 0089 adds non-destructive three-observation quiet-runtime checks before and after work, but an unrelated Ollama client can still begin inside the operation; stronger runtime isolation remains required for production acceptance.
 - A malicious process already running as the same Windows user remains outside this cooperative boundary, and ordinary path revalidation cannot eliminate every same-user check/open race.
 
 ## Alternatives rejected

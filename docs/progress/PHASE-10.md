@@ -67,7 +67,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 - Locked native Release build: 0 warnings, 0 errors; 2.32 seconds in the recorded dedicated run.
 - P10 exact-namespace tests: passed 53, failed 0, skipped 0; about 7 seconds, with exact counters parsed from retained TRX.
-- Current full suite at `0e31254`: passed 564, failed 0, skipped 0; zero build warnings/errors.
+- Current expanded full suite at `e66dc3a`: passed 566, failed 0, skipped 0; zero build warnings/errors. The P10 stabilization itself remains commit `0e31254`.
 - One preceding full-suite run timed out after 30 seconds while launching the disabled-worker child fixture, despite the product gate being before service construction. The fixture now explicitly sets `DCX_GLOBAL_CONTRIBUTION_API=0` instead of depending on an inherited absence, retains `DCX_GLOBAL_CONTRIBUTION_WORKER=1`, and allows a bounded 60-second Windows startup window. Ten consecutive focused repetitions and the final full suite passed. The timeout is not represented as acceptance.
 - Eligible CKB item: quarantined, absent from catalog before review, approved into a signed release, synchronized by a client, then withdrawn/deprecated.
 - Secret/PII/dummy item: remained quarantined and reviewer publication failed closed.
