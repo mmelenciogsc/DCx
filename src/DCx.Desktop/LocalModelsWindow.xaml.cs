@@ -1351,9 +1351,9 @@ public partial class LocalModelsWindow : Window
             "The minimum reserves one temporary transfer copy, one retained verified copy, and 536,870,912 workspace bytes. " +
             $"{available} Capacity must be rechecked immediately before any future transfer.\n" +
             $"{itemDetails}\n" +
-            "The inert core transport reloads the authenticated catalog, requires exact-item approval, disables redirects, proxy, cookies and decompression, and rolls back any partial stream unless final URI, status, length and SHA-256 all match. Its private set coordinator serializes transfer, verification and cleanup; rechecks capacity; uses random incoming storage; protects a source-path-free receipt; atomically publishes only a complete plan; and can rehash the completed set. " +
+            "The inert core transport reloads the authenticated catalog, requires exact-item approval, disables automatic redirects, proxy, credentials, preauthentication, cookies and decompression, and rolls back any partial stream unless the requested URI, final status, length and SHA-256 all match. Its bounded manual redirect policy defaults to deny-all; no real provider rule is configured. Its private set coordinator serializes transfer, verification and cleanup; rechecks capacity; uses random incoming storage; protects a source-path-free receipt; atomically publishes only a complete plan; and can rehash the completed set. " +
             (transferActionAvailable
-                ? "This window exposes one separately approved exact-plan transfer, cancellation, protected verification and abandoned-partial recovery. The current strict transport rejects provider redirects."
+                ? "This window exposes one separately approved exact-plan transfer, cancellation, protected verification and abandoned-partial recovery. Current provider redirects remain denied."
                 : "These boundaries are not connected to a transfer action in this validation window.") + "\n" +
             "No transfer approval exists. Nothing was downloaded, installed, extracted, pulled, registered, selected, or executed.";
     }

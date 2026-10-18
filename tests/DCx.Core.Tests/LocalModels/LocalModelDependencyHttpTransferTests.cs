@@ -17,6 +17,9 @@ public sealed class LocalModelDependencyHttpTransferTests
         Assert.False(handler.UseProxy);
         Assert.Equal(DecompressionMethods.None, handler.AutomaticDecompression);
         Assert.Equal(TimeSpan.FromSeconds(15), handler.ConnectTimeout);
+        Assert.Null(handler.Credentials);
+        Assert.False(handler.PreAuthenticate);
+        Assert.Equal(16, handler.MaxResponseHeadersLength);
     }
 
     [Fact]
@@ -46,6 +49,164 @@ public sealed class LocalModelDependencyHttpTransferTests
         var completed = Assert.Single(progress);
         Assert.Equal(bytes.LongLength, completed.BytesTransferred);
         Assert.Equal(bytes.LongLength, completed.ExpectedBytes);
+    }
+
+    [Fact]
+    public async Task DefaultPolicy_DeniesRedirectBeforeFollowingAndRollsBack()
+    {
+        var bytes = "redirect denied fixture"u8.ToArray();
+        var (catalog, plan, item) = Plan(bytes);
+        var target = new Uri("https://assets.example.test/releases/dependency.bin?signature=fixture");
+        var handler = new FixtureHandler(request => Redirect(request, target));
+        using var transfer = new LocalModelDependencyHttpTransfer(handler, catalog);
+        using var destination = new MemoryStream();
+
+        await AssertCodeAsync("dependency_transfer_redirect_denied", () => transfer.TransferAsync(
+            plan,
+            LocalModelDependencyTransferApproval.Create(plan, item, approved: true),
+            destination));
+
+        Assert.Equal(0, destination.Length);
+        Assert.Equal(1, handler.Requests);
+        Assert.Equal(item.SourceUri, Assert.Single(handler.RequestedUris));
+    }
+
+    [Fact]
+    public async Task ExactPolicy_FollowsApprovedRedirectWithoutForwardingAmbientHeaders()
+    {
+        var bytes = "redirect approved fixture"u8.ToArray();
+        var (catalog, plan, item) = Plan(bytes);
+        var target = new Uri("https://assets.example.test/releases/dependency.bin?signature=fixture");
+        var handler = new FixtureHandler(request =>
+            request.RequestUri == item.SourceUri
+                ? Redirect(request, target)
+                : Response(request, bytes));
+        using var transfer = new LocalModelDependencyHttpTransfer(
+            handler,
+            catalog,
+            redirectPolicy: ExactPolicy(
+                item,
+                (new Uri("https://github.com/"), new Uri("https://assets.example.test/releases/"))));
+        using var destination = new MemoryStream();
+
+        var result = await transfer.TransferAsync(
+            plan,
+            LocalModelDependencyTransferApproval.Create(plan, item, approved: true),
+            destination);
+
+        Assert.Equal(bytes, destination.ToArray());
+        Assert.Equal(item.SourceUri, result.SourceUri);
+        Assert.Equal([item.SourceUri, target], handler.RequestedUris);
+        Assert.All(handler.AcceptEncodings, value => Assert.Equal("identity", value));
+        Assert.All(handler.NoStoreValues, Assert.True);
+        Assert.All(handler.AuthorizationPresent, Assert.False);
+        Assert.All(handler.CookiePresent, Assert.False);
+        Assert.All(handler.ReferrerPresent, Assert.False);
+    }
+
+    [Fact]
+    public async Task UnsafeRedirectTargetsFailBeforeSecondRequest()
+    {
+        var bytes = "unsafe redirect fixture"u8.ToArray();
+        var (catalog, plan, item) = Plan(bytes);
+        var targets = new Uri[]
+        {
+            new("/relative", UriKind.Relative),
+            new("http://assets.example.test/releases/dependency.bin"),
+            new("https://127.0.0.1/releases/dependency.bin"),
+            new("https://user@assets.example.test/releases/dependency.bin"),
+            new("https://assets.example.test:444/releases/dependency.bin"),
+            new("https://assets.example.test/releases/dependency.bin#fragment"),
+            new($"https://assets.example.test/releases/dependency.bin?{new string('a', 2049)}"),
+        };
+
+        foreach (var target in targets)
+        {
+            var handler = new FixtureHandler(request => Redirect(request, target));
+            using var transfer = new LocalModelDependencyHttpTransfer(
+                handler,
+                catalog,
+                redirectPolicy: new AllowAllRedirectPolicy());
+            using var destination = new MemoryStream();
+
+            await AssertCodeAsync("dependency_transfer_redirect_invalid", () => transfer.TransferAsync(
+                plan,
+                LocalModelDependencyTransferApproval.Create(plan, item, approved: true),
+                destination));
+            Assert.Equal(0, destination.Length);
+            Assert.Equal(1, handler.Requests);
+        }
+    }
+
+    [Fact]
+    public async Task RedirectLoopAndHopLimitFailClosed()
+    {
+        var bytes = "redirect bound fixture"u8.ToArray();
+        var (catalog, plan, item) = Plan(bytes);
+        var first = new Uri("https://one.example.test/files/one.bin");
+        var second = new Uri("https://two.example.test/files/two.bin");
+        var third = new Uri("https://three.example.test/files/three.bin");
+        var fourth = new Uri("https://four.example.test/files/four.bin");
+        var policy = ExactPolicy(
+            item,
+            (new Uri("https://github.com/"), new Uri("https://one.example.test/files/")),
+            (new Uri("https://one.example.test/"), new Uri("https://two.example.test/files/")),
+            (new Uri("https://two.example.test/"), new Uri("https://three.example.test/files/")),
+            (new Uri("https://three.example.test/"), new Uri("https://four.example.test/files/")),
+            (new Uri("https://one.example.test/"), new Uri("https://github.com/dcx/")));
+
+        var loopHandler = new FixtureHandler(request =>
+            request.RequestUri == item.SourceUri
+                ? Redirect(request, first)
+                : Redirect(request, item.SourceUri));
+        using (var loopTransfer = new LocalModelDependencyHttpTransfer(
+            loopHandler,
+            catalog,
+            redirectPolicy: policy))
+        {
+            await DeniedAndEmptyAsync(
+                loopTransfer,
+                plan,
+                LocalModelDependencyTransferApproval.Create(plan, item, approved: true),
+                "dependency_transfer_redirect_invalid");
+            Assert.Equal(2, loopHandler.Requests);
+        }
+
+        var hopHandler = new FixtureHandler(request => Redirect(
+            request,
+            request.RequestUri == item.SourceUri ? first :
+            request.RequestUri == first ? second :
+            request.RequestUri == second ? third : fourth));
+        using var hopTransfer = new LocalModelDependencyHttpTransfer(
+            hopHandler,
+            catalog,
+            redirectPolicy: policy);
+        await DeniedAndEmptyAsync(
+            hopTransfer,
+            plan,
+            LocalModelDependencyTransferApproval.Create(plan, item, approved: true),
+            "dependency_transfer_redirect_limit");
+        Assert.Equal(4, hopHandler.Requests);
+    }
+
+    [Fact]
+    public void ExactPolicy_DeniesChangedItemTransitionAndBroadOrDuplicateRules()
+    {
+        var bytes = "redirect policy fixture"u8.ToArray();
+        var (_, _, item) = Plan(bytes);
+        var from = new Uri("https://github.com/");
+        var prefix = new Uri("https://assets.example.test/releases/");
+        var policy = ExactPolicy(item, (from, prefix));
+        var target = new Uri("https://assets.example.test/releases/dependency.bin?signature=fixture");
+
+        Assert.True(policy.IsAllowed(item, item.SourceUri, target, 1));
+        Assert.False(policy.IsAllowed(item with { ExpectedBytes = item.ExpectedBytes + 1 }, item.SourceUri, target, 1));
+        Assert.False(policy.IsAllowed(item, item.SourceUri, new Uri("https://assets.example.test/other/dependency.bin"), 1));
+        Assert.False(policy.IsAllowed(item, item.SourceUri, target, 0));
+        Assert.Throws<ArgumentException>(() => ExactPolicy(
+            item,
+            (from, new Uri("https://assets.example.test"))));
+        Assert.Throws<ArgumentException>(() => ExactPolicy(item, (from, prefix), (from, prefix)));
     }
 
     [Fact]
@@ -86,7 +247,7 @@ public sealed class LocalModelDependencyHttpTransferTests
     }
 
     [Fact]
-    public async Task RedirectFinalUriEncodingRangeAndChunkedResponsesFailClosed()
+    public async Task SubstitutedFinalUriEncodingRangeAndChunkedResponsesFailClosed()
     {
         var bytes = "response policy fixture"u8.ToArray();
         var (catalog, plan, item) = Plan(bytes);
@@ -97,7 +258,6 @@ public sealed class LocalModelDependencyHttpTransferTests
         handler.Respond = request => Response(
             request,
             bytes,
-            status: HttpStatusCode.Redirect,
             finalUri: new Uri("https://github.com/redirected"));
         await DeniedAndEmptyAsync(transfer, plan, approval, "dependency_transfer_response_invalid");
 
@@ -334,12 +494,42 @@ public sealed class LocalModelDependencyHttpTransferTests
         };
     }
 
+    private static HttpResponseMessage Redirect(
+        HttpRequestMessage request,
+        Uri target,
+        HttpStatusCode status = HttpStatusCode.Redirect)
+    {
+        var response = new HttpResponseMessage(status)
+        {
+            RequestMessage = new HttpRequestMessage(request.Method, request.RequestUri),
+            Content = new ByteArrayContent([]),
+        };
+        response.Headers.Location = target;
+        return response;
+    }
+
+    private static ExactLocalModelDependencyRedirectPolicy ExactPolicy(
+        LocalModelDependencyTransferItem item,
+        params (Uri FromOrigin, Uri TargetPrefix)[] transitions) =>
+        new(Array.AsReadOnly(transitions.Select(transition =>
+            new LocalModelDependencyRedirectRule(
+                item.SourceUri,
+                item.ExpectedBytes,
+                item.Sha256,
+                transition.FromOrigin,
+                transition.TargetPrefix)).ToArray()));
+
     private sealed class FixtureHandler(
         Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
         public Func<HttpRequestMessage, HttpResponseMessage> Respond { get; set; } = respond;
         public int Requests { get; private set; }
+        public List<Uri> RequestedUris { get; } = [];
         public List<string> AcceptEncodings { get; } = [];
+        public List<bool> NoStoreValues { get; } = [];
+        public List<bool> AuthorizationPresent { get; } = [];
+        public List<bool> CookiePresent { get; } = [];
+        public List<bool> ReferrerPresent { get; } = [];
         public bool NoStore { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(
@@ -347,10 +537,24 @@ public sealed class LocalModelDependencyHttpTransferTests
             CancellationToken cancellationToken)
         {
             Requests++;
+            RequestedUris.Add(request.RequestUri!);
             AcceptEncodings.AddRange(request.Headers.AcceptEncoding.Select(value => value.Value));
             NoStore = request.Headers.CacheControl?.NoStore == true;
+            NoStoreValues.Add(NoStore);
+            AuthorizationPresent.Add(request.Headers.Authorization is not null);
+            CookiePresent.Add(request.Headers.Contains("Cookie"));
+            ReferrerPresent.Add(request.Headers.Referrer is not null);
             return Task.FromResult(Respond(request));
         }
+    }
+
+    private sealed class AllowAllRedirectPolicy : ILocalModelDependencyRedirectPolicy
+    {
+        public bool IsAllowed(
+            LocalModelDependencyTransferItem item,
+            Uri previousUri,
+            Uri targetUri,
+            int redirectNumber) => true;
     }
 
     private sealed class CancelAfterFirstReadStream(

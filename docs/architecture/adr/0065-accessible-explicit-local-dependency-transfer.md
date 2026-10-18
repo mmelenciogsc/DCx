@@ -13,7 +13,7 @@ The local-model window exposes one initially unchecked approval bound to the exa
 
 The coordinator serializes transfer, verification and cleanup in process. Progress reports only stage, item ordinal/count and byte counts; it omits source URLs, local paths and transport diagnostics. Cancellation remains keyboard available during work and removes only the current strict random incoming directory. Atomic publication is labeled published, not completed; completion is announced only after protected receipt verification and full payload rehash. Separate **Verify completed set** and **Recover abandoned partials** actions are keyboard reachable. Recovery runs while normal DCx owns its exclusive per-user data-root lease, recognizes only strict incoming names and refuses links. Read-only verification remains available even when current free space is insufficient for a new transfer.
 
-The production transport continues to deny redirects. The UI says so. The current official source addresses therefore cannot complete acquisition until a reviewed direct-origin or narrowly authenticated redirect policy exists. Transfer publication remains inert and grants no extraction, installation, registration, selection, execution, legal or redistribution authority.
+The production transport continues to deny provider redirects. ADR 0066 adds a bounded manual redirect mechanism but leaves its production policy empty; the UI says so. The current official source addresses therefore cannot complete acquisition until a reviewed direct-origin or narrowly authenticated redirect rule exists. Transfer publication remains inert and grants no extraction, installation, registration, selection, execution, legal or redistribution authority.
 
 ## Consequences
 
