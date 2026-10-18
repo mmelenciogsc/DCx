@@ -45,6 +45,8 @@ try {
     "Revoked signer and policy rollback rejection=PASS"
     "Rejected rollback preserves active replica=PASS"
     "Interrupted delta checkpoint recovery=PASS"
+    "Same-replica multi-client/process operation isolation=PASS"
+    "Operation-lease cancellation/recovery and linked-lock denial=PASS"
     "Private collection isolation=PASS"
     "Offline search and rollback=PASS"
     "Lazy artifact download=PASS"

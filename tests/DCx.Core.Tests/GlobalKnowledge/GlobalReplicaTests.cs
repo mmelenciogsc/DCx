@@ -67,6 +67,92 @@ public sealed class GlobalReplicaTests : IDisposable
     }
 
     [Fact]
+    public async Task SameReplicaClients_SerializeSyncAndCancellationWithoutCheckpointRace()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var repository = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "shared-replica-server"),
+            key.ExportPkcs8PrivateKey());
+        var resource = Resource(
+            "global:shared-replica",
+            "1",
+            "Shared replica",
+            "Concurrent clients must observe one atomic activation.",
+            [1f]);
+        await repository.PublishAsync(
+            [new GlobalReleaseChange(GlobalReleaseChangeKind.Upsert, resource.ResourceId, resource.Version, resource)],
+            DateTimeOffset.Parse("2026-10-18T00:00:00Z"));
+        var transport = new RepositoryRegistryTransport(repository);
+        var blockingTransport = new BlockingReleaseTransport(transport);
+        var clientRoot = Path.Combine(root, "shared-replica-client");
+        var anchors = new TestGlobalTrustPolicyAnchorStore();
+        var firstClient = await GlobalReplicaClient.OpenAsync(
+            clientRoot,
+            repository.TrustRootSubjectPublicKeyInfo,
+            anchors);
+        var secondClient = await GlobalReplicaClient.OpenAsync(
+            clientRoot,
+            repository.TrustRootSubjectPublicKeyInfo,
+            anchors);
+        var cancellingClient = await GlobalReplicaClient.OpenAsync(
+            clientRoot,
+            repository.TrustRootSubjectPublicKeyInfo,
+            anchors);
+
+        var firstSync = firstClient.SynchronizeAsync(blockingTransport);
+        await blockingTransport.WaitUntilBlockedAsync();
+        var secondSync = secondClient.SynchronizeAsync(transport);
+        try
+        {
+            await Task.Delay(100);
+            Assert.False(secondSync.IsCompleted);
+
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                cancellingClient.GetStatusAsync(cancellation.Token));
+        }
+        finally
+        {
+            blockingTransport.Release();
+        }
+
+        var firstResult = await firstSync;
+        var secondResult = await secondSync;
+        Assert.Equal(1, firstResult.ReleasesApplied);
+        Assert.Equal(0, secondResult.ReleasesApplied);
+        Assert.True(secondResult.WasAlreadyCurrent);
+        Assert.Equal(1, (await cancellingClient.GetStatusAsync()).Sequence);
+        Assert.Empty(Directory.GetFiles(
+            Path.Combine(firstClient.ReplicaRoot, "staging"),
+            "*.part",
+            SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
+    public async Task OperationLease_CancelsOnExternalContentionThenRecovers()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var client = await GlobalReplicaClient.OpenAsync(
+            Path.Combine(root, "externally-contended-client"),
+            key.ExportSubjectPublicKeyInfo(),
+            new TestGlobalTrustPolicyAnchorStore());
+        var lockPath = Path.Combine(client.ReplicaRoot, GlobalReplicaOperationLease.LockFileName);
+
+        using (var externalLease = new FileStream(
+                   lockPath,
+                   FileMode.Open,
+                   FileAccess.ReadWrite,
+                   FileShare.None))
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                client.GetStatusAsync(cancellation.Token));
+        }
+
+        Assert.Equal(0, (await client.GetStatusAsync()).Sequence);
+    }
+
+    [Fact]
     public async Task Sync_RejectsReleaseSignedByUntrustedKeyWithoutActivation()
     {
         using var trusted = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -396,6 +482,19 @@ public sealed class GlobalReplicaTests : IDisposable
             Path.Combine(pointerClient.ReplicaRoot, "active.json"),
             outsidePointer);
         await Assert.ThrowsAsync<GlobalReplicaException>(() => pointerClient.GetStatusAsync());
+
+        var lockClient = await GlobalReplicaClient.OpenAsync(
+            Path.Combine(root, "lock-client"),
+            publicKey,
+            new TestGlobalTrustPolicyAnchorStore());
+        var lockPath = Path.Combine(lockClient.ReplicaRoot, GlobalReplicaOperationLease.LockFileName);
+        File.Delete(lockPath);
+        var outsideLock = Path.Combine(root, "outside-lock");
+        await File.WriteAllTextAsync(outsideLock, "must remain unchanged");
+        File.CreateSymbolicLink(lockPath, outsideLock);
+
+        await Assert.ThrowsAsync<GlobalReplicaException>(() => lockClient.GetStatusAsync());
+        Assert.Equal("must remain unchanged", await File.ReadAllTextAsync(outsideLock));
     }
 
     [Fact]
@@ -605,6 +704,60 @@ public sealed class GlobalReplicaTests : IDisposable
         }
 
         public Task<byte[]> DownloadArtifactChunkAsync(string sha256, long offset, int count, CancellationToken cancellationToken) =>
+            inner.DownloadArtifactChunkAsync(sha256, offset, count, cancellationToken);
+    }
+
+    private sealed class BlockingReleaseTransport(IGlobalRegistryTransport inner) : IGlobalRegistryTransport
+    {
+        private readonly TaskCompletionSource blocked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int shouldBlock = 1;
+
+        public Task WaitUntilBlockedAsync() => blocked.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        public void Release() => released.TrySetResult();
+
+        public Task<GlobalTrustPolicyDescriptor?> GetLatestTrustPolicyAsync(CancellationToken cancellationToken) =>
+            inner.GetLatestTrustPolicyAsync(cancellationToken);
+
+        public Task<GlobalTrustPolicyDescriptor> GetTrustPolicyAsync(
+            long revision,
+            CancellationToken cancellationToken) =>
+            inner.GetTrustPolicyAsync(revision, cancellationToken);
+
+        public Task<byte[]> DownloadTrustPolicyChunkAsync(
+            long revision,
+            long offset,
+            int count,
+            CancellationToken cancellationToken) =>
+            inner.DownloadTrustPolicyChunkAsync(revision, offset, count, cancellationToken);
+
+        public Task<GlobalReleaseDescriptor?> GetLatestReleaseAsync(CancellationToken cancellationToken) =>
+            inner.GetLatestReleaseAsync(cancellationToken);
+
+        public Task<GlobalReleaseDescriptor> GetReleaseAsync(long sequence, CancellationToken cancellationToken) =>
+            inner.GetReleaseAsync(sequence, cancellationToken);
+
+        public async Task<byte[]> DownloadReleaseChunkAsync(
+            long sequence,
+            long offset,
+            int count,
+            CancellationToken cancellationToken)
+        {
+            if (Interlocked.Exchange(ref shouldBlock, 0) == 1)
+            {
+                blocked.TrySetResult();
+                await released.Task.WaitAsync(cancellationToken);
+            }
+
+            return await inner.DownloadReleaseChunkAsync(sequence, offset, count, cancellationToken);
+        }
+
+        public Task<byte[]> DownloadArtifactChunkAsync(
+            string sha256,
+            long offset,
+            int count,
+            CancellationToken cancellationToken) =>
             inner.DownloadArtifactChunkAsync(sha256, offset, count, cancellationToken);
     }
 }

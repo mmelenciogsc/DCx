@@ -106,28 +106,52 @@ public sealed partial class GlobalReplicaClient
         GlobalStoragePathGuard.EnsureDirectory(client.catalogsRoot, "global catalog store");
         GlobalStoragePathGuard.EnsureDirectory(client.stagingRoot, "global staging store");
         GlobalStoragePathGuard.EnsureDirectory(client.artifactsRoot, "global artifact store");
-        _ = await client.LoadActiveAsync(cancellationToken).ConfigureAwait(false);
+        using (await GlobalReplicaOperationLease.AcquireAsync(root, cancellationToken).ConfigureAwait(false))
+        {
+            _ = await client.LoadActiveAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         return client;
     }
 
     public async Task<GlobalReplicaStatus> GetStatusAsync(CancellationToken cancellationToken = default)
     {
-        ValidateStorageLayout();
-        var state = await LoadActiveAsync(cancellationToken).ConfigureAwait(false);
-        return new GlobalReplicaStatus(state.Sequence, state.ReleaseSha256, state.Resources.Count);
+        await syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var operationLease = await GlobalReplicaOperationLease.AcquireAsync(ReplicaRoot, cancellationToken)
+                .ConfigureAwait(false);
+            ValidateStorageLayout();
+            var state = await LoadActiveAsync(cancellationToken).ConfigureAwait(false);
+            return new GlobalReplicaStatus(state.Sequence, state.ReleaseSha256, state.Resources.Count);
+        }
+        finally
+        {
+            syncLock.Release();
+        }
     }
 
     public async Task<GlobalTrustPolicyStatus?> GetTrustPolicyStatusAsync(
         CancellationToken cancellationToken = default)
     {
-        ValidateStorageLayout();
-        var state = await LoadTrustPolicyAsync(cancellationToken).ConfigureAwait(false);
-        return state is null
-            ? null
-            : new GlobalTrustPolicyStatus(
-                state.SignedPolicy.Policy.Revision,
-                state.Sha256,
-                state.SignedPolicy.Policy.ReleaseKeys.Count);
+        await syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var operationLease = await GlobalReplicaOperationLease.AcquireAsync(ReplicaRoot, cancellationToken)
+                .ConfigureAwait(false);
+            ValidateStorageLayout();
+            var state = await LoadTrustPolicyAsync(cancellationToken).ConfigureAwait(false);
+            return state is null
+                ? null
+                : new GlobalTrustPolicyStatus(
+                    state.SignedPolicy.Policy.Revision,
+                    state.Sha256,
+                    state.SignedPolicy.Policy.ReleaseKeys.Count);
+        }
+        finally
+        {
+            syncLock.Release();
+        }
     }
 
     public async Task<GlobalTrustPolicyStatus> ApplyTrustPolicyAsync(
@@ -142,6 +166,8 @@ public sealed partial class GlobalReplicaClient
         await syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            using var operationLease = await GlobalReplicaOperationLease.AcquireAsync(ReplicaRoot, cancellationToken)
+                .ConfigureAwait(false);
             ValidateStorageLayout();
             return await ApplyTrustPolicyUnderLockAsync(policyEnvelope, cancellationToken).ConfigureAwait(false);
         }
@@ -159,6 +185,8 @@ public sealed partial class GlobalReplicaClient
         await syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            using var operationLease = await GlobalReplicaOperationLease.AcquireAsync(ReplicaRoot, cancellationToken)
+                .ConfigureAwait(false);
             ValidateStorageLayout();
             var trustPolicy = await SynchronizeTrustPolicyAsync(transport, cancellationToken).ConfigureAwait(false);
             var current = await LoadActiveAsync(trustPolicy, cancellationToken).ConfigureAwait(false);
@@ -254,6 +282,8 @@ public sealed partial class GlobalReplicaClient
         await syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            using var operationLease = await GlobalReplicaOperationLease.AcquireAsync(ReplicaRoot, cancellationToken)
+                .ConfigureAwait(false);
             ValidateStorageLayout();
             var matches = Directory.GetFiles(releasesRoot, $"{sequence:D12}-*.release.json");
             if (matches.Length != 1)
@@ -281,36 +311,46 @@ public sealed partial class GlobalReplicaClient
         int limit = 10,
         CancellationToken cancellationToken = default)
     {
-        ValidateStorageLayout();
         if (limit is < 1 or > 50 || embedding is { Length: > GlobalReleaseCodec.MaximumEmbeddingDimensions } ||
             embedding?.Any(value => !float.IsFinite(value)) == true)
         {
             throw new ArgumentException("The global search limit or embedding is invalid.");
         }
 
-        var state = await LoadActiveAsync(cancellationToken).ConfigureAwait(false);
-        var terms = SearchTermRegex().Matches(query ?? string.Empty)
-            .Select(match => match.Value)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(12)
-            .ToArray();
-        if (terms.Length == 0 && embedding is null)
+        await syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            return [];
-        }
-
-        return state.Resources
-            .Select(resource => new
+            using var operationLease = await GlobalReplicaOperationLease.AcquireAsync(ReplicaRoot, cancellationToken)
+                .ConfigureAwait(false);
+            ValidateStorageLayout();
+            var state = await LoadActiveAsync(cancellationToken).ConfigureAwait(false);
+            var terms = SearchTermRegex().Matches(query ?? string.Empty)
+                .Select(match => match.Value)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(12)
+                .ToArray();
+            if (terms.Length == 0 && embedding is null)
             {
-                Resource = resource,
-                Score = Score(resource, terms, embedding),
-            })
-            .Where(item => item.Score > 0)
-            .OrderByDescending(item => item.Score)
-            .ThenBy(item => item.Resource.ResourceId, StringComparer.Ordinal)
-            .Take(limit)
-            .Select(item => item.Resource)
-            .ToArray();
+                return [];
+            }
+
+            return state.Resources
+                .Select(resource => new
+                {
+                    Resource = resource,
+                    Score = Score(resource, terms, embedding),
+                })
+                .Where(item => item.Score > 0)
+                .OrderByDescending(item => item.Score)
+                .ThenBy(item => item.Resource.ResourceId, StringComparer.Ordinal)
+                .Take(limit)
+                .Select(item => item.Resource)
+                .ToArray();
+        }
+        finally
+        {
+            syncLock.Release();
+        }
     }
 
     public async Task<string> GetArtifactAsync(
@@ -319,36 +359,47 @@ public sealed partial class GlobalReplicaClient
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transport);
-        ValidateStorageLayout();
         if (!IsSha256(sha256))
         {
             throw new GlobalReplicaException("The requested global artifact digest is invalid.");
         }
 
-        var state = await LoadActiveAsync(cancellationToken).ConfigureAwait(false);
-        var reference = state.Resources.Select(item => item.Artifact)
-            .FirstOrDefault(item => item is not null && item.Sha256.Equals(sha256, StringComparison.OrdinalIgnoreCase))
-            ?? throw new GlobalReplicaException("The artifact is not referenced by the active signed catalog.");
-        var normalized = sha256.ToLowerInvariant();
-        var destinationDirectory = Path.Combine(artifactsRoot, normalized[..2]);
-        GlobalStoragePathGuard.EnsureDirectory(destinationDirectory, "global artifact digest store");
-        var destination = Path.Combine(destinationDirectory, normalized);
-        GlobalStoragePathGuard.ValidateFile(destination, mustExist: false, "global artifact");
-        if (File.Exists(destination))
+        await syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            await VerifyFileAsync(destination, normalized, reference.SizeBytes, cancellationToken).ConfigureAwait(false);
+            using var operationLease = await GlobalReplicaOperationLease.AcquireAsync(ReplicaRoot, cancellationToken)
+                .ConfigureAwait(false);
+            ValidateStorageLayout();
+            var state = await LoadActiveAsync(cancellationToken).ConfigureAwait(false);
+            var reference = state.Resources.Select(item => item.Artifact)
+                .FirstOrDefault(item => item is not null && item.Sha256.Equals(sha256, StringComparison.OrdinalIgnoreCase))
+                ?? throw new GlobalReplicaException("The artifact is not referenced by the active signed catalog.");
+            var normalized = sha256.ToLowerInvariant();
+            var destinationDirectory = Path.Combine(artifactsRoot, normalized[..2]);
+            GlobalStoragePathGuard.EnsureDirectory(destinationDirectory, "global artifact digest store");
+            var destination = Path.Combine(destinationDirectory, normalized);
+            GlobalStoragePathGuard.ValidateFile(destination, mustExist: false, "global artifact");
+            if (File.Exists(destination))
+            {
+                await VerifyFileAsync(destination, normalized, reference.SizeBytes, cancellationToken)
+                    .ConfigureAwait(false);
+                return destination;
+            }
+
+            var partial = Path.Combine(stagingRoot, $"artifact-{normalized}.part");
+            await DownloadChunksAsync(
+                partial,
+                reference.SizeBytes,
+                (offset, count, token) => transport.DownloadArtifactChunkAsync(normalized, offset, count, token),
+                cancellationToken).ConfigureAwait(false);
+            await VerifyFileAsync(partial, normalized, reference.SizeBytes, cancellationToken).ConfigureAwait(false);
+            File.Move(partial, destination, overwrite: false);
             return destination;
         }
-
-        var partial = Path.Combine(stagingRoot, $"artifact-{normalized}.part");
-        await DownloadChunksAsync(
-            partial,
-            reference.SizeBytes,
-            (offset, count, token) => transport.DownloadArtifactChunkAsync(normalized, offset, count, token),
-            cancellationToken).ConfigureAwait(false);
-        await VerifyFileAsync(partial, normalized, reference.SizeBytes, cancellationToken).ConfigureAwait(false);
-        File.Move(partial, destination, overwrite: false);
-        return destination;
+        finally
+        {
+            syncLock.Release();
+        }
     }
 
     private async Task<ActiveState> LoadActiveAsync(CancellationToken cancellationToken)
