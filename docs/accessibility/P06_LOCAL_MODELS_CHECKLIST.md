@@ -2,6 +2,8 @@
 
 Status: NOT RUN. Automated UIA evidence does not satisfy this checklist.
 
+Automated evidence proves that cooperating DCx processes serialize Ollama work and that queued acquisition is cancellable and recoverable. It does not prove the screen-reader wording, wait-state discoverability or cancellation experience when another DCx operation owns the model.
+
 Run separately with the installed JAWS, NVDA and Narrator versions. Use only an already-installed nonprivate fixture model and the gated synthetic transfer fixture; do not perform a real provider transfer, install, retag or upload anything.
 
 1. Keyboard to **Local models** and confirm the window title, heading, introductory no-download notice and current vision/embedding/transcription choices are announced once and in a useful order.
@@ -36,5 +38,6 @@ Run separately with the installed JAWS, NVDA and Narrator versions. Use only an 
 30. Cancel the first synthetic attempt. Confirm the cleanup result receives focus, no partial completion is implied, and the one-time approval resets. Approve and complete a second attempt; confirm the protected/reverified result receives focus, progress reaches 100%, and approval resets again.
 31. Invoke **Verify completed set** and **Recover abandoned partials** by keyboard. Confirm each concise result receives focus. Confirm recovery explains that links are refused and no completed set was changed.
 32. Repeat the synthetic workflow at 200% scaling and High Contrast. Check `Alt+O`, `Alt+K`, `Alt+B`, `Alt+C`, `Alt+V` and `Alt+R` for conflicts with each screen reader. Record verbosity, delayed announcements, cancellation latency and any focus loss. Do not infer this human result from automated UIA.
+33. With a disposable validation profile, start one long local-model operation and initiate a second operation from another DCx process. Confirm the waiting state does not claim progress or completion, cancellation remains discoverable, cancellation produces a concise announcement, and a later retry works after the first process releases or exits. Do not use real user media and do not start an unrelated Ollama client during the resource-attribution check.
 
 P06 remains blocked until this human gate and the separate real Whisper/embedding gates pass.

@@ -1,7 +1,7 @@
 # P04 — OpenAI identity and local Codex integration
 
 - Status: Complete (offline/native mock gate; external account invocation unverified)
-- Implementation commits: `8ba629c`, `e559975`, `5873218`, `c200e8f`
+- Implementation commits: `8ba629c`, `e559975`, `5873218`, `c200e8f`, `5614991`
 
 Commercial ChatGPT sign-in for DCx distribution is a strict eligibility blocker. API-key mode remains independent.
 
@@ -29,7 +29,7 @@ See `docs/references/VERIFICATION_LOG.md` and ADR 0004 for source URLs and the r
 - Accessible OpenAI/Codex settings window with API-key save/delete, provider/runtime status, model picker, prompt, Run, Cancel and Disconnect controls.
 - Permanently disabled commercial ChatGPT button until eligibility evidence changes the compiled distribution capability.
 - Repository-owned Windows subprocess fixture that exercises the same JSONL transport without credentials, network access or billable inference.
-- Cancellation rejects before `turn/start` dispatch or, after dispatch, waits only for the bounded identity-bearing response and interrupts that exact thread/turn. The fixture can deterministically send active-turn notifications before the response to prove reordering does not orphan a turn.
+- Cancellation rejects before `turn/start` dispatch or registers one pending intent against the exact unique ephemeral thread before sending. The first exact identity-bearing started, delta or completed notification binds the turn and permits immediate exact interruption; the later correlated response must identify the same thread/turn. Response-reader binding remains the consistency check and fallback. Conflicting response/notification identity, ambiguous mapping and cross-thread turn reuse fail closed.
 
 ## Reproduction
 
@@ -57,6 +57,7 @@ Native Windows 11 build/test after final hardening:
 - Active-turn cancellation waits for the exact in-flight turn before requesting interruption, then proves the turn is removed. A later expanded-suite run exposed the remaining notification-before-response race; the fixture now forces that ordering, and the two P04 process tests passed six consecutive focused runs after identity retention was hardened. The current committed-source native validator is recorded with the encompassing milestone evidence.
 - The first expanded pre-commit run after the P06 observer change passed 494/495: `Client_CancellationInterruptsOnlyActiveTurn` received `TaskCanceledException` while waiting for `turn/start`. The deterministic delayed-response fixture reproduced that ordering. After `5873218`, the exact-commit full suite passed 495/495 and `validate-p04.ps1` passed its native offline UIA flow. This non-zero observation remains part of the record.
 - A later expanded run at the P12 milestone passed 550/551: `Client_CancellationInterruptsOnlyActiveTurn` observed a completed turn. The reader had completed the correlated response task, but its awaiting continuation could still be overtaken by the following terminal notification. Commit `c200e8f` binds the pre-registered cancellation intent synchronously in the protocol response reader before later notifications are read. Both focused process tests then passed together, followed by eight consecutive no-build focused runs, the native P04 UIA gate and the exact-source full suite at `02d0564` (551/551). This second non-zero observation remains recorded; ADR 0083 supersedes only the incomplete scheduling assumption, not ADR 0070's identity-retention rule.
+- The first expanded run after the P06 inference-lease milestone passed 555/556: the same cancellation test again observed a completed turn. The fixture's delayed `turn/start` response blocked its single stdin loop, so an interrupt could remain unread until completion under load. More importantly, DCx ignored exact thread/turn identity already available from notifications while awaiting the response. Commit `5614991` registers cancellation by exact ephemeral thread before dispatch, binds the first identity-bearing turn notification, interrupts immediately, and treats the eventual response as a mandatory identity-consistency check. The fixture now processes delayed requests asynchronously and delays the response beyond normal uncancelled completion; a conflicting notification/response case is also denied. The three focused cases passed, then ten consecutive no-build focused runs, native P04 UIA and the exact-source full suite passed 557/557 with zero build warnings/errors. This third non-zero observation remains recorded; ADR 0085 supersedes only the response-first assumption in ADRs 0070/0083.
 - Secret-pattern filename scan found no matches outside ignored build/test artifacts.
 
 ## Changed files
@@ -65,7 +66,7 @@ Native Windows 11 build/test after final hardening:
 - Native runtime discovery and accessible provider UI: `src/DCx.Desktop/OpenAI`, `src/DCx.Desktop/OpenAiControlWindow.xaml*`, shell entry controls.
 - Offline process fixture: `tests/DCx.FakeCodexAppServer`.
 - Unit/integration tests: `tests/DCx.Core.Tests/OpenAI`, `tests/DCx.Core.Tests/Security`.
-- Turn-identity cancellation ordering: `src/DCx.Core/OpenAI/CodexAppServerClient.cs`, the delayed-response fixture/test above, `docs/architecture/adr/0070-retain-codex-turn-identity-through-cancellation.md`, and the response-reader binding in ADR 0083.
+- Turn-identity cancellation ordering: `src/DCx.Core/OpenAI/CodexAppServerClient.cs`, the full-duplex delayed-response fixture and focused tests, `docs/architecture/adr/0070-retain-codex-turn-identity-through-cancellation.md`, the response-reader binding in ADR 0083, and notification-first exact binding in ADR 0085.
 - Native UIA test: `scripts/validate-p04.ps1`.
 - Human checklist: `docs/accessibility/P04_OPENAI_CHECKLIST.md`.
 

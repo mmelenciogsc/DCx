@@ -85,5 +85,7 @@
 | [0081](architecture/adr/0081-compose-care-contributor-native-fixture.md) | Compose the authenticated CARE ledger with the native dashboard only in an isolated fixture | Accepted for native local validation; production contributor authentication remains blocked | 2026-10-18 |
 | [0082](architecture/adr/0082-assisted-facebook-current-post-inspection.md) | Inspect only the current Facebook post after explicit user handback | Accepted for controlled local validation; live Facebook acceptance remains blocked | 2026-10-18 |
 | [0083](architecture/adr/0083-bind-codex-cancellation-in-response-reader.md) | Bind Codex cancellation intent in the protocol response reader | Accepted for the local app-server boundary; real provider acceptance remains blocked | 2026-10-18 |
+| [0084](architecture/adr/0084-serialize-per-user-ollama-inference.md) | Serialize per-user Ollama inference | Accepted for cooperative DCx local-model operations; external-client isolation remains blocked | 2026-10-19 |
+| [0085](architecture/adr/0085-bind-codex-cancellation-from-turn-notifications.md) | Bind Codex cancellation from exact turn notifications | Accepted for the local app-server boundary; real provider acceptance remains blocked | 2026-10-19 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

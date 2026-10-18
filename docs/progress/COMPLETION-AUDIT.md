@@ -1,6 +1,6 @@
 # DCx requirement-to-evidence completion audit
 
-Updated: 2026-10-18
+Updated: 2026-10-19
 
 This audit maps the authoritative handoff to current executable evidence. “Automated gate passed” does not imply production readiness, human assistive-technology acceptance, provider approval or deployment. The product objective is not complete while any required phase remains partial or blocked.
 
@@ -12,9 +12,9 @@ Authoritative inputs: `DCx_Codex_Handoff_Kit/README.md`, `DCX_PRODUCT_ARCHITECTU
 | P01 | Native WebView2 shell, profiles, browser functions, keyboard/UIA and manual AT checklist | [PHASE-01.md](PHASE-01.md) | Automated native gate achieved. Human JAWS/NVDA/Narrator entries remain unverified. |
 | P02 | Shared live viewport, manual takeover/handback, safe DOM/ARIA actions and focus restoration | [PHASE-02.md](PHASE-02.md) | Automated native fixture gate achieved; live third-party authenticated acceptance remains separate. |
 | P03 | Restricted PowerShell/process/UIA broker and keyboard-operable native-app handoff | [PHASE-03.md](PHASE-03.md) | Automated native gate achieved; elevation/install authority remains absent by design. |
-| P04 | Per-user Codex app-server, API-key path, cancellation/reconnect, eligible ChatGPT sign-in only | [PHASE-04.md](PHASE-04.md) | Offline/native mock gate achieved, including response-reader-bound exact-turn cancellation after two recorded race findings. Real provider invocation and commercial ChatGPT sign-in eligibility remain blocked. |
+| P04 | Per-user Codex app-server, API-key path, cancellation/reconnect, eligible ChatGPT sign-in only | [PHASE-04.md](PHASE-04.md) | Offline/native mock gate achieved, including notification- and response-bound exact-turn cancellation after three recorded race findings. Real provider invocation and commercial ChatGPT sign-in eligibility remain blocked. |
 | P05 | BOSS task graph, eight roles, deterministic-first routing, budgets, checkpoints and measured benchmark | [PHASE-05.md](PHASE-05.md) | Deterministic benchmark gate achieved; fixture metrics make no production cost-savings claim. |
-| P06 | Hardware-selected Ollama/Whisper/embedding stack with approved payloads, licenses and real quality/resource benchmarks | [PHASE-06.md](PHASE-06.md) | Partial. Hardware policy, exact review/staging boundaries and real installed vision benchmark pass. Owner-approved transfer plus Whisper/embedding installation and acceptance remain blocked. |
+| P06 | Hardware-selected Ollama/Whisper/embedding stack with approved payloads, licenses and real quality/resource benchmarks | [PHASE-06.md](PHASE-06.md) | Partial. Hardware policy, exact review/staging boundaries, cross-process sequencing of cooperating DCx Ollama operations and the real installed vision benchmark pass. External-client isolation, owner-approved transfer and Whisper/embedding installation and acceptance remain blocked. |
 | P07 | Files/documents/media viewers, scanned-PDF wizard/export, visual Q&A and accessibility evidence | [PHASE-07.md](PHASE-07.md) | Automated native gate achieved. Human AT, real speech accuracy and live/authenticated/protected YouTube acceptance remain unverified. |
 | P08 | Private isolated CKB/CCB, vector/metadata/artifact stores, provenance and hostile artifact denial | [PHASE-08.md](PHASE-08.md) | Automated local/native gate achieved. |
 | P09 | Authoritative global service plus signed incremental two-client synchronization and local replica separation | [PHASE-09.md](PHASE-09.md) | Partial. Signed loopback service/client and hostile storage gates pass. Approved Docker/Compose deployment, production key custody and stronger same-user isolation remain blocked. |
@@ -34,11 +34,12 @@ Authoritative inputs: `DCx_Codex_Handoff_Kit/README.md`, `DCX_PRODUCT_ARCHITECTU
 
 ## Current exact-source checkpoint
 
-- Implementation: `02d0564`.
-- Full Windows suite: 551 passed, 0 failed, 0 skipped.
-- P11: `artifacts/test-results/p11-7065dfe7ca624e8a898b00f8f7592740/`; 122/122 plus generated and authenticated-ledger native UIA.
-- P12: `artifacts/test-results/p12-dd80f9ec1adf4390807fe6204ff9549c/`; nine composed fixtures and zero production actions. Focused Facebook/XLSX evidence: `p12-integrations-4e9afdf28bd64db08986912dd8c77e7e/`; 17/17 selected tests, including 15 Facebook policy cases, plus native UIA.
-- P13: `artifacts/test-results/p13-abb774602db9448181b62fa48ad4eab5/`; 23/23 reliability, 21/21 trust, Defender clean, NuGet advisories 0 and unsigned trust denied.
-- P14: `artifacts/test-results/p14-5fa74555b70846cfadc5d8c3fd25daf8/`; 10/10, seven blockers, `NO_GO`, activation false.
+- Implementation: `5614991`.
+- Full Windows suite: 557 passed, 0 failed, 0 skipped; zero build warnings/errors.
+- P06: `artifacts/test-results/p06-1893255314b3464d85e191ec152b11e2/`; 202/202, 5/5 mandatory sequencing contracts, real installed-GPU vision and verified unload, with no dependency transfer/install.
+- P11: `artifacts/test-results/p11-4bad10a823fa48fda476ba3fe07a88b0/`; 122/122 plus generated and authenticated-ledger native UIA.
+- P12: `artifacts/test-results/p12-dd738441b5d547b4b967126391d196c8/`; nine composed fixtures and zero production actions. Focused Facebook/XLSX evidence: `p12-integrations-b821cca37ff54da2815c99a087d9a2a0/`; 17/17 selected tests, including 15 Facebook policy cases, plus native UIA.
+- P13: `artifacts/test-results/p13-676e0022f5d54066842734450c342c83/`; 23/23 reliability, 21/21 trust, Defender clean, NuGet advisories 0 and unsigned trust denied.
+- P14: `artifacts/test-results/p14-a3408cbf97d541359340a5ffccc80ecb/`; 10/10, seven blockers, `NO_GO`, activation false.
 
 Evidence directories are ignored build artifacts and are intentionally not committed. The phase records are the durable reproduction index.
