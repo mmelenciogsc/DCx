@@ -1195,12 +1195,14 @@ public sealed class PayPalSandboxHttpAdapterTests
             var now = DateTimeOffset.Parse("2026-10-17T00:00:00Z");
             var preview = Preview("batch:durable-adapter", 500);
             var repository = await DurableCareRepository.OpenAsync(root);
-            await repository.RegisterCarePeriodAsync(
+            var closeReview = DurableCareRepository.ReviewCarePeriodClose(
                 new CarePeriodInput(
                     2026, 1, 1_250, 0, 0, 0, 0,
                     MinimumPayoutCents: 0),
                 [new ContributorUsageWeight(DefaultContributor, 1m)],
                 now);
+            await repository.RegisterReviewedCarePeriodAsync(
+                closeReview, true, now);
             var submitHandler = new ScriptedHandler(async (index, request, cancellationToken) =>
             {
                 if (index == 0)

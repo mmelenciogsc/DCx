@@ -160,7 +160,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(13L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(14L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -177,7 +177,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         {
             await connection.OpenAsync();
             var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 14;";
+            command.CommandText = "PRAGMA user_version = 15;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -189,7 +189,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(14L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(15L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -249,7 +249,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await verifiedConnection.OpenAsync();
         var version = verifiedConnection.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(13L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(14L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -286,7 +286,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await verified.OpenAsync();
         var version = verified.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(13L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(14L, (long)(await version.ExecuteScalarAsync())!);
         var table = verified.CreateCommand();
         table.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'payout_item_remediations';";
         Assert.Equal(1L, (long)(await table.ExecuteScalarAsync())!);
@@ -353,7 +353,8 @@ public sealed class DurableCareRepositoryTests : IDisposable
         var care = CareAllocationCalculator.Calculate(
             new CarePeriodInput(2026, 1, 10_000, 0, 0, 0, 0, MinimumPayoutCents: 100),
             [new ContributorUsageWeight("contributor:one", 1m)]);
-        await repository.RegisterCarePeriodAsync(
+        await RegisterAsync(
+            repository,
             new CarePeriodInput(2026, 1, 10_000, 0, 0, 0, 0, MinimumPayoutCents: 100),
             [new ContributorUsageWeight("contributor:one", 1m)],
             now);
@@ -414,13 +415,53 @@ public sealed class DurableCareRepositoryTests : IDisposable
         ];
         var repository = await DurableCareRepository.OpenAsync(root);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            repository.RegisterCarePeriodAsync(
+        Assert.Throws<InvalidOperationException>(() =>
+            DurableCareRepository.ReviewCarePeriodClose(
                 input,
                 [new ContributorUsageWeight(new string('x', 129), 1m)],
                 now));
 
-        var registered = await repository.RegisterCarePeriodAsync(input, usage, now);
+        var review = DurableCareRepository.ReviewCarePeriodClose(input, usage, now);
+        Assert.Equal(now.AddMinutes(10), review.ExpiresUtc);
+        Assert.Equal(64, review.ReviewSha256.Length);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.RegisterReviewedCarePeriodAsync(review, false, now));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.RegisterReviewedCarePeriodAsync(
+                review with { ReviewSha256 = new string('0', 64) },
+                true,
+                now));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.RegisterReviewedCarePeriodAsync(
+                review with
+                {
+                    Usage =
+                    [
+                        new ContributorUsageWeight("contributor:one", 2m),
+                        new ContributorUsageWeight("contributor:two", 2m),
+                    ],
+                },
+                true,
+                now));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.RegisterReviewedCarePeriodAsync(
+                review with
+                {
+                    Result = review.Result with
+                    {
+                        AggregateContributorPoolCents =
+                            review.Result.AggregateContributorPoolCents + 1,
+                    },
+                },
+                true,
+                now));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.RegisterReviewedCarePeriodAsync(review, true, now.AddSeconds(-1)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.RegisterReviewedCarePeriodAsync(review, true, now.AddMinutes(11)));
+        Assert.Equal(0, await repository.BalanceAsync(LedgerAccount.ContributorPayable));
+
+        var registered = await repository.RegisterReviewedCarePeriodAsync(review, true, now);
 
         Assert.Equal(1_200, registered.AggregateContributorPoolCents);
         Assert.Collection(
@@ -438,15 +479,27 @@ public sealed class DurableCareRepositoryTests : IDisposable
         Assert.Equal(-1_200, await repository.BalanceAsync(LedgerAccount.ContributorPayable));
 
         var reopened = await DurableCareRepository.OpenAsync(root);
-        var replay = await reopened.RegisterCarePeriodAsync(input, usage, now.AddMinutes(1));
+        var replay = await reopened.RegisterReviewedCarePeriodAsync(
+            review, true, now.AddMinutes(1));
         Assert.Equal(registered.AggregateContributorPoolCents, replay.AggregateContributorPoolCents);
         Assert.Equal(registered.Net60EligibilityDate, replay.Net60EligibilityDate);
         Assert.Equal(registered.Allocations.ToArray(), replay.Allocations.ToArray());
         Assert.Equal(-1_200, await reopened.BalanceAsync(LedgerAccount.ContributorPayable));
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            reopened.RegisterCarePeriodAsync(
-                input with { SubscriptionRevenueCents = 3_001 },
-                usage,
+            reopened.RegisterReviewedCarePeriodAsync(
+                DurableCareRepository.ReviewCarePeriodClose(
+                    input,
+                    usage,
+                    now.AddMinutes(2)),
+                true,
+                now.AddMinutes(2)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            reopened.RegisterReviewedCarePeriodAsync(
+                DurableCareRepository.ReviewCarePeriodClose(
+                    input with { SubscriptionRevenueCents = 3_001 },
+                    usage,
+                    now.AddMinutes(2)),
+                true,
                 now.AddMinutes(2)));
         Assert.Equal(-1_200, await reopened.BalanceAsync(LedgerAccount.ContributorPayable));
         Assert.True(await reopened.ReconcilesAsync());
@@ -456,7 +509,8 @@ public sealed class DurableCareRepositoryTests : IDisposable
     public async Task PayoutReservation_RejectsPeriodContributorAmountSubstitutionAndHeldAllocation()
     {
         var repository = await DurableCareRepository.OpenAsync(root);
-        var payable = await repository.RegisterCarePeriodAsync(
+        var payable = await RegisterAsync(
+            repository,
             new CarePeriodInput(
                 2026, 1, 3_000, 0, 0, 0, 0,
                 ContributorPoolBasisPoints: 4000,
@@ -498,7 +552,8 @@ public sealed class DurableCareRepositoryTests : IDisposable
         Assert.Null(await repository.GetPayoutStateAsync(wrongAmount.BatchId));
         Assert.Null(await repository.GetPayoutStateAsync(wrongPeriod.BatchId));
 
-        var held = await repository.RegisterCarePeriodAsync(
+        var held = await RegisterAsync(
+            repository,
             new CarePeriodInput(
                 2026, 2, 1_250, 0, 0, 0, 0,
                 ContributorPoolBasisPoints: 4000,
@@ -573,7 +628,8 @@ public sealed class DurableCareRepositoryTests : IDisposable
             StringComparison.Ordinal);
         Assert.Null(await firstRepository.GetPayoutStateAsync(first.BatchId));
 
-        await firstRepository.RegisterCarePeriodAsync(
+        await RegisterAsync(
+            firstRepository,
             new CarePeriodInput(
                 2026, 1, 2_500, 0, 0, 0, 0,
                 ContributorPoolBasisPoints: 4000,
@@ -1246,7 +1302,133 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await verified.OpenAsync();
         var version = verified.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(13L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(14L, (long)(await version.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task SchemaThirteen_UnreviewedCarePeriodRequiresFreshExactCloseApproval()
+    {
+        var input = new CarePeriodInput(
+            2026, 1, 1_250, 0, 0, 0, 0,
+            ContributorPoolBasisPoints: 4000,
+            MinimumPayoutCents: 0);
+        ContributorUsageWeight[] usage =
+        [
+            new("contributor:one", 1m),
+        ];
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var result = await RegisterAsync(repository, input, usage, now);
+        var preview = new PayoutBatchPreview(
+            "batch:schema-thirteen-close-review",
+            PayoutExecutionMode.Sandbox,
+            result.Net60EligibilityDate,
+            [new PayoutItem("contributor:one", 500, Approval("contributor:one"))],
+            PayoutBatchPreviewFactory.CarePeriodId(result));
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(root, "care-ledger.sqlite3"),
+            Pooling = false,
+        }.ToString();
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE care_periods
+                SET close_review_sha256 = NULL,
+                    close_approval_sha256 = NULL,
+                    reviewed_utc = NULL,
+                    review_expires_utc = NULL,
+                    approved_utc = NULL;
+                """;
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+            command.CommandText = "PRAGMA user_version = 13;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var migrated = await DurableCareRepository.OpenAsync(root);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => migrated.ReservePayoutAsync(
+            preview, true, true, preview.EligibilityDate, now.AddMinutes(1)));
+        Assert.Null(await migrated.GetPayoutStateAsync(preview.BatchId));
+
+        var competingRepository = await DurableCareRepository.OpenAsync(root);
+        var firstReview = DurableCareRepository.ReviewCarePeriodClose(
+            input, usage, now.AddMinutes(2));
+        var secondReview = DurableCareRepository.ReviewCarePeriodClose(
+            input, usage, now.AddMinutes(3));
+        async Task<(bool Accepted, CarePeriodCloseReview Review, CarePeriodResult? Result)> AttemptAsync(
+            DurableCareRepository candidate,
+            CarePeriodCloseReview review)
+        {
+            try
+            {
+                return (true, review, await candidate.RegisterReviewedCarePeriodAsync(
+                    review, true, review.ReviewedUtc));
+            }
+            catch (InvalidOperationException)
+            {
+                return (false, review, null);
+            }
+        }
+
+        var attempts = await Task.WhenAll(
+            AttemptAsync(migrated, firstReview),
+            AttemptAsync(competingRepository, secondReview));
+        var accepted = Assert.Single(attempts, attempt => attempt.Accepted);
+        Assert.Single(attempts, attempt => !attempt.Accepted);
+        var freshReview = accepted.Review;
+        var promoted = accepted.Result!;
+        Assert.Equal(result.AggregateContributorPoolCents, promoted.AggregateContributorPoolCents);
+        Assert.Equal(result.Net60EligibilityDate, promoted.Net60EligibilityDate);
+        Assert.Equal(result.Allocations.ToArray(), promoted.Allocations.ToArray());
+        Assert.Equal(-500, await migrated.BalanceAsync(LedgerAccount.ContributorPayable));
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE care_periods SET approved_utc = $approved WHERE period_id = $period;
+                """;
+            command.Parameters.AddWithValue("$approved", now.AddMinutes(4).ToString("O"));
+            command.Parameters.AddWithValue("$period", preview.CarePeriodId!);
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+        await Assert.ThrowsAsync<InvalidOperationException>(() => migrated.ReservePayoutAsync(
+            preview, true, true, preview.EligibilityDate, now.AddMinutes(3)));
+        Assert.Null(await migrated.GetPayoutStateAsync(preview.BatchId));
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE care_periods SET approved_utc = $approved WHERE period_id = $period;
+                """;
+            command.Parameters.AddWithValue("$approved", freshReview.ReviewedUtc.ToString("O"));
+            command.Parameters.AddWithValue("$period", preview.CarePeriodId!);
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+        Assert.True(await migrated.ReservePayoutAsync(
+            preview, true, true, preview.EligibilityDate, now.AddMinutes(3)));
+
+        await using var verified = new SqliteConnection(connectionString);
+        await verified.OpenAsync();
+        var version = verified.CreateCommand();
+        version.CommandText = "PRAGMA user_version;";
+        Assert.Equal(14L, (long)(await version.ExecuteScalarAsync())!);
+        var closeReview = verified.CreateCommand();
+        closeReview.CommandText = """
+            SELECT close_review_sha256, close_approval_sha256,
+                   reviewed_utc, review_expires_utc, approved_utc
+            FROM care_periods WHERE period_id = $period;
+            """;
+        closeReview.Parameters.AddWithValue("$period", preview.CarePeriodId!);
+        await using var reader = await closeReview.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(freshReview.ReviewSha256, reader.GetString(0));
+        Assert.Equal(64, reader.GetString(1).Length);
+        Assert.Equal(freshReview.ReviewedUtc.ToString("O"), reader.GetString(2));
+        Assert.Equal(freshReview.ExpiresUtc.ToString("O"), reader.GetString(3));
+        Assert.Equal(freshReview.ReviewedUtc.ToString("O"), reader.GetString(4));
     }
 
     [Fact]
@@ -1299,7 +1481,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var version = reopened.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(13L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(14L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     public void Dispose()
@@ -1339,7 +1521,8 @@ public sealed class DurableCareRepositoryTests : IDisposable
         var month = int.Parse(period.AsSpan(10, 2));
         var revenue = checked(preview.TotalCents * 5 / 2);
         Assert.Equal(preview.TotalCents * 5, revenue * 2);
-        var result = await repository.RegisterCarePeriodAsync(
+        var result = await RegisterAsync(
+            repository,
             new CarePeriodInput(
                 year, month, revenue, 0, 0, 0, 0,
                 ContributorPoolBasisPoints: 4000,
@@ -1350,6 +1533,18 @@ public sealed class DurableCareRepositoryTests : IDisposable
             now);
         Assert.Equal(preview.EligibilityDate, result.Net60EligibilityDate);
         Assert.Equal(preview.TotalCents, result.AggregateContributorPoolCents);
+    }
+
+    private static async Task<CarePeriodResult> RegisterAsync(
+        DurableCareRepository repository,
+        CarePeriodInput input,
+        IReadOnlyList<ContributorUsageWeight> usage,
+        DateTimeOffset reviewedUtc)
+    {
+        var review = DurableCareRepository.ReviewCarePeriodClose(
+            input, usage, reviewedUtc);
+        return await repository.RegisterReviewedCarePeriodAsync(
+            review, true, reviewedUtc);
     }
 
     private async Task<PayoutBatchPreview> CompletePartiallyFailedPayoutAsync(

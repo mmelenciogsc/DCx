@@ -1167,7 +1167,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         command.CommandText = "PRAGMA user_version;";
         var schemaVersion = Convert.ToInt32(
             await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
-        if (schemaVersion > 13)
+        if (schemaVersion > 14)
         {
             throw new InvalidOperationException("The CARE ledger schema is newer than this application.");
         }
@@ -1395,6 +1395,11 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                     registration_sha256 = lower(registration_sha256) AND
                     registration_sha256 NOT GLOB '*[^0-9a-f]*'),
                 registered_utc TEXT NOT NULL,
+                close_review_sha256 TEXT,
+                close_approval_sha256 TEXT,
+                reviewed_utc TEXT,
+                review_expires_utc TEXT,
+                approved_utc TEXT,
                 UNIQUE(earning_year, earning_month)
             );
             CREATE TABLE IF NOT EXISTS care_contributor_allocations(
@@ -1628,6 +1633,36 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             END;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(
+            connection,
+            "care_periods",
+            "close_review_sha256",
+            "TEXT",
+            cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(
+            connection,
+            "care_periods",
+            "close_approval_sha256",
+            "TEXT",
+            cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(
+            connection,
+            "care_periods",
+            "reviewed_utc",
+            "TEXT",
+            cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(
+            connection,
+            "care_periods",
+            "review_expires_utc",
+            "TEXT",
+            cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(
+            connection,
+            "care_periods",
+            "approved_utc",
+            "TEXT",
+            cancellationToken).ConfigureAwait(false);
         await BackfillBlockedCaseReferencesAsync(
                 connection, DateTimeOffset.UtcNow, cancellationToken)
             .ConfigureAwait(false);
@@ -1639,7 +1674,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             ON webhook_event_quarantine(state, next_attempt_utc, occurred_utc, event_id);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        command.CommandText = "PRAGMA user_version = 13;";
+        command.CommandText = "PRAGMA user_version = 14;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 

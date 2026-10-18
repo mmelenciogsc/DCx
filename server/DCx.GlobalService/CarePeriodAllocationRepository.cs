@@ -6,38 +6,109 @@ using Microsoft.Data.Sqlite;
 
 namespace DCx.GlobalService;
 
+public sealed record CarePeriodCloseReview(
+    CarePeriodInput Input,
+    IReadOnlyList<ContributorUsageWeight> Usage,
+    CarePeriodResult Result,
+    DateTimeOffset ReviewedUtc,
+    DateTimeOffset ExpiresUtc,
+    string ReviewSha256);
+
 public sealed partial class DurableCareRepository
 {
     private const int MaximumCareContributorsPerPeriod = 100_000;
+    private static readonly TimeSpan CarePeriodCloseReviewLifetime = TimeSpan.FromMinutes(10);
 
-    public async Task<CarePeriodResult> RegisterCarePeriodAsync(
+    public static CarePeriodCloseReview ReviewCarePeriodClose(
         CarePeriodInput input,
         IReadOnlyList<ContributorUsageWeight> usage,
-        DateTimeOffset registeredUtc,
-        CancellationToken cancellationToken = default)
+        DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(input);
-        ArgumentNullException.ThrowIfNull(usage);
-        if (registeredUtc.Offset != TimeSpan.Zero)
-        {
-            throw new InvalidOperationException("CARE period registration requires UTC time.");
-        }
-        if (usage.Count > MaximumCareContributorsPerPeriod || usage.Any(item =>
-                item is null ||
-                string.IsNullOrWhiteSpace(item.ContributorPseudonym) ||
-                item.ContributorPseudonym.Length > 128 ||
-                item.ContributorPseudonym.Any(character =>
-                    !char.IsAsciiLetterOrDigit(character) &&
-                    character is not (':' or '.' or '_' or '-'))))
+        var canonicalUsage = CanonicalizeCareUsage(usage);
+        var result = CareAllocationCalculator.Calculate(input, canonicalUsage);
+        var reviewedUtc = now.ToUniversalTime();
+        var expiresUtc = reviewedUtc.Add(CarePeriodCloseReviewLifetime);
+        return new CarePeriodCloseReview(
+            input,
+            canonicalUsage,
+            result,
+            reviewedUtc,
+            expiresUtc,
+            CarePeriodCloseReviewSha(
+                input, canonicalUsage, result, reviewedUtc, expiresUtc));
+    }
+
+    public async Task<CarePeriodResult> RegisterReviewedCarePeriodAsync(
+        CarePeriodCloseReview review,
+        bool ownerApproved,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(review);
+        if (!ownerApproved)
         {
             throw new InvalidOperationException(
-                "The CARE contributor allocation set is invalid or exceeds its limit.");
+                "CARE period close requires explicit owner approval.");
         }
 
-        var canonicalUsage = usage
-            .OrderBy(item => item.ContributorPseudonym, StringComparer.Ordinal)
-            .ToArray();
-        var result = CareAllocationCalculator.Calculate(input, canonicalUsage);
+        var approvedUtc = now.ToUniversalTime();
+        var canonicalUsage = CanonicalizeCareUsage(review.Usage);
+        var result = CareAllocationCalculator.Calculate(review.Input, canonicalUsage);
+        if (review.ReviewedUtc.Offset != TimeSpan.Zero ||
+            review.ExpiresUtc.Offset != TimeSpan.Zero ||
+            review.ExpiresUtc - review.ReviewedUtc != CarePeriodCloseReviewLifetime ||
+            approvedUtc < review.ReviewedUtc || approvedUtc > review.ExpiresUtc ||
+            !CarePeriodResultsEqual(review.Result, result) ||
+            !PayoutContractValidation.IsLowerSha256(review.ReviewSha256))
+        {
+            throw new InvalidOperationException(
+                "The CARE period close review is invalid, stale or expired.");
+        }
+
+        var expectedReviewSha = CarePeriodCloseReviewSha(
+            review.Input,
+            canonicalUsage,
+            result,
+            review.ReviewedUtc,
+            review.ExpiresUtc);
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(expectedReviewSha),
+                Convert.FromHexString(review.ReviewSha256)))
+        {
+            throw new InvalidOperationException(
+                "The CARE period close review digest is invalid.");
+        }
+        var approvalSha = CarePeriodCloseApprovalSha(
+            review.ReviewSha256,
+            review.ReviewedUtc,
+            review.ExpiresUtc,
+            approvedUtc);
+
+        return await RegisterCarePeriodInternalAsync(
+                review.Input,
+                canonicalUsage,
+                result,
+                review.ReviewedUtc,
+                review.ExpiresUtc,
+                review.ReviewSha256,
+                approvalSha,
+                approvedUtc,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<CarePeriodResult> RegisterCarePeriodInternalAsync(
+        CarePeriodInput input,
+        IReadOnlyList<ContributorUsageWeight> canonicalUsage,
+        CarePeriodResult result,
+        DateTimeOffset reviewedUtc,
+        DateTimeOffset reviewExpiresUtc,
+        string closeReviewSha256,
+        string closeApprovalSha256,
+        DateTimeOffset approvedUtc,
+        CancellationToken cancellationToken)
+    {
         var periodId = PayoutBatchPreviewFactory.CarePeriodId(result);
         var registrationSha = CarePeriodRegistrationSha(input, canonicalUsage, result);
         await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -53,6 +124,18 @@ public sealed partial class DurableCareRepository
                 ValidateStoredCarePeriod(existing, input, result, registrationSha);
                 await ValidateStoredCareAllocationsAsync(
                         connection, transaction, periodId, canonicalUsage, result, cancellationToken)
+                    .ConfigureAwait(false);
+                await BindOrValidateStoredCarePeriodCloseReviewAsync(
+                        connection,
+                        transaction,
+                        periodId,
+                        existing,
+                        reviewedUtc,
+                        reviewExpiresUtc,
+                        closeReviewSha256,
+                        closeApprovalSha256,
+                        approvedUtc,
+                        cancellationToken)
                     .ConfigureAwait(false);
                 if (result.AggregateContributorPoolCents > 0)
                 {
@@ -88,11 +171,14 @@ public sealed partial class DurableCareRepository
                     tax_risk_reserve_cents, contributor_pool_basis_points,
                     minimum_payout_cents, distributable_net_profit_cents,
                     contributor_pool_cents, period_close, eligibility_date,
-                    registration_sha256, registered_utc)
+                    registration_sha256, registered_utc,
+                    close_review_sha256, close_approval_sha256,
+                    reviewed_utc, review_expires_utc, approved_utc)
                 VALUES(
                     $period, $year, $month,
                     $revenue, $refunds, $fees, $operating, $reserve, $basis,
-                    $minimum, $net, $pool, $close, $eligibility, $sha, $registered);
+                    $minimum, $net, $pool, $close, $eligibility, $sha, $registered,
+                    $review_sha, $approval_sha, $reviewed, $review_expires, $approved);
                 """;
             command.Parameters.AddWithValue("$period", periodId);
             command.Parameters.AddWithValue("$year", input.Year);
@@ -109,7 +195,12 @@ public sealed partial class DurableCareRepository
             command.Parameters.AddWithValue("$close", result.EarningPeriodClose.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             command.Parameters.AddWithValue("$eligibility", result.Net60EligibilityDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             command.Parameters.AddWithValue("$sha", registrationSha);
-            command.Parameters.AddWithValue("$registered", registeredUtc.ToString("O"));
+            command.Parameters.AddWithValue("$registered", approvedUtc.ToString("O"));
+            command.Parameters.AddWithValue("$review_sha", closeReviewSha256);
+            command.Parameters.AddWithValue("$approval_sha", closeApprovalSha256);
+            command.Parameters.AddWithValue("$reviewed", reviewedUtc.ToString("O"));
+            command.Parameters.AddWithValue("$review_expires", reviewExpiresUtc.ToString("O"));
+            command.Parameters.AddWithValue("$approved", approvedUtc.ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
             var allocations = result.Allocations.ToDictionary(
@@ -139,7 +230,7 @@ public sealed partial class DurableCareRepository
                 _ = await PostInternalAsync(
                         connection,
                         transaction,
-                        CareLedgerJournal.ContributorAccrual(periodId, result, registeredUtc),
+                        CareLedgerJournal.ContributorAccrual(periodId, result, approvedUtc),
                         cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -324,6 +415,135 @@ public sealed partial class DurableCareRepository
             Result = result,
         })));
 
+    private static string CarePeriodCloseReviewSha(
+        CarePeriodInput input,
+        IReadOnlyList<ContributorUsageWeight> usage,
+        CarePeriodResult result,
+        DateTimeOffset reviewedUtc,
+        DateTimeOffset expiresUtc) =>
+        Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            SchemaVersion = 1,
+            Input = input,
+            Usage = usage,
+            Result = result,
+            ReviewedUtc = reviewedUtc.ToUniversalTime(),
+            ExpiresUtc = expiresUtc.ToUniversalTime(),
+        })));
+
+    private static string CarePeriodCloseApprovalSha(
+        string reviewSha256,
+        DateTimeOffset reviewedUtc,
+        DateTimeOffset expiresUtc,
+        DateTimeOffset approvedUtc) =>
+        Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            SchemaVersion = 1,
+            ReviewSha256 = reviewSha256,
+            ReviewedUtc = reviewedUtc.ToUniversalTime(),
+            ExpiresUtc = expiresUtc.ToUniversalTime(),
+            ApprovedUtc = approvedUtc.ToUniversalTime(),
+        })));
+
+    private static ContributorUsageWeight[] CanonicalizeCareUsage(
+        IReadOnlyList<ContributorUsageWeight> usage)
+    {
+        ArgumentNullException.ThrowIfNull(usage);
+        if (usage.Count > MaximumCareContributorsPerPeriod || usage.Any(item =>
+                item is null ||
+                string.IsNullOrWhiteSpace(item.ContributorPseudonym) ||
+                item.ContributorPseudonym.Length > 128 ||
+                item.ContributorPseudonym.Any(character =>
+                    !char.IsAsciiLetterOrDigit(character) &&
+                    character is not (':' or '.' or '_' or '-'))))
+        {
+            throw new InvalidOperationException(
+                "The CARE contributor allocation set is invalid or exceeds its limit.");
+        }
+
+        return usage
+            .OrderBy(item => item.ContributorPseudonym, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static bool CarePeriodResultsEqual(
+        CarePeriodResult? left,
+        CarePeriodResult right) =>
+        left is not null &&
+        left.Year == right.Year &&
+        left.Month == right.Month &&
+        left.DistributableNetProfitCents == right.DistributableNetProfitCents &&
+        left.AggregateContributorPoolCents == right.AggregateContributorPoolCents &&
+        left.EarningPeriodClose == right.EarningPeriodClose &&
+        left.Net60EligibilityDate == right.Net60EligibilityDate &&
+        left.Allocations is not null &&
+        left.Allocations.SequenceEqual(right.Allocations);
+
+    private static async Task BindOrValidateStoredCarePeriodCloseReviewAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string periodId,
+        StoredCarePeriod stored,
+        DateTimeOffset reviewedUtc,
+        DateTimeOffset reviewExpiresUtc,
+        string closeReviewSha256,
+        string closeApprovalSha256,
+        DateTimeOffset approvedUtc,
+        CancellationToken cancellationToken)
+    {
+        var closeFields = new[]
+        {
+            stored.CloseReviewSha256,
+            stored.CloseApprovalSha256,
+            stored.ReviewedUtc,
+            stored.ReviewExpiresUtc,
+            stored.ApprovedUtc,
+        };
+        if (closeFields.All(value => value is null))
+        {
+            var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                UPDATE care_periods
+                SET close_review_sha256 = $review_sha,
+                    close_approval_sha256 = $approval_sha,
+                    reviewed_utc = $reviewed,
+                    review_expires_utc = $review_expires,
+                    approved_utc = $approved
+                WHERE period_id = $period
+                  AND close_review_sha256 IS NULL
+                  AND close_approval_sha256 IS NULL
+                  AND reviewed_utc IS NULL
+                  AND review_expires_utc IS NULL
+                  AND approved_utc IS NULL;
+                """;
+            command.Parameters.AddWithValue("$review_sha", closeReviewSha256);
+            command.Parameters.AddWithValue("$approval_sha", closeApprovalSha256);
+            command.Parameters.AddWithValue("$reviewed", reviewedUtc.ToString("O"));
+            command.Parameters.AddWithValue("$review_expires", reviewExpiresUtc.ToString("O"));
+            command.Parameters.AddWithValue("$approved", approvedUtc.ToString("O"));
+            command.Parameters.AddWithValue("$period", periodId);
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+            {
+                throw new InvalidOperationException(
+                    "The CARE period close approval conflicted during registration.");
+            }
+
+            return;
+        }
+
+        if (closeFields.Any(value => value is null) ||
+            !string.Equals(stored.CloseReviewSha256, closeReviewSha256, StringComparison.Ordinal) ||
+            !string.Equals(stored.ReviewedUtc, reviewedUtc.ToString("O"), StringComparison.Ordinal) ||
+            !string.Equals(stored.ReviewExpiresUtc, reviewExpiresUtc.ToString("O"), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The CARE earning period conflicts with its approved close review.");
+        }
+
+        ValidateStoredCarePeriodCloseApproval(stored);
+    }
+
     private static async Task<CarePeriodResult> ValidateRegisteredCarePeriodIntegrityAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -401,6 +621,7 @@ public sealed partial class DurableCareRepository
         await ValidateStoredCareAllocationsAsync(
                 connection, transaction, periodId, usage, result, cancellationToken)
             .ConfigureAwait(false);
+        ValidateStoredCarePeriodCloseReview(stored, input, usage, result);
         return result;
     }
 
@@ -418,7 +639,9 @@ public sealed partial class DurableCareRepository
                    approved_operating_cost_cents, tax_risk_reserve_cents,
                    contributor_pool_basis_points, minimum_payout_cents,
                    distributable_net_profit_cents, contributor_pool_cents,
-                   period_close, eligibility_date, registration_sha256, registered_utc
+                   period_close, eligibility_date, registration_sha256, registered_utc,
+                   close_review_sha256, close_approval_sha256,
+                   reviewed_utc, review_expires_utc, approved_utc
             FROM care_periods WHERE period_id = $period;
             """;
         command.Parameters.AddWithValue("$period", periodId);
@@ -428,7 +651,12 @@ public sealed partial class DurableCareRepository
                 reader.GetInt32(0), reader.GetInt32(1), reader.GetInt64(2), reader.GetInt64(3),
                 reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6), reader.GetInt32(7),
                 reader.GetInt64(8), reader.GetInt64(9), reader.GetInt64(10), reader.GetString(11),
-                reader.GetString(12), reader.GetString(13), reader.GetString(14))
+                reader.GetString(12), reader.GetString(13), reader.GetString(14),
+                reader.IsDBNull(15) ? null : reader.GetString(15),
+                reader.IsDBNull(16) ? null : reader.GetString(16),
+                reader.IsDBNull(17) ? null : reader.GetString(17),
+                reader.IsDBNull(18) ? null : reader.GetString(18),
+                reader.IsDBNull(19) ? null : reader.GetString(19))
             : null;
     }
 
@@ -506,6 +734,85 @@ public sealed partial class DurableCareRepository
         }
     }
 
+    private static void ValidateStoredCarePeriodCloseReview(
+        StoredCarePeriod stored,
+        CarePeriodInput input,
+        IReadOnlyList<ContributorUsageWeight> usage,
+        CarePeriodResult result)
+    {
+        if (!PayoutContractValidation.IsLowerSha256(stored.CloseReviewSha256) ||
+            !DateTimeOffset.TryParse(
+                stored.ReviewedUtc,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var reviewedUtc) ||
+            !DateTimeOffset.TryParse(
+                stored.ReviewExpiresUtc,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var expiresUtc) ||
+            !DateTimeOffset.TryParse(
+                stored.ApprovedUtc,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var approvedUtc) ||
+            reviewedUtc.Offset != TimeSpan.Zero ||
+            expiresUtc.Offset != TimeSpan.Zero ||
+            approvedUtc.Offset != TimeSpan.Zero ||
+            expiresUtc - reviewedUtc != CarePeriodCloseReviewLifetime ||
+            approvedUtc < reviewedUtc || approvedUtc > expiresUtc)
+        {
+            throw new InvalidOperationException(
+                "The registered CARE period lacks a valid approved close review.");
+        }
+
+        ValidateStoredCarePeriodCloseApproval(stored);
+
+        var expected = CarePeriodCloseReviewSha(
+            input, usage, result, reviewedUtc, expiresUtc);
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(expected),
+                Convert.FromHexString(stored.CloseReviewSha256!)))
+        {
+            throw new InvalidOperationException(
+                "The registered CARE period close review failed integrity validation.");
+        }
+    }
+
+    private static void ValidateStoredCarePeriodCloseApproval(StoredCarePeriod stored)
+    {
+        if (!PayoutContractValidation.IsLowerSha256(stored.CloseApprovalSha256) ||
+            !DateTimeOffset.TryParse(
+                stored.ReviewedUtc,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var reviewedUtc) ||
+            !DateTimeOffset.TryParse(
+                stored.ReviewExpiresUtc,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var expiresUtc) ||
+            !DateTimeOffset.TryParse(
+                stored.ApprovedUtc,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var approvedUtc))
+        {
+            throw new InvalidOperationException(
+                "The registered CARE period lacks a valid close approval binding.");
+        }
+
+        var expected = CarePeriodCloseApprovalSha(
+            stored.CloseReviewSha256!, reviewedUtc, expiresUtc, approvedUtc);
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(expected),
+                Convert.FromHexString(stored.CloseApprovalSha256!)))
+        {
+            throw new InvalidOperationException(
+                "The registered CARE period close approval failed integrity validation.");
+        }
+    }
+
     private sealed record StoredCarePeriod(
         int Year,
         int Month,
@@ -521,5 +828,10 @@ public sealed partial class DurableCareRepository
         string PeriodClose,
         string EligibilityDate,
         string RegistrationSha256,
-        string RegisteredUtc);
+        string RegisteredUtc,
+        string? CloseReviewSha256,
+        string? CloseApprovalSha256,
+        string? ReviewedUtc,
+        string? ReviewExpiresUtc,
+        string? ApprovedUtc);
 }
