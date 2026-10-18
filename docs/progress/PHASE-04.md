@@ -1,7 +1,7 @@
 # P04 — OpenAI identity and local Codex integration
 
 - Status: Complete (offline/native mock gate; external account invocation unverified)
-- Implementation commits: `8ba629c`, `e559975`; current follow-up commit recorded by the commit containing this file
+- Implementation commits: `8ba629c`, `e559975`, `5873218`
 
 Commercial ChatGPT sign-in for DCx distribution is a strict eligibility blocker. API-key mode remains independent.
 
@@ -55,6 +55,7 @@ Native Windows 11 build/test after final hardening:
 - P00 smoke and P01–P03 native UIA regressions passed.
 - P04 UIA E2E passed: blocked ChatGPT state/reason, isolated test runtime, JSONL connection, one selected model, streamed response and explicit disconnect.
 - Active-turn cancellation waits for the exact in-flight turn before requesting interruption, then proves the turn is removed. A later expanded-suite run exposed the remaining notification-before-response race; the fixture now forces that ordering, and the two P04 process tests passed six consecutive focused runs after identity retention was hardened. The current committed-source native validator is recorded with the encompassing milestone evidence.
+- The first expanded pre-commit run after the P06 observer change passed 494/495: `Client_CancellationInterruptsOnlyActiveTurn` received `TaskCanceledException` while waiting for `turn/start`. The deterministic delayed-response fixture reproduced that ordering. After `5873218`, the exact-commit full suite passed 495/495 and `validate-p04.ps1` passed its native offline UIA flow. This non-zero observation remains part of the record.
 - Secret-pattern filename scan found no matches outside ignored build/test artifacts.
 
 ## Changed files
