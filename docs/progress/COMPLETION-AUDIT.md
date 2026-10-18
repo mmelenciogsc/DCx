@@ -22,7 +22,7 @@ Authoritative inputs: `DCx_Codex_Handoff_Kit/README.md`, `DCX_PRODUCT_ARCHITECTU
 | P11 | Subscription/webhook/accounting/CARE/Net60/holds/refunds, payout sandbox, immutable audit and transparent contributor status | [PHASE-11.md](PHASE-11.md) | Partial protected local sandbox. Schema-v14 close approval, exact allocations/liability, recipient workflow, operations, subject-bound transport and an isolated real ledger-to-native-window composition pass 122/122 plus native UIA. Production contributor identity/TLS/deployment, credentials, exact plan, merchant/recipient eligibility, production policy and authorized sandbox acceptance remain blocked. |
 | P12 | Reproducible full vertical flows plus separate live/human acceptance | [PHASE-12.md](PHASE-12.md) | Partial. Nine safe fixtures pass. The Facebook-shaped fixture now proves explicit login handoff, user-selected current-post inspection and blocked-page no-fabrication in the real native/shared-viewport workflow, but makes no live request. Live Facebook/QuickBooks/YouTube, real signed install, deployed CCB and PayPal acceptance remain absent. |
 | P13 | Signed install/update/uninstall lifecycle on clean Windows, WebView2 bootstrap, scans, recovery and human AT signoff | [PHASE-13.md](PHASE-13.md) | Partial. Reproducible unsigned artifacts, Defender/NuGet/trust denial, offline startup and recovery pass. Signing identity, clean VM, independent assessment and human AT remain blocked. |
-| P14 | Opt-in pilot, admin/metrics/runbooks/policies/approvals, all major issues triaged and explicit go/no-go | [PHASE-14.md](PHASE-14.md) | Local controls pass, but pilot/admin/provider/policy gates remain incomplete. Current decision is `NO_GO`; seven blockers and production activation false. |
+| P14 | Opt-in pilot, admin/metrics/runbooks/policies/approvals, all major issues triaged and explicit go/no-go | [PHASE-14.md](PHASE-14.md) | Local aggregate consent/withdrawal controls, minimized storage, triage and `NO_GO` pass. No event source, transport, enrollment, pilot admin/provider/policy/human-AT approval or production activation exists; seven blockers remain. |
 
 ## Cross-cutting audit
 
@@ -34,12 +34,12 @@ Authoritative inputs: `DCx_Codex_Handoff_Kit/README.md`, `DCX_PRODUCT_ARCHITECTU
 
 ## Current exact-source checkpoint
 
-- Implementation: `94a0f6b`.
-- Full Windows suite: 561 passed, 0 failed, 0 skipped; zero build warnings/errors.
+- Product implementation: `9745e33`; current evidence-retention/validation source: `7f6e707`.
+- Full Windows suite: 562 passed, 0 failed, 0 skipped; zero build warnings/errors.
 - P06: `artifacts/test-results/p06-2929e1512eb74c9090579f5975e9cdf3/`; 206/206, six hardware contracts, five mandatory sequencing contracts, three runtime-resource/unload contracts, real installed-GPU vision and verified unload, with no dependency transfer/install.
 - P11: `artifacts/test-results/p11-0d4a701ca5614522af687bd42a8064a5/`; 122/122 plus generated and authenticated-ledger native UIA.
 - P12: `artifacts/test-results/p12-1ac53524cc9644e294d7d660736b2025/`; nine composed fixtures and zero production actions. Focused Facebook/XLSX evidence: `p12-integrations-294bb5ae0fee4aafa9e23af092de14fb/`; 17/17 selected tests, including 15 Facebook policy cases, plus native UIA.
-- P13: `artifacts/test-results/p13-72a088f95d064253bf89fa26ee35e837/`; 23/23 reliability, 21/21 trust, Defender clean, NuGet advisories 0 and unsigned trust denied.
-- P14: `artifacts/test-results/p14-e482fdde25e141f3ac7ee4efbb21d09e/`; 10/10, seven blockers, `NO_GO`, activation false.
+- P13: `artifacts/test-results/p13-127f9d78c5a5497db550645ebbac38ce/`; 23/23 reliability, 21/21 trust, Defender clean, NuGet advisories 0 and unsigned trust denied.
+- P14: `artifacts/test-results/p14-b82cf85071ef4d4ba449b44e2f20a91a/`; 11/11 plus retained native local consent enable/withdrawal/focus/access-key UIA evidence, zero event sources/transfers, seven blockers, `NO_GO`, activation false.
 
 Evidence directories are ignored build artifacts and are intentionally not committed. The phase records are the durable reproduction index.

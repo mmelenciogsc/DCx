@@ -18,4 +18,4 @@ Consent records contain only enabled state, notice version and UTC recording tim
 - Prompt, response, URL, path, keystroke, account and user identifiers have no storage field in this subsystem.
 - Ratio metrics can be reconstructed from bounded zero/one samples; token routes and reviewed failure classes retain limited aggregate diagnostic value.
 - Opt-out has an immediate local purge behavior.
-- An approved privacy notice, accessible consent/withdrawal UI, retention policy, pilot enrollment, administration and explicit activation remain separate blockers.
+- ADR 0087 adds automated native evidence for local-only consent and withdrawal/purge. Human assistive-technology acceptance, an approved production privacy notice, retention policy, pilot enrollment, administration and explicit activation remain separate blockers.

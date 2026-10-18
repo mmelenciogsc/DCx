@@ -32,3 +32,17 @@ These window-local access keys are available only in **Local models**. Approval 
 | `Alt+R` | Recover strict abandoned partial-transfer directories under the DCx data lease. |
 
 Route observation creates only a non-persisted two-hour exact query-free review. Payload approval remains separately unchecked. These actions do not install, register, select or execute transferred content. Human JAWS/NVDA/Narrator conflict testing remains required.
+
+## Release readiness privacy access keys
+
+These window-local keys are available only in **Release readiness**. Both approvals start unchecked and reset after use.
+
+| Shortcut | Action |
+|---|---|
+| `Alt+I` | Check or clear the local aggregate-recording consent. |
+| `Alt+E` | Enable local aggregate recording after consent. This connects no event source or transport. |
+| `Alt+A` | Check or clear the separate permanent-purge acknowledgment. |
+| `Alt+S` | Stop local recording and permanently purge retained aggregate buckets after acknowledgment. |
+| `Alt+R` | Refresh the read-only release decision, blockers, metric definitions and local consent state. |
+
+No key enrolls a pilot, sends metrics or activates production. Human JAWS/NVDA/Narrator conflict testing remains required.

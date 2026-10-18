@@ -30,6 +30,14 @@ cd /mnt/d/DCx
 
 Build outputs are under each project's `bin/Release` directory and are ignored by Git. Do not commit credentials, local browser profiles, package caches, signing keys, or test-result artifacts.
 
+## Local readiness and metric privacy controls
+
+Open **Release readiness** from the main window or launch `DCx.exe --readiness`. The decision, blockers and privacy-reviewed metric definitions are read-only and remain `NO_GO` while a critical or major blocker exists. There is no production activation action.
+
+Local aggregate recording defaults off. The privacy group states the exact notice-version-1 exclusions. **Enable local aggregate recording** remains disabled until its separate consent is checked and resets that approval after use. **Stop recording and purge local aggregates** has a different unchecked approval and atomically disables recording and removes all retained aggregate buckets; an older client preserves the highest stored notice version so withdrawal cannot be blocked by version rollback protection. The status reports only the retained daily-bucket count.
+
+These controls do not connect a product event source, export, transport, pilot enrollment or production activation. Do not add any of those paths without approved privacy/retention policy, explicit scope-specific consent, security review, human JAWS/NVDA/Narrator acceptance and a revised P14 gate.
+
 ## Already-installed local models
 
 The current P06 gate expects a Windows-native Ollama service at the loopback origin `http://localhost:11434/`. DCx never acquires a dependency automatically and does not install or retag models. In the native app, open **Local models**, select a unique name ending in its matching SHA-256 digest, read the complete license text, check the default-off approval, and choose the eligible vision or embedding role. The per-user selection can be cleared independently for each role.

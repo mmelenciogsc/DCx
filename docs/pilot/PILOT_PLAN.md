@@ -2,7 +2,7 @@
 
 Status: draft only. The current automated decision is `NO_GO`; no pilot enrollment or telemetry collection is authorized.
 
-The implemented native readiness dashboard is read-only and consumes the same blocker policy as the JSON report. It cannot activate a pilot or production, enroll a participant, collect or transmit an event, publish content or initiate a payment.
+The implemented native readiness dashboard consumes the same read-only blocker policy as the JSON report. Its separate local privacy group can enable the existing aggregate-only store or stop and purge it after distinct unchecked approvals. Those settings cannot activate a pilot or production, enroll a participant, collect an event by themselves, transmit data, publish content or initiate a payment.
 
 ## Entry conditions
 
@@ -23,7 +23,7 @@ Each participant receives an accessible scope statement, data disclosure, stop/w
 
 ## Metrics
 
-The implementation defines 12 aggregate metrics: completion rate, duration, input/output token totals, tested CCB reuse ratio, retrieval success, crashes, user-control revocations, false agent claims, accessibility failures, global-sync bytes and CARE reconciliation variance. A default-off local store accepts only these keys and closed enum dimensions, aggregates immediately by UTC day, and purges on opt-out. It has no product event or network wiring. Metrics contain no prompt, output body, URL, local path, keystroke, field value, provider account identifier or user identifier.
+The implementation defines 12 aggregate metrics: completion rate, duration, input/output token totals, tested CCB reuse ratio, retrieval success, crashes, user-control revocations, false agent claims, accessibility failures, global-sync bytes and CARE reconciliation variance. A default-off local store accepts only these keys and closed enum dimensions, aggregates immediately by UTC day, and purges on opt-out. The native UI exposes the exact local notice, retained-bucket count, separate one-use enable consent and separate stop/purge acknowledgment. It has no product event or network wiring. Metrics contain no prompt, output body, URL, local path, keystroke, field value, provider account identifier or user identifier.
 
 ## Stop conditions
 

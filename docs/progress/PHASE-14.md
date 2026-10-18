@@ -1,7 +1,8 @@
 # P14 — Pilot and release readiness
 
 - Status: BLOCKED / NO_GO (local readiness controls pass; pilot and production activation are off)
-- Implementation commits through current exact source: `94a0f6b`
+- Product implementation commit: `9745e33`
+- Evidence-retention/validation commit and current exact source: `7f6e707`
 - Documentation commit: recorded by the commit containing this file
 
 No pilot was started, no telemetry was collected, no user was enrolled, and no production service or payment was activated.
@@ -17,8 +18,11 @@ No pilot was started, no telemetry was collected, no user was enrolled, and no p
 - Consent notice versions cannot roll back. Opt-out atomically disables recording and purges existing local aggregates.
 - Atomic JSON readiness report utility and native validation script.
 - Seven current critical/major blockers are assigned to owner roles with next actions and evidence.
-- Native keyboard- and UIA-accessible read-only readiness dashboard launched from the main window or with `DCx.exe --readiness`.
+- Native keyboard- and UIA-accessible readiness dashboard launched from the main window or with `DCx.exe --readiness`; the release decision, blockers and metric definitions remain read-only.
 - The JSON report and native dashboard consume the same immutable current-readiness policy, preventing blocker-list drift. The dashboard exposes no production-activation action.
+- A separate local privacy group displays the complete minimized-data notice and current daily-aggregate bucket count. Enabling requires an initially unchecked one-use consent; stopping and permanent purge require a separate initially unchecked one-use acknowledgment. Both results receive focus, five access keys are distinct, and actions are mutually excluded while running.
+- Local opt-out atomically disables recording and purges all aggregates even when an older client supplies an earlier notice version; the highest recorded notice version is preserved rather than rolled back. Enabling still rejects notice-version rollback.
+- These controls connect no product event source, network transport, pilot enrollment, export, production action or activation authority.
 - Pilot and incident-response runbooks describe opt-in, stop conditions, data minimization, escalation and rollback.
 
 ## Reproduction
@@ -31,20 +35,24 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14
 ## Measured result
 
 - Locked Release build: 0 warnings, 0 errors.
-- P14 exact-namespace release/readiness tests: passed 10, failed 0, skipped 0; about 1 second. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
-- Current implementation-source expanded full suite: passed 561, failed 0, skipped 0; native Windows with zero build warnings/errors.
+- P14 exact-namespace release/readiness tests: passed 11, failed 0, skipped 0. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
+- Current exact-source expanded full suite: passed 562, failed 0, skipped 0; native Windows with zero build warnings/errors.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
 - Production activation approved: false.
 - Decision: `NO_GO`.
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
-- Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled consent state, blocker list, metric-definition list and refresh action. The validator confirmed that no control named `Activate production` exists.
+- Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled/zero-bucket consent state, blocker list, metric-definition list and refresh action. It proved separate initially unchecked opt-in and stop/purge approvals, successful local enable, focused completion, approval reset, successful stop/purge back to zero buckets, focused purge completion and five distinct access keys. The validator confirmed that no control named `Activate production` exists.
 - The P11 readiness gate was rerun after composing the default-off contributor process transport with the native dashboard under a separate validation-only startup gate. It proves a read-only digest-authenticated token-to-subject mapping, operator/contributor role separation, hardened literal-loopback transport, real ledger projection and native focus/keyboard behavior. P11 remains blocking because this is not production contributor identity, MFA/TLS/credential rotation/multi-subject authorization/deployment, and production close/adjustment/hold/dispute/tax authority, exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider plus closure/requeue policy, centralized audit, deployed distributed fencing, external alert delivery/human acknowledgment/escalation and authorized provider acceptance remain absent.
-- Evidence: `artifacts/test-results/p14-e482fdde25e141f3ac7ee4efbb21d09e/go-no-go.json` with `p14-readiness.trx` beside it, generated from exact implementation source `94a0f6b` and intentionally not committed. The exact-source full suite passes 561/561 with zero build warnings/errors.
+- Evidence: `artifacts/test-results/p14-b82cf85071ef4d4ba449b44e2f20a91a/`, generated from exact source `7f6e707` and intentionally not committed. It contains `go-no-go.json`, `p14-readiness.trx` and the retained `native-readiness-uia.json` consent/focus/access-key/privacy-boundary transcript. The exact-source full suite passes 562/562 with zero build warnings/errors.
 
 ## Changed files in the latest milestone
 
+- Local-only consent state/count and rollback-safe withdrawal: `src/DCx.Core/Release/PilotMetricAggregateStore.cs` and `tests/DCx.Core.Tests/Release/PilotMetricAggregateStoreTests.cs`.
+- Accessible local privacy controls, stable statuses and focus: `src/DCx.Desktop/ReadinessWindow.xaml` and `src/DCx.Desktop/ReadinessWindow.xaml.cs`.
+- Native approval/enable/stop/purge/focus/access-key/activation-absence gate and retained machine-readable UIA transcript: `scripts/validate-p14.ps1`.
+- Decision and human-AT boundary: `docs/architecture/adr/0087-local-only-pilot-metric-consent-controls.md` and `docs/accessibility/P14_PILOT_PRIVACY_CHECKLIST.md`.
 - Shared policy and tests: `src/DCx.Core/Release/ReleaseReadiness.cs`, `tests/DCx.Core.Tests/Release/ReleaseReadinessTests.cs`, `tests/DCx.ReadinessReport/Program.cs`.
 - Native accessible UI: `src/DCx.Desktop/ReadinessWindow.xaml`, `src/DCx.Desktop/ReadinessWindow.xaml.cs`, `src/DCx.Desktop/App.xaml.cs`, `src/DCx.Desktop/MainWindow.xaml`, `src/DCx.Desktop/MainWindow.xaml.cs`.
 - Reproducible UIA gate: `scripts/validate-p14.ps1`.
@@ -54,5 +62,5 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14
 
 - P06 transcription/embedding backend gate, P09 Compose gate, P10 production CCB isolation/deployment gate, P11 exact-plan provisioning/credentialed PayPal acceptance/provider eligibility and verification/closure/requeue-policy/authenticated-transport/distributed-fencing/production-scheduling/external-notification gates, P12 live/human acceptance and P13 signed installer/security/human-AT gates are unresolved.
 - Privacy notice, terms, CARE/commission policy, provider distribution approvals and legal/compliance review are not approved.
-- The readiness dashboard is local and read-only; it is not a pilot admin console. No enrollment system, approved accessible consent/withdrawal UI, network metric transport, support staffing or incident exercise exists. The local versioned consent record and aggregate store are not wired to product event collection.
+- The readiness dashboard now has automated evidence for accessible local aggregate-consent enable and withdrawal/purge, but it is not a pilot admin console or approved pilot enrollment flow. The notice and interaction still require human JAWS/NVDA/Narrator and legal/privacy approval. No enrollment system, product event source, network metric transport, final retention policy, support staffing or incident exercise exists.
 - A staged pilot requires explicit owner approval after blocker closure. Production activation remains off by construction in this report.

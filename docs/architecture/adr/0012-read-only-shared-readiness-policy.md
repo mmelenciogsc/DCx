@@ -1,6 +1,6 @@
 # ADR 0012: Read-only shared readiness policy
 
-- Status: Accepted for local controls
+- Status: Accepted for shared readiness policy; consent-mutation prohibition superseded by ADR 0087
 - Date: 2026-10-17
 
 ## Context
@@ -12,6 +12,8 @@ Release blockers must be understandable through the accessible Windows UI as wel
 Keep the current triaged blocker set in one immutable core policy. The atomic JSON reporter and native WPF readiness dashboard evaluate that same policy. The dashboard is keyboard- and UIA-accessible, reads only local readiness and aggregate-consent state, and offers refresh only.
 
 The dashboard contains no production activation, pilot enrollment, metric consent mutation, event collection, network transport, publishing or payment action. A `GO` decision still requires every critical/major blocker to be validated and a separate explicit production-activation approval.
+
+ADR 0087 later permits only local aggregate-consent enable and atomic stop/purge controls in a separate privacy group. The readiness decision and evidence remain read-only, and the new controls add no event source, enrollment, network transport or production authority.
 
 ## Consequences
 

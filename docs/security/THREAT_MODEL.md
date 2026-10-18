@@ -195,9 +195,10 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 
 - A `GO` decision requires zero nonvalidated critical/major issues and a separate explicit production-activation approval. Approval cannot override a blocker.
 - Readiness entries fail closed without a unique ID, owner role, next action and evidence reference. The current report assigns all seven critical/major blockers and remains `NO_GO`.
-- The JSON report and native dashboard consume the same immutable current-readiness policy. The dashboard is read-only and exposes no production-activation, enrollment, collection, publishing or payment action.
+- The JSON report and native dashboard consume the same immutable current-readiness policy. The decision, blockers and metric definitions remain read-only, and the dashboard exposes no production-activation, enrollment, collection, publishing or payment action.
 - Pilot metric storage defaults off and accepts only the 12 reviewed keys, closed enum dimensions and bounded numeric samples. SQLite stores daily count/sum/min/max aggregates, not raw events or user/content fields.
-- Versioned consent cannot roll back. Opt-out atomically disables recording and purges the local aggregates. No product event source or network transport is wired; collection still requires an approved notice, accessible enrollment/withdrawal, retention and incident procedures.
+- Enabling local recording requires a separate initially unchecked one-use consent under the displayed notice; no event is produced by that action. Stopping and permanent purge require another initially unchecked one-use acknowledgment. Actions are mutually excluded, approvals reset and focused stable results reveal no exception/path detail.
+- Enabling versioned consent cannot roll back the notice. Opt-out atomically disables recording and purges local aggregates even from an older client, while preserving the highest prior notice version. The accessible state reports only the daily aggregate-bucket count. No product event source or network transport is wired; collection still requires an approved notice, pilot enrollment, final retention and incident procedures.
 - Incident stop conditions include credential/private-data exposure, unauthorized side effects, reconciliation variance, signing failure, inaccessible critical flows and user-control safety failures.
 
 ## P11 opaque blocked-case review

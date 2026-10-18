@@ -16,4 +16,4 @@ All seven current critical/major issues are triaged to owner roles with evidence
 
 Passing local fixtures, deterministic staging and 100% triage do not make the product releasable. A future `GO` additionally requires every critical/major disposition to be validated and explicit production-activation approval.
 
-The native readiness dashboard is a read-only local view of this same blocker policy. It has no activation, enrollment, telemetry, publishing or payment control and is not a pilot administration console.
+The native readiness decision and blocker view remain read-only. A separate local-only privacy group can enable aggregate storage or stop and purge it after distinct approvals, but it connects no event source or transport and grants no activation, enrollment, publishing or payment authority. It is not a pilot administration console.
