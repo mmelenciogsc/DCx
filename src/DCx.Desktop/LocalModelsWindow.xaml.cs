@@ -1495,7 +1495,10 @@ public partial class LocalModelsWindow : Window
                         ? $"Reported graphics memory {Number(memory)} bytes from {gpu.MemorySource}. "
                         : "Reported graphics memory unavailable. ") +
                     (gpu.AvailableMemoryBytes is long available
-                        ? $"Currently available graphics memory {Number(available)} bytes from {gpu.AvailableMemorySource}."
+                        ? $"Currently available graphics memory {Number(available)} bytes from {gpu.AvailableMemorySource}. " +
+                          (gpu.LocalModelGpuAdmissionEligible
+                              ? "Eligible for local-model GPU resource admission."
+                              : "Inventory only; not eligible for local-model GPU resource admission without a validated compute backend.")
                         : "Current usable graphics-memory telemetry unavailable; GPU model selection fails closed.")));
         return
             $"Hardware profile. Captured UTC {profile.CapturedUtc:O}. " +
@@ -1504,7 +1507,7 @@ public partial class LocalModelsWindow : Window
             $"Physical memory {Number(profile.PhysicalMemoryBytes)} bytes. Available memory {Number(profile.AvailableMemoryBytes)} bytes.\n" +
             $"Application-data storage {Number(profile.StorageTotalBytes)} total bytes. {Number(profile.StorageAvailableBytes)} available bytes.\n" +
             $"{graphics}\n" +
-            "This profile used native Windows kernel, read-only registry data and, when present, the NVIDIA driver telemetry library loaded only from Windows System32. No external process or network request ran. Available capacity is volatile and must be rechecked before resource-intensive work.";
+            "This profile used native Windows kernel, read-only registry data, the Windows DXGI adapter-memory budget, and, when present, the NVIDIA driver telemetry library loaded only from Windows System32. No external process or network request ran. Available capacity is volatile and must be rechecked before resource-intensive work. DXGI-only budgets remain inventory evidence until that adapter's compute backend is separately validated.";
     }
 
     private static string FormatDependencyTransferPlan(

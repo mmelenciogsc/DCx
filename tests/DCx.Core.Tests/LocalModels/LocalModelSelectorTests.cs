@@ -93,8 +93,8 @@ public sealed class LocalModelSelectorTests
             500_000_000_000,
             Array.AsReadOnly<LocalGpuProfile>(
             [
-                new("Small GPU", null, null, 4L * 1024 * 1024 * 1024, "fixture", 2L * 1024 * 1024 * 1024, "fixture live"),
-                new("Large GPU", null, null, 8_188L * 1024 * 1024, "fixture", 6_000_000_000, "fixture live"),
+                new("Small GPU", null, null, 4L * 1024 * 1024 * 1024, "fixture", 2L * 1024 * 1024 * 1024, "fixture live", true),
+                new("Large GPU", null, null, 8_188L * 1024 * 1024, "fixture", 6_000_000_000, "fixture live", true),
             ]));
 
         var selection = new LocalModelSelector().SelectForHardware(profile, Models);
@@ -103,6 +103,30 @@ public sealed class LocalModelSelectorTests
         Assert.Equal(profile.AvailableMemoryBytes, selection.AvailableSystemMemoryBytes);
         Assert.Equal("vision-4b:" + Vision4Digest, selection.Vision.Model?.Name);
         Assert.Equal("embed-small:" + EmbedSmallDigest, selection.Embedding.Model?.Name);
+    }
+
+    [Fact]
+    public void SelectForHardware_DoesNotTreatInventoryOnlyDxgiBudgetAsComputeAdmission()
+    {
+        var profile = new LocalHardwareProfile(
+            DateTimeOffset.UtcNow,
+            "Windows fixture",
+            "X64",
+            "CPU fixture",
+            8,
+            16L * 1024 * 1024 * 1024,
+            8L * 1024 * 1024 * 1024,
+            1_000_000_000_000,
+            500_000_000_000,
+            Array.AsReadOnly<LocalGpuProfile>(
+            [
+                new("Integrated GPU", "Intel", null, 8_000_000_000, "Windows DXGI local memory budget", 7_000_000_000, "Windows DXGI local memory budget"),
+            ]));
+
+        var selection = new LocalModelSelector().SelectForHardware(profile, Models);
+
+        Assert.Equal(0, selection.AvailableGraphicsMemoryBytes);
+        Assert.False(selection.Vision.IsAvailable);
     }
 
     [Fact]

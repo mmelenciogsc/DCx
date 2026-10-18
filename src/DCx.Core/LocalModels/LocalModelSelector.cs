@@ -13,7 +13,7 @@ public sealed class LocalModelSelector
         ArgumentNullException.ThrowIfNull(installedModels);
         var inventory = installedModels.Where(model => model is not null).ToArray();
         var graphicsMemory = hardware.Gpus
-            .Where(gpu => gpu.AvailableMemoryBytes is > 0)
+            .Where(gpu => gpu.LocalModelGpuAdmissionEligible && gpu.AvailableMemoryBytes is > 0)
             .Select(gpu => gpu.AvailableMemoryBytes!.Value)
             .DefaultIfEmpty(0)
             .Max();

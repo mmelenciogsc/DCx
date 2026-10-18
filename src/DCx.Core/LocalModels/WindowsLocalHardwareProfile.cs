@@ -13,7 +13,8 @@ public sealed record LocalGpuProfile(
     long? ReportedMemoryBytes,
     string? MemorySource,
     long? AvailableMemoryBytes = null,
-    string? AvailableMemorySource = null);
+    string? AvailableMemorySource = null,
+    bool LocalModelGpuAdmissionEligible = false);
 
 public sealed record LocalHardwareProfile(
     DateTimeOffset CapturedUtc,
@@ -107,7 +108,8 @@ public sealed class LocalHardwareProfiler
                 ValidateGpuMemory(rawGpu.ReportedMemoryBytes),
                 ValidateOptionalText(rawGpu.MemorySource, 64, "graphics memory source"),
                 ValidateAvailableGpuMemory(rawGpu.AvailableMemoryBytes),
-                ValidateOptionalText(rawGpu.AvailableMemorySource, 64, "available graphics memory source"));
+                ValidateOptionalText(rawGpu.AvailableMemorySource, 64, "available graphics memory source"),
+                rawGpu.LocalModelGpuAdmissionEligible);
             if ((gpu.ReportedMemoryBytes is null) != (gpu.MemorySource is null))
             {
                 throw new InvalidOperationException("Graphics memory and its source must be reported together.");
@@ -119,6 +121,10 @@ public sealed class LocalHardwareProfiler
             if (gpu.AvailableMemoryBytes is not null && gpu.ReportedMemoryBytes is null)
             {
                 throw new InvalidOperationException("Available graphics memory requires a reported total.");
+            }
+            if (gpu.LocalModelGpuAdmissionEligible && gpu.AvailableMemoryBytes is null)
+            {
+                throw new InvalidOperationException("Local-model GPU admission requires current available-memory telemetry.");
             }
             if (gpu.AvailableMemoryBytes is long availableGraphicsMemory &&
                 gpu.ReportedMemoryBytes is long reportedGraphicsMemory &&
@@ -133,7 +139,8 @@ public sealed class LocalHardwareProfiler
                 gpu.ReportedMemoryBytes?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
                 gpu.MemorySource ?? string.Empty,
                 gpu.AvailableMemoryBytes?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
-                gpu.AvailableMemorySource ?? string.Empty);
+                gpu.AvailableMemorySource ?? string.Empty,
+                gpu.LocalModelGpuAdmissionEligible.ToString(System.Globalization.CultureInfo.InvariantCulture));
             if (identities.Add(identity)) gpus.Add(gpu);
         }
 
@@ -204,15 +211,19 @@ public sealed class WindowsLocalHardwareProfileSource : ILocalHardwareProfileSou
     private const string VideoRegistryPath = @"SYSTEM\CurrentControlSet\Control\Video";
     private const string CpuRegistryPath = @"HARDWARE\DESCRIPTION\System\CentralProcessor\0";
     private readonly INvidiaGpuTelemetrySource nvidiaTelemetry;
+    private readonly IDxgiGpuTelemetrySource dxgiTelemetry;
 
     public WindowsLocalHardwareProfileSource()
-        : this(new NvidiaNvmlGpuTelemetrySource())
+        : this(new NvidiaNvmlGpuTelemetrySource(), new DxgiGpuTelemetrySource())
     {
     }
 
-    internal WindowsLocalHardwareProfileSource(INvidiaGpuTelemetrySource nvidiaTelemetry)
+    internal WindowsLocalHardwareProfileSource(
+        INvidiaGpuTelemetrySource nvidiaTelemetry,
+        IDxgiGpuTelemetrySource dxgiTelemetry)
     {
         this.nvidiaTelemetry = nvidiaTelemetry ?? throw new ArgumentNullException(nameof(nvidiaTelemetry));
+        this.dxgiTelemetry = dxgiTelemetry ?? throw new ArgumentNullException(nameof(dxgiTelemetry));
     }
 
     public RawLocalHardwareProfile Read(string applicationDataPath)
@@ -263,6 +274,8 @@ public sealed class WindowsLocalHardwareProfileSource : ILocalHardwareProfileSou
     {
         var telemetry = nvidiaTelemetry.Read();
         var telemetryUsed = new bool[telemetry.Count];
+        var dxgi = dxgiTelemetry.Read();
+        var dxgiUsed = new bool[dxgi.Count];
         using var videoRoot = Registry.LocalMachine.OpenSubKey(VideoRegistryPath, writable: false);
         var yielded = 0;
         foreach (var adapterKeyName in (videoRoot?.GetSubKeyNames() ?? [])
@@ -285,10 +298,24 @@ public sealed class WindowsLocalHardwareProfileSource : ILocalHardwareProfileSou
             var telemetryIndex = FindUniqueTelemetry(name.Trim(), telemetry, telemetryUsed);
             var snapshot = telemetryIndex >= 0 ? telemetry[telemetryIndex] : null;
             if (telemetryIndex >= 0) telemetryUsed[telemetryIndex] = true;
+            var dxgiIndex = FindUniqueDxgiTelemetry(name.Trim(), dxgi, dxgiUsed);
+            var dxgiSnapshot = dxgiIndex >= 0 ? dxgi[dxgiIndex] : null;
+            if (dxgiIndex >= 0) dxgiUsed[dxgiIndex] = true;
             if (memory is null && snapshot is not null)
             {
                 memory = snapshot.TotalMemoryBytes;
                 memorySource = "NVIDIA NVML total memory";
+            }
+            var availableMemory = snapshot?.AvailableMemoryBytes ?? dxgiSnapshot?.AvailableBudgetBytes;
+            var availableMemorySource = snapshot is not null
+                ? "NVIDIA NVML free memory"
+                : dxgiSnapshot is not null
+                    ? "Windows DXGI local memory budget"
+                    : null;
+            if (dxgiSnapshot is not null && (memory is null || availableMemory > memory))
+            {
+                memory = dxgiSnapshot.BudgetBytes;
+                memorySource = "Windows DXGI local memory budget";
             }
             yield return new LocalGpuProfile(
                 name.Trim(),
@@ -296,8 +323,9 @@ public sealed class WindowsLocalHardwareProfileSource : ILocalHardwareProfileSou
                 ReadRegistryText(adapterKey.GetValue("DriverVersion"))?.Trim(),
                 memory,
                 memorySource,
-                snapshot?.AvailableMemoryBytes,
-                snapshot is null ? null : "NVIDIA NVML free memory");
+                availableMemory,
+                availableMemorySource,
+                snapshot is not null);
             yielded++;
             if (yielded == 16) yield break;
         }
@@ -313,7 +341,24 @@ public sealed class WindowsLocalHardwareProfileSource : ILocalHardwareProfileSou
                 snapshot.TotalMemoryBytes,
                 "NVIDIA NVML total memory",
                 snapshot.AvailableMemoryBytes,
-                "NVIDIA NVML free memory");
+                "NVIDIA NVML free memory",
+                true);
+            yielded++;
+        }
+
+        for (var index = 0; index < dxgi.Count && yielded < 16; index++)
+        {
+            if (dxgiUsed[index]) continue;
+            var snapshot = dxgi[index];
+            yield return new LocalGpuProfile(
+                snapshot.Name,
+                snapshot.Provider,
+                null,
+                snapshot.BudgetBytes,
+                "Windows DXGI local memory budget",
+                snapshot.AvailableBudgetBytes,
+                "Windows DXGI local memory budget",
+                false);
             yielded++;
         }
     }
@@ -321,6 +366,21 @@ public sealed class WindowsLocalHardwareProfileSource : ILocalHardwareProfileSou
     private static int FindUniqueTelemetry(
         string name,
         IReadOnlyList<NvidiaGpuMemorySnapshot> telemetry,
+        IReadOnlyList<bool> used)
+    {
+        var match = -1;
+        for (var index = 0; index < telemetry.Count; index++)
+        {
+            if (used[index] || !string.Equals(name, telemetry[index].Name, StringComparison.OrdinalIgnoreCase)) continue;
+            if (match >= 0) return -1;
+            match = index;
+        }
+        return match;
+    }
+
+    private static int FindUniqueDxgiTelemetry(
+        string name,
+        IReadOnlyList<DxgiGpuMemorySnapshot> telemetry,
         IReadOnlyList<bool> used)
     {
         var match = -1;

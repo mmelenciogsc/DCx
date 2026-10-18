@@ -124,7 +124,9 @@ try {
         "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.Capture_RejectsMalformedCapacityTextAndGraphicsEvidence",
         "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.WindowsSource_CapturesCurrentHostWithoutAChildProcess",
         "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.NvidiaTelemetry_LoadsOnlyInstalledSystemDriverAndReturnsBoundedLiveMemory",
+        "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.DxgiTelemetry_ReturnsBoundedCurrentHostBudgetsWithoutAChildProcess",
         "DCx.Core.Tests.LocalModels.LocalModelSelectorTests.SelectForHardware_UsesLiveAvailableGpuAndSystemMemoryBudgets",
+        "DCx.Core.Tests.LocalModels.LocalModelSelectorTests.SelectForHardware_DoesNotTreatInventoryOnlyDxgiBudgetAsComputeAdmission",
         "DCx.Core.Tests.LocalModels.LocalModelSelectorTests.SelectForHardware_FailsClosedWithoutLiveGpuCapacityAndUsesAvailableRam"
     )
     $requiredOllamaInferenceLeaseContracts = @(
@@ -420,13 +422,21 @@ $nativeNvidiaProfiles = @($nativeHardwareProfile.Gpus | Where-Object {
     $_.AvailableMemoryBytes -le $_.ReportedMemoryBytes -and
     $_.AvailableMemorySource -ceq "NVIDIA NVML free memory"
 })
+$nativeDxgiInventoryProfiles = @($nativeHardwareProfile.Gpus | Where-Object {
+    $_.AvailableMemoryBytes -ge 0 -and
+    $_.ReportedMemoryBytes -ge $_.AvailableMemoryBytes -and
+    $_.AvailableMemorySource -ceq "Windows DXGI local memory budget" -and
+    $_.LocalModelGpuAdmissionEligible -eq $false
+})
 if ($nativeHardwareProfile.OperatingSystem -notlike "Microsoft Windows *" -or
     $nativeHardwareProfile.CpuName -cne "12th Gen Intel(R) Core(TM) i7-12650H" -or
     $nativeHardwareProfile.LogicalProcessorCount -ne 16 -or
     $nativeHardwareProfile.PhysicalMemoryBytes -lt 16000000000 -or
     $nativeHardwareProfile.AvailableMemoryBytes -le 0 -or
     $nativeHardwareProfile.StorageAvailableBytes -le 0 -or
-    $nativeNvidiaProfiles.Count -ne 1) {
+    $nativeNvidiaProfiles.Count -ne 1 -or
+    $nativeNvidiaProfiles[0].LocalModelGpuAdmissionEligible -ne $true -or
+    $nativeDxgiInventoryProfiles.Count -lt 1) {
     throw "The native product hardware profile did not match the measured Windows host."
 }
 $dependencyCatalog = [DCx.Core.LocalModels.LocalModelDependencyCatalogLoader]::new().LoadEmbeddedAsync(
@@ -733,6 +743,17 @@ $manifest = [ordered]@{
     native_hardware_nvidia_registry_memory_bytes = [long]$nativeNvidiaProfiles[0].ReportedMemoryBytes
     native_hardware_nvidia_available_memory_bytes = [long]$nativeNvidiaProfiles[0].AvailableMemoryBytes
     native_hardware_nvidia_available_memory_source = [string]$nativeNvidiaProfiles[0].AvailableMemorySource
+    native_hardware_nvidia_gpu_admission_eligible = [bool]$nativeNvidiaProfiles[0].LocalModelGpuAdmissionEligible
+    native_hardware_dxgi_inventory_adapters = @($nativeDxgiInventoryProfiles | ForEach-Object {
+        [ordered]@{
+            name = [string]$_.Name
+            provider = [string]$_.Provider
+            driver = [string]$_.DriverVersion
+            budget_bytes = [long]$_.ReportedMemoryBytes
+            available_budget_bytes = [long]$_.AvailableMemoryBytes
+            local_model_gpu_admission_eligible = [bool]$_.LocalModelGpuAdmissionEligible
+        }
+    })
     native_resource_available_system_memory_bytes = [long]$nativeResourceSelection.AvailableSystemMemoryBytes
     native_resource_available_graphics_memory_bytes = [long]$nativeResourceSelection.AvailableGraphicsMemoryBytes
     native_resource_selected_vision_model = [string]$nativeResourceSelection.Vision.Model.Name
@@ -794,7 +815,7 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Bounded Ollama embedding adapter fixture=PASS"
 "Ollama redirect/cookie/proxy denial and response-origin validation=PASS"
 "Low-resource and local-first fallback tests=PASS"
-"Native product hardware profile contracts=PASS ($($manifest.native_hardware_profile_contract_tests)/$($manifest.native_hardware_profile_contract_tests)); CPU=$($manifest.native_hardware_cpu); logical processors=$($manifest.native_hardware_logical_processors); physical memory bytes=$($manifest.native_hardware_physical_memory_bytes); available system memory bytes=$($manifest.native_hardware_available_memory_bytes); application-data storage available bytes=$($manifest.native_hardware_storage_available_bytes); NVIDIA registry driver=$($manifest.native_hardware_nvidia_registry_driver); registry graphics memory bytes=$($manifest.native_hardware_nvidia_registry_memory_bytes); live available graphics memory bytes=$($manifest.native_hardware_nvidia_available_memory_bytes) from $($manifest.native_hardware_nvidia_available_memory_source)"
+"Native product hardware profile contracts=PASS ($($manifest.native_hardware_profile_contract_tests)/$($manifest.native_hardware_profile_contract_tests)); CPU=$($manifest.native_hardware_cpu); logical processors=$($manifest.native_hardware_logical_processors); physical memory bytes=$($manifest.native_hardware_physical_memory_bytes); available system memory bytes=$($manifest.native_hardware_available_memory_bytes); application-data storage available bytes=$($manifest.native_hardware_storage_available_bytes); NVIDIA registry driver=$($manifest.native_hardware_nvidia_registry_driver); registry graphics memory bytes=$($manifest.native_hardware_nvidia_registry_memory_bytes); live available graphics memory bytes=$($manifest.native_hardware_nvidia_available_memory_bytes) from $($manifest.native_hardware_nvidia_available_memory_source); DXGI inventory-only adapters=$(@($manifest.native_hardware_dxgi_inventory_adapters).Count)"
 "Per-user cross-process Ollama inference sequencing contracts=PASS ($($manifest.ollama_inference_lease_contract_tests)/$($manifest.ollama_inference_lease_contract_tests)); lock data retained=False"
 "Runtime resource-admission and verified-unload contracts=PASS ($($manifest.ollama_runtime_resource_unload_contract_tests)/$($manifest.ollama_runtime_resource_unload_contract_tests))"
 "Native hardware-bound model selection=PASS; available graphics bytes=$($manifest.native_resource_available_graphics_memory_bytes); available system bytes=$($manifest.native_resource_available_system_memory_bytes); vision=$($manifest.native_resource_selected_vision_model); embedding available=$($manifest.native_resource_selected_embedding_available)"

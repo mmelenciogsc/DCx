@@ -17,7 +17,8 @@ public sealed class WindowsLocalHardwareProfileTests
             8L * 1024 * 1024 * 1024,
             "HardwareInformation.qwMemorySize",
             6L * 1024 * 1024 * 1024,
-            "fixture live free memory");
+            "fixture live free memory",
+            true);
         var profile = new LocalHardwareProfiler(
             new FixtureSource(new RawLocalHardwareProfile(
                 "Microsoft Windows fixture",
@@ -41,6 +42,7 @@ public sealed class WindowsLocalHardwareProfileTests
         Assert.Equal("GPU Large", profile.Gpus[0].Name);
         Assert.Equal(8L * 1024 * 1024 * 1024, profile.Gpus[0].ReportedMemoryBytes);
         Assert.Equal(6L * 1024 * 1024 * 1024, profile.Gpus[0].AvailableMemoryBytes);
+        Assert.True(profile.Gpus[0].LocalModelGpuAdmissionEligible);
         Assert.Equal("GPU Small", profile.Gpus[1].Name);
     }
 
@@ -69,6 +71,10 @@ public sealed class WindowsLocalHardwareProfileTests
         }));
         Assert.Throws<InvalidOperationException>(() => Capture(valid with
         {
+            Gpus = [new("GPU", null, null, 1024, "fixture", null, null, true)],
+        }));
+        Assert.Throws<InvalidOperationException>(() => Capture(valid with
+        {
             Gpus = Enumerable.Range(0, 17)
                 .Select(index => new LocalGpuProfile($"GPU {index}", null, null, null, null))
                 .ToArray(),
@@ -93,6 +99,8 @@ public sealed class WindowsLocalHardwareProfileTests
             Assert.False(string.IsNullOrWhiteSpace(gpu.AvailableMemorySource));
             Assert.InRange(gpu.AvailableMemoryBytes!.Value, 0, gpu.ReportedMemoryBytes!.Value);
         });
+        Assert.All(profile.Gpus.Where(gpu => gpu.LocalModelGpuAdmissionEligible), gpu =>
+            Assert.Equal("NVIDIA NVML free memory", gpu.AvailableMemorySource));
     }
 
     [Fact]
@@ -111,6 +119,24 @@ public sealed class WindowsLocalHardwareProfileTests
             Assert.False(string.IsNullOrWhiteSpace(snapshot.Name));
             Assert.False(string.IsNullOrWhiteSpace(snapshot.DriverVersion));
             Assert.InRange(snapshot.AvailableMemoryBytes, 0, snapshot.TotalMemoryBytes);
+        });
+    }
+
+    [Fact]
+    public void DxgiTelemetry_ReturnsBoundedCurrentHostBudgetsWithoutAChildProcess()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var snapshots = new DxgiGpuTelemetrySource().Read();
+
+        Assert.NotEmpty(snapshots);
+        Assert.InRange(snapshots.Count, 1, 16);
+        Assert.All(snapshots, snapshot =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(snapshot.Name));
+            Assert.False(string.IsNullOrWhiteSpace(snapshot.Provider));
+            Assert.InRange(snapshot.BudgetBytes, 1, 1L << 50);
+            Assert.InRange(snapshot.AvailableBudgetBytes, 0, snapshot.BudgetBytes);
         });
     }
 
