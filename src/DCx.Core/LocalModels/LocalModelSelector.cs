@@ -5,6 +5,25 @@ public sealed class LocalModelSelector
     private const double MaximumVramFraction = 0.70;
     private const double MaximumEmbeddingRamFraction = 0.25;
 
+    public LocalModelResourceSelection SelectForHardware(
+        LocalHardwareProfile hardware,
+        IEnumerable<LocalModelDescriptor> installedModels)
+    {
+        ArgumentNullException.ThrowIfNull(hardware);
+        ArgumentNullException.ThrowIfNull(installedModels);
+        var inventory = installedModels.Where(model => model is not null).ToArray();
+        var graphicsMemory = hardware.Gpus
+            .Where(gpu => gpu.ReportedMemoryBytes is > 0)
+            .Select(gpu => gpu.ReportedMemoryBytes!.Value)
+            .DefaultIfEmpty(0)
+            .Max();
+        return new LocalModelResourceSelection(
+            graphicsMemory,
+            hardware.PhysicalMemoryBytes,
+            SelectVisionModel(graphicsMemory, inventory),
+            SelectEmbeddingModel(hardware.PhysicalMemoryBytes, inventory));
+    }
+
     public LocalModelSelection SelectVisionModel(long availableVramBytes, IEnumerable<LocalModelDescriptor> installedModels)
     {
         if (availableVramBytes < 0)
@@ -53,3 +72,9 @@ public sealed class LocalModelSelector
                 $"Selected the smallest uniquely digest-bound installed embedding model within 25% of measured RAM: {selected.Name} ({selected.SizeBytes} bytes).");
     }
 }
+
+public sealed record LocalModelResourceSelection(
+    long ReportedGraphicsMemoryBytes,
+    long PhysicalMemoryBytes,
+    LocalModelSelection Vision,
+    LocalModelSelection Embedding);

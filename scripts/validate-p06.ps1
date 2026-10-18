@@ -72,6 +72,12 @@ try {
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferPlanTests.Plan_RejectsUnknownDuplicateOrMalformedSelectionsAndCatalogs",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferPlanTests.Plan_RejectsConflictingIdentityForOneExactSource"
     )
+    $requiredHardwareProfileContracts = @(
+        "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.Capture_ValidatesDeduplicatesAndOrdersBoundedHardwareEvidence",
+        "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.Capture_RejectsMalformedCapacityTextAndGraphicsEvidence",
+        "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.WindowsSource_CapturesCurrentHostWithoutAChildProcess",
+        "DCx.Core.Tests.LocalModels.LocalModelSelectorTests.SelectForHardware_BindsNativeGraphicsAndPhysicalMemoryBudgets"
+    )
     $requiredApprovalStateContracts = @(
         "DCx.Core.Tests.LocalModels.LocalModelApprovalStateAnchorStoreTests.WindowsVaultAnchor_RoundTripsOverwritesIsolatesAndRejectsMalformedState",
         "DCx.Core.Tests.LocalModels.LocalModelApprovalStateAnchorStoreTests.WindowsVaultAnchor_HonorsPreCanceledOperationsWithoutCreatingCredential",
@@ -120,6 +126,12 @@ try {
             throw "P06 did not prove required dependency transfer-preflight contract: $requiredDependencyTransferContract"
         }
     }
+    foreach ($requiredHardwareProfileContract in $requiredHardwareProfileContracts) {
+        $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredHardwareProfileContract })
+        if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
+            throw "P06 did not prove required native hardware-profile contract: $requiredHardwareProfileContract"
+        }
+    }
     foreach ($requiredApprovalStateContract in $requiredApprovalStateContracts) {
         $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredApprovalStateContract })
         if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
@@ -158,6 +170,7 @@ try {
         $whisperRegistrationEvidence.benchmark_missing_backend_unavailable -ne $true -or
         $whisperRegistrationEvidence.embedding_benchmark_missing_model_unavailable -ne $true -or
         $whisperRegistrationEvidence.dependency_catalog_native_uia -ne "pass" -or
+        $whisperRegistrationEvidence.native_hardware_profile_uia -ne "pass" -or
         $whisperRegistrationEvidence.dependency_catalog_sha256 -ne "1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325" -or
         $whisperRegistrationEvidence.dependency_candidate_count -ne 4 -or
         $whisperRegistrationEvidence.dependency_transfer_preflight_native_uia -ne "pass" -or
@@ -263,6 +276,23 @@ finally {
 $imageBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($fixtureImage))
 $coreAssembly = Join-Path $repoRoot "src\DCx.Core\bin\Release\net10.0\DCx.Core.dll"
 [void][Reflection.Assembly]::LoadFrom($coreAssembly)
+$nativeHardwareProfile = [DCx.Core.LocalModels.LocalHardwareProfiler]::new().Capture($repoRoot)
+$nativeNvidiaProfiles = @($nativeHardwareProfile.Gpus | Where-Object {
+    $_.Name -ceq "NVIDIA GeForce RTX 4060 Laptop GPU" -and
+    $_.Provider -ceq "NVIDIA" -and
+    $_.DriverVersion -ceq "32.0.16.1078" -and
+    $_.ReportedMemoryBytes -eq 8585740288 -and
+    $_.MemorySource -ceq "HardwareInformation.qwMemorySize"
+})
+if ($nativeHardwareProfile.OperatingSystem -notlike "Microsoft Windows *" -or
+    $nativeHardwareProfile.CpuName -cne "12th Gen Intel(R) Core(TM) i7-12650H" -or
+    $nativeHardwareProfile.LogicalProcessorCount -ne 16 -or
+    $nativeHardwareProfile.PhysicalMemoryBytes -lt 16000000000 -or
+    $nativeHardwareProfile.AvailableMemoryBytes -le 0 -or
+    $nativeHardwareProfile.StorageAvailableBytes -le 0 -or
+    $nativeNvidiaProfiles.Count -ne 1) {
+    throw "The native product hardware profile did not match the measured Windows host."
+}
 $dependencyCatalog = [DCx.Core.LocalModels.LocalModelDependencyCatalogLoader]::new().LoadEmbeddedAsync(
     [Threading.CancellationToken]::None).GetAwaiter().GetResult()
 $dependencyCandidateIds = @($dependencyCatalog.Candidates | ForEach-Object { $_.Id } | Sort-Object)
@@ -286,6 +316,15 @@ $client = [DCx.Core.LocalModels.OllamaLocalClient]::new(
     [Uri]"http://localhost:11434/", [TimeSpan]::FromMinutes(3))
 try {
     $inventory = $client.ListModelsAsync([Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    $nativeResourceSelection = [DCx.Core.LocalModels.LocalModelSelector]::new().SelectForHardware(
+        $nativeHardwareProfile,
+        $inventory)
+    if ($null -eq $nativeResourceSelection.Vision.Model -or
+        $nativeResourceSelection.Vision.Model.Name -cne $model -or
+        $nativeResourceSelection.Vision.Model.Digest -cne $modelDigest -or
+        $nativeResourceSelection.Embedding.IsAvailable -ne $false) {
+        throw "The native hardware-bound model selector did not choose the expected resource-safe local model state."
+    }
     $boundModels = @($inventory | Where-Object {
         $_.Name -ceq $model -and $_.Digest -ceq $modelDigest -and $_.HasDigestBoundName -and $_.SupportsVision
     })
@@ -533,6 +572,22 @@ $manifest = [ordered]@{
     local_model_storage_link_denials = $requiredStorageDenials.Count
     local_model_storage_external_writes = 0
     local_model_approval_anchor_contract_tests = $requiredApprovalStateContracts.Count
+    native_hardware_profile_contract_tests = $requiredHardwareProfileContracts.Count
+    native_hardware_profile_passed = $true
+    native_hardware_operating_system = [string]$nativeHardwareProfile.OperatingSystem
+    native_hardware_process_architecture = [string]$nativeHardwareProfile.ProcessArchitecture
+    native_hardware_cpu = [string]$nativeHardwareProfile.CpuName
+    native_hardware_logical_processors = [int]$nativeHardwareProfile.LogicalProcessorCount
+    native_hardware_physical_memory_bytes = [long]$nativeHardwareProfile.PhysicalMemoryBytes
+    native_hardware_available_memory_bytes = [long]$nativeHardwareProfile.AvailableMemoryBytes
+    native_hardware_storage_total_bytes = [long]$nativeHardwareProfile.StorageTotalBytes
+    native_hardware_storage_available_bytes = [long]$nativeHardwareProfile.StorageAvailableBytes
+    native_hardware_gpu_count = [int]$nativeHardwareProfile.Gpus.Count
+    native_hardware_nvidia_registry_driver = [string]$nativeNvidiaProfiles[0].DriverVersion
+    native_hardware_nvidia_registry_memory_bytes = [long]$nativeNvidiaProfiles[0].ReportedMemoryBytes
+    native_resource_selected_vision_model = [string]$nativeResourceSelection.Vision.Model.Name
+    native_resource_selected_vision_digest = [string]$nativeResourceSelection.Vision.Model.Digest
+    native_resource_selected_embedding_available = [bool]$nativeResourceSelection.Embedding.IsAvailable
     dependency_catalog_id = [string]$dependencyCatalog.CatalogId
     dependency_catalog_sha256 = [string]$dependencyCatalog.CatalogSha256
     dependency_catalog_candidates = @($dependencyCandidateIds)
@@ -577,6 +632,8 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Bounded Ollama embedding adapter fixture=PASS"
 "Ollama redirect/cookie/proxy denial and response-origin validation=PASS"
 "Low-resource and local-first fallback tests=PASS"
+"Native product hardware profile contracts=PASS ($($manifest.native_hardware_profile_contract_tests)/$($manifest.native_hardware_profile_contract_tests)); CPU=$($manifest.native_hardware_cpu); logical processors=$($manifest.native_hardware_logical_processors); physical memory bytes=$($manifest.native_hardware_physical_memory_bytes); application-data storage available bytes=$($manifest.native_hardware_storage_available_bytes); NVIDIA registry driver=$($manifest.native_hardware_nvidia_registry_driver); registry graphics memory bytes=$($manifest.native_hardware_nvidia_registry_memory_bytes)"
+"Native hardware-bound model selection=PASS; vision=$($manifest.native_resource_selected_vision_model); embedding available=$($manifest.native_resource_selected_embedding_available)"
 "Local-model linked-root, linked-file and swapped-directory denials=PASS ($($manifest.local_model_storage_link_denials)/$($manifest.local_model_storage_link_denials)); external writes=$($manifest.local_model_storage_external_writes)"
 "Pinned dependency catalog=$($manifest.dependency_catalog_id); SHA-256=$($manifest.dependency_catalog_sha256)"
 "Pinned dependency catalog/reviewer contracts=PASS ($($manifest.dependency_catalog_contract_tests)/$($manifest.dependency_catalog_contract_tests)); downloads or installs=$($manifest.dependency_downloads_or_installs)"

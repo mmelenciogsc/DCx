@@ -63,5 +63,6 @@
 | [0059](architecture/adr/0059-protected-whisper-stage-receipt-anchor.md) | Anchor exact inert Whisper stage receipts in Windows Credential Manager | Accepted for per-user filesystem-replacement defense | 2026-10-18 |
 | [0060](architecture/adr/0060-protected-local-model-approval-state.md) | Protect local-model approval state from filesystem replay | Accepted for per-user filesystem-replacement defense | 2026-10-18 |
 | [0061](architecture/adr/0061-deterministic-local-dependency-transfer-preflight.md) | Derive an exact local-dependency transfer and capacity preflight | Accepted for read-only transfer review; acquisition remains blocked | 2026-10-18 |
+| [0062](architecture/adr/0062-native-windows-hardware-profile.md) | Profile local-model resources through bounded native Windows evidence | Accepted for product inventory and selection prefilter; benchmark acceptance remains required | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

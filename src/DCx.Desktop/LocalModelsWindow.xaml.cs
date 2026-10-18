@@ -30,6 +30,7 @@ public partial class LocalModelsWindow : Window
     private FfmpegBackendReview? reviewedFfmpegBackend;
     private DependencyCandidateRow? selectedDependencyCandidate;
     private LocalModelDependencyArtifactReview? reviewedDependencyArtifact;
+    private LocalHardwareProfile? hardwareProfile;
 
     public LocalModelsWindow(
         LocalModelSelectionStore store,
@@ -64,13 +65,33 @@ public partial class LocalModelsWindow : Window
         InitializeComponent();
         Loaded += async (_, _) =>
         {
+            LoadHardwareProfile();
             await LoadDependencyCatalogAsync();
             await RefreshAsync();
         };
         Closed += (_, _) => lifetime.Cancel();
     }
 
-    private async void OnRefreshClick(object sender, RoutedEventArgs e) => await RefreshAsync();
+    private async void OnRefreshClick(object sender, RoutedEventArgs e)
+    {
+        LoadHardwareProfile();
+        await RefreshAsync();
+    }
+
+    private void LoadHardwareProfile()
+    {
+        try
+        {
+            hardwareProfile = new LocalHardwareProfiler().Capture(applicationDataRoot);
+            SetHardwareProfile(FormatHardwareProfile(hardwareProfile));
+        }
+        catch
+        {
+            hardwareProfile = null;
+            SetHardwareProfile(
+                "Native hardware profile unavailable. No external process, network request, model load, download, install, or resource estimate occurred.");
+        }
+    }
 
     private void OnOpenBenchmarkReviewClick(object sender, RoutedEventArgs e)
     {
@@ -590,16 +611,16 @@ public partial class LocalModelsWindow : Window
             await UpdateFfmpegSelectionAsync();
             using var client = new OllamaLocalClient(OllamaOrigin, TimeSpan.FromSeconds(30));
             var models = await client.ListModelsAsync(lifetime.Token);
-            var counts = models
-                .GroupBy(model => model.Name, StringComparer.Ordinal)
-                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+            var resourceSelection = hardwareProfile is null
+                ? null
+                : new LocalModelSelector().SelectForHardware(hardwareProfile, models);
             var rows = models
                 .OrderBy(model => model.Name, StringComparer.Ordinal)
                 .ThenBy(model => model.Digest, StringComparer.Ordinal)
                 .Select(model => new CandidateRow(
                     model,
-                    counts[model.Name] == 1 && model.HasDigestBoundName && model.SupportsVision,
-                    counts[model.Name] == 1 && model.HasDigestBoundName && model.SupportsEmbeddings))
+                    IsExactModel(resourceSelection?.Vision.Model, model),
+                    IsExactModel(resourceSelection?.Embedding.Model, model)))
                 .ToArray();
             ModelsList.ItemsSource = rows;
             await UpdateCurrentSelectionsAsync();
@@ -612,7 +633,10 @@ public partial class LocalModelsWindow : Window
             else
             {
                 SetStatus(
-                    $"Found {rows.Length} installed model records. {eligible} unique digest-bound records are eligible. Nothing was downloaded or uploaded.");
+                    hardwareProfile is null
+                        ? $"Found {rows.Length} installed model records, but none is eligible because the native hardware profile is unavailable. Nothing was downloaded or uploaded."
+                        : $"Found {rows.Length} installed model records. {eligible} resource-selected digest-bound records are eligible. " +
+                          $"{resourceSelection!.Vision.Reason} {resourceSelection.Embedding.Reason} Nothing was downloaded or uploaded.");
             }
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
@@ -662,6 +686,18 @@ public partial class LocalModelsWindow : Window
                 isVision && !sameName[0].SupportsVision || !isVision && !sameName[0].SupportsEmbeddings)
             {
                 throw new InvalidOperationException("The reviewed model binding changed.");
+            }
+
+            var currentHardware = new LocalHardwareProfiler().Capture(applicationDataRoot);
+            hardwareProfile = currentHardware;
+            SetHardwareProfile(FormatHardwareProfile(currentHardware));
+            var resourceSelection = new LocalModelSelector().SelectForHardware(currentHardware, inventory);
+            var currentlyEligible = isVision
+                ? resourceSelection.Vision.Model
+                : resourceSelection.Embedding.Model;
+            if (!IsExactModel(currentlyEligible, sameName[0]))
+            {
+                throw new InvalidOperationException("The reviewed model no longer matches the native resource policy.");
             }
 
             var inspection = await client.InspectModelAsync(sameName[0].Name, lifetime.Token);
@@ -914,6 +950,12 @@ public partial class LocalModelsWindow : Window
         AutomationProperties.SetName(DependencyCatalogSummary, value);
     }
 
+    private void SetHardwareProfile(string value)
+    {
+        HardwareProfileSummary.Text = value;
+        AutomationProperties.SetName(HardwareProfileSummary, value);
+    }
+
     private void SetDependencyTransferPreflight(string value)
     {
         DependencyTransferPreflight.Text = value;
@@ -953,6 +995,29 @@ public partial class LocalModelsWindow : Window
             "This read-only inventory grants no network, download, extraction, install, pull, execution, legal, approval, or selection authority.";
     }
 
+    private static string FormatHardwareProfile(LocalHardwareProfile profile)
+    {
+        static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+        var graphics = profile.Gpus.Count == 0
+            ? "Graphics adapters: none reported by the bounded Windows registry inventory."
+            : "Graphics adapters:\n" + string.Join(
+                "\n",
+                profile.Gpus.Select(gpu =>
+                    $"{gpu.Name}. Provider {gpu.Provider ?? "unavailable"}. " +
+                    $"Windows driver {gpu.DriverVersion ?? "unavailable"}. " +
+                    (gpu.ReportedMemoryBytes is long memory
+                        ? $"Registry-reported graphics memory {Number(memory)} bytes from {gpu.MemorySource}."
+                        : "Registry-reported graphics memory unavailable.")));
+        return
+            $"Hardware profile. Captured UTC {profile.CapturedUtc:O}. " +
+            $"Operating system {profile.OperatingSystem}. Process architecture {profile.ProcessArchitecture}.\n" +
+            $"Processor {profile.CpuName}. {profile.LogicalProcessorCount} logical processors.\n" +
+            $"Physical memory {Number(profile.PhysicalMemoryBytes)} bytes. Available memory {Number(profile.AvailableMemoryBytes)} bytes.\n" +
+            $"Application-data storage {Number(profile.StorageTotalBytes)} total bytes. {Number(profile.StorageAvailableBytes)} available bytes.\n" +
+            $"{graphics}\n" +
+            "This profile used native Windows kernel and read-only registry data. No external process or network request ran. Capacity is volatile and must be rechecked before resource-intensive work.";
+    }
+
     private static string FormatDependencyTransferPlan(LocalModelDependencyTransferPlan plan)
     {
         static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
@@ -978,6 +1043,12 @@ public partial class LocalModelsWindow : Window
 
     private static string Sha256(string value) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static bool IsExactModel(LocalModelDescriptor? expected, LocalModelDescriptor actual) =>
+        expected is not null &&
+        string.Equals(expected.Name, actual.Name, StringComparison.Ordinal) &&
+        string.Equals(expected.Digest, actual.Digest, StringComparison.Ordinal) &&
+        expected.SizeBytes == actual.SizeBytes;
 
     private sealed record CandidateRow(
         LocalModelDescriptor Descriptor,

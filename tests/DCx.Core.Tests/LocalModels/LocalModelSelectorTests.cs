@@ -78,6 +78,33 @@ public sealed class LocalModelSelectorTests
         Assert.Contains("digest-bound", selection.Reason, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void SelectForHardware_BindsNativeGraphicsAndPhysicalMemoryBudgets()
+    {
+        var profile = new LocalHardwareProfile(
+            DateTimeOffset.UtcNow,
+            "Windows fixture",
+            "X64",
+            "CPU fixture",
+            8,
+            16L * 1024 * 1024 * 1024,
+            8L * 1024 * 1024 * 1024,
+            1_000_000_000_000,
+            500_000_000_000,
+            Array.AsReadOnly<LocalGpuProfile>(
+            [
+                new("Small GPU", null, null, 2L * 1024 * 1024 * 1024, "fixture"),
+                new("Large GPU", null, null, 8_188L * 1024 * 1024, "fixture"),
+            ]));
+
+        var selection = new LocalModelSelector().SelectForHardware(profile, Models);
+
+        Assert.Equal(8_188L * 1024 * 1024, selection.ReportedGraphicsMemoryBytes);
+        Assert.Equal(profile.PhysicalMemoryBytes, selection.PhysicalMemoryBytes);
+        Assert.Equal("vision-4b:" + Vision4Digest, selection.Vision.Model?.Name);
+        Assert.Equal("embed-small:" + EmbedSmallDigest, selection.Embedding.Model?.Name);
+    }
+
     [Theory]
     [InlineData(true, true, true, true, false, LocalInferenceRoute.LocalGpu)]
     [InlineData(false, true, true, true, false, LocalInferenceRoute.LocalCpu)]

@@ -33,6 +33,22 @@
                            TextWrapping="Wrap"
                            Text="Review models already installed in the local Ollama runtime. This window never downloads, installs, retags, or uploads a model. Only a unique name ending in its matching SHA-256 digest can be selected." />
 
+                <GroupBox Margin="0,16,0,0" Header="Native hardware and resource profile">
+                    <TextBox x:Name="HardwareProfileSummary"
+                             MinHeight="120"
+                             MaxHeight="240"
+                             Margin="12,8"
+                             Padding="8"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             Text="Reading native Windows hardware and storage capacity."
+                             AutomationProperties.AutomationId="LocalHardwareProfile"
+                             AutomationProperties.Name="Reading native Windows hardware and storage capacity."
+                             AutomationProperties.HelpText="Read-only operating system, processor, memory, application-data storage, graphics-adapter and driver inventory. No external process or network request is used." />
+                </GroupBox>
+
                 <GroupBox Margin="0,16,0,0" Header="Current selections">
                     <StackPanel Margin="12,8">
                         <TextBlock x:Name="CurrentVisionText"

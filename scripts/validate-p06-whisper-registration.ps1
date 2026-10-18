@@ -198,6 +198,20 @@ try {
              $status.Current.Name -like "Installed local models could not be read safely.*")) { $status }
     } "The bounded Ollama inventory refresh did not finish." 160
 
+    $hardwareProfile = Wait-For {
+        $candidate = Find-ById $localModelsWindow "LocalHardwareProfile"
+        if ($null -ne $candidate -and
+            $candidate.Current.Name -like "Hardware profile. Captured UTC *" -and
+            $candidate.Current.Name -like "*Processor 12th Gen Intel(R) Core(TM) i7-12650H. 16 logical processors.*" -and
+            $candidate.Current.Name -like "*NVIDIA GeForce RTX 4060 Laptop GPU. Provider NVIDIA. Windows driver 32.0.16.1078. Registry-reported graphics memory 8,585,740,288 bytes from HardwareInformation.qwMemorySize.*" -and
+            $candidate.Current.Name -like "*No external process or network request ran. Capacity is volatile and must be rechecked before resource-intensive work.*") {
+            $candidate
+        }
+    } "The native bounded hardware profile was not exposed accessibly."
+    if (-not $hardwareProfile.Current.IsKeyboardFocusable) {
+        throw "The native hardware profile is not keyboard focusable."
+    }
+
     $approval = Wait-For {
         Find-ById $localModelsWindow "ApproveWhisperBackendBox"
     } "The explicit Whisper approval checkbox was not exposed."
@@ -954,6 +968,7 @@ try {
         complete_model_license_exposed = $true
         exact_file_digests_exposed = $true
         dependency_catalog_native_uia = "pass"
+        native_hardware_profile_uia = "pass"
         dependency_catalog_sha256 = "1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325"
         dependency_candidate_count = 4
         dependency_transfer_preflight_native_uia = "pass"
@@ -1019,6 +1034,7 @@ try {
     "Complete runtime/model licenses UIA=PASS"
     "Exact four-file digest review UIA=PASS"
     "Immutable dependency catalog and staged-mismatch denial UIA=PASS"
+    "Native Windows hardware and resource profile UIA=PASS"
     "Exact dependency transfer footprint and capacity preflight UIA=PASS"
     "Explicit default-off inert Whisper runtime staging UIA=PASS"
     "Protected runtime staging receipt anchor composition UIA=PASS"
