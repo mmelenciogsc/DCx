@@ -94,11 +94,92 @@ try {
     } "The blocker and metric counts were not exposed through UIA."
     $consent = Wait-For {
         $element = Find-ById $window "ReadinessConsentStatus"
-        if ($null -ne $element -and $element.Current.Name.StartsWith("Local aggregate metric recording is disabled.", [StringComparison]::Ordinal)) { $element }
+        if ($null -ne $element -and
+            $element.Current.Name.StartsWith("Local aggregate metric recording is disabled. 0 daily aggregate buckets are stored.", [StringComparison]::Ordinal)) { $element }
     } "The default-off metric consent state was not exposed through UIA."
+    $defaultConsentName = $consent.Current.Name
+    $privacyControls = Wait-For { Find-ById $window "MetricPrivacyControls" } "The local metric privacy controls were not exposed through UIA."
+    $optInApproval = Wait-For { Find-ById $window "MetricOptInApproval" } "The local metric opt-in approval was not exposed through UIA."
+    $enableMetrics = Wait-For { Find-ById $window "EnableMetricRecording" } "The local metric enable action was not exposed through UIA."
+    $optOutApproval = Wait-For { Find-ById $window "MetricOptOutApproval" } "The local metric stop-and-purge approval was not exposed through UIA."
+    $stopAndPurge = Wait-For { Find-ById $window "StopAndPurgeMetrics" } "The local metric stop-and-purge action was not exposed through UIA."
+    $consentActionStatus = Wait-For { Find-ById $window "MetricConsentActionStatus" } "The local metric privacy action status was not exposed through UIA."
+    if ($optInApproval.Current.Name -notlike "*initially unchecked*" -or
+        $optOutApproval.Current.Name -notlike "*initially unchecked*" -or
+        $enableMetrics.Current.IsEnabled -or $stopAndPurge.Current.IsEnabled) {
+        throw "The local metric privacy approvals were not initially unchecked and fail closed."
+    }
+
+    $optInToggle = [System.Windows.Automation.TogglePattern]$optInApproval.GetCurrentPattern(
+        [System.Windows.Automation.TogglePattern]::Pattern)
+    $optInToggle.Toggle()
+    $enableMetrics = Wait-For {
+        $element = Find-ById $window "EnableMetricRecording"
+        if ($null -ne $element -and $element.Current.IsEnabled) { $element }
+    } "Explicit local metric consent did not enable the bounded local action."
+    ([System.Windows.Automation.InvokePattern]$enableMetrics.GetCurrentPattern(
+        [System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
+    $enabledConsent = Wait-For {
+        $element = Find-ById $window "ReadinessConsentStatus"
+        if ($null -ne $element -and
+            $element.Current.Name.StartsWith("Local aggregate metric recording is opted in under notice version 1. 0 daily aggregate buckets are stored.", [StringComparison]::Ordinal)) { $element }
+    } "The local metric opt-in did not update the consent status."
+    $enabledConsentName = $enabledConsent.Current.Name
+    $enableResult = Wait-For {
+        $element = Find-ById $window "MetricConsentActionStatus"
+        if ($null -ne $element -and
+            $element.Current.HasKeyboardFocus -and
+            $element.Current.Name.StartsWith("Local aggregate recording is enabled under notice version 1.", [StringComparison]::Ordinal)) { $element }
+    } "The local metric opt-in result was not focused and exposed through UIA."
+    $optInApproval = Find-ById $window "MetricOptInApproval"
+    $optInToggle = [System.Windows.Automation.TogglePattern]$optInApproval.GetCurrentPattern(
+        [System.Windows.Automation.TogglePattern]::Pattern)
+    if ($optInToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "The one-use local metric opt-in approval did not reset."
+    }
+
+    $optOutApproval = Find-ById $window "MetricOptOutApproval"
+    $optOutToggle = [System.Windows.Automation.TogglePattern]$optOutApproval.GetCurrentPattern(
+        [System.Windows.Automation.TogglePattern]::Pattern)
+    $optOutToggle.Toggle()
+    $stopAndPurge = Wait-For {
+        $element = Find-ById $window "StopAndPurgeMetrics"
+        if ($null -ne $element -and $element.Current.IsEnabled) { $element }
+    } "Explicit stop-and-purge approval did not enable the bounded local action."
+    ([System.Windows.Automation.InvokePattern]$stopAndPurge.GetCurrentPattern(
+        [System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
+    $disabledConsent = Wait-For {
+        $element = Find-ById $window "ReadinessConsentStatus"
+        if ($null -ne $element -and
+            $element.Current.Name.StartsWith("Local aggregate metric recording is disabled. 0 daily aggregate buckets are stored.", [StringComparison]::Ordinal)) { $element }
+    } "The local metric stop-and-purge action did not restore the disabled status."
+    $disabledConsentName = $disabledConsent.Current.Name
+    $purgeResult = Wait-For {
+        $element = Find-ById $window "MetricConsentActionStatus"
+        if ($null -ne $element -and
+            $element.Current.HasKeyboardFocus -and
+            $element.Current.Name.StartsWith("Local aggregate recording stopped. All retained local aggregate metrics were permanently deleted.", [StringComparison]::Ordinal)) { $element }
+    } "The local metric stop-and-purge result was not focused and exposed through UIA."
+    $optOutApproval = Find-ById $window "MetricOptOutApproval"
+    $optOutToggle = [System.Windows.Automation.TogglePattern]$optOutApproval.GetCurrentPattern(
+        [System.Windows.Automation.TogglePattern]::Pattern)
+    if ($optOutToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off -or
+        (Find-ById $window "StopAndPurgeMetrics").Current.IsEnabled) {
+        throw "The one-use local metric stop-and-purge approval did not reset."
+    }
     $blockers = Wait-For { Find-ById $window "ReadinessBlockers" } "The blocker list was not exposed through UIA."
     $metrics = Wait-For { Find-ById $window "ReadinessMetrics" } "The metric-definition list was not exposed through UIA."
     $refresh = Wait-For { Find-ById $window "ReadinessRefresh" } "The refresh action was not exposed through UIA."
+    $privacyAccessKeys = @(
+        $optInApproval.Current.AccessKey,
+        $enableMetrics.Current.AccessKey,
+        $optOutApproval.Current.AccessKey,
+        $stopAndPurge.Current.AccessKey,
+        $refresh.Current.AccessKey)
+    if ($privacyAccessKeys -contains "" -or
+        @($privacyAccessKeys | Select-Object -Unique).Count -ne $privacyAccessKeys.Count) {
+        throw "The local metric privacy and refresh access keys were missing or conflicting."
+    }
     if ($null -ne (Find-ByName $window "Activate production")) {
         throw "The read-only readiness dashboard exposed a production activation action."
     }
@@ -114,7 +195,11 @@ try {
     "Native readiness dashboard UIA=$($heading.Current.Name)"
     "Native readiness decision UIA=$($decision.Current.Name)"
     "Native readiness counts UIA=$($summary.Current.Name)"
-    "Native readiness consent UIA=$($consent.Current.Name)"
+    "Native readiness consent UIA=$defaultConsentName"
+    "Native local consent enable UIA=$enabledConsentName"
+    "Native local consent stop and purge UIA=$disabledConsentName"
+    "Native local consent focused results=PASS"
+    "Native local consent access keys=$($privacyAccessKeys.Count) distinct"
     "Native readiness blocker and metric lists=PASS"
     "Production activation control absent=PASS"
     "Production activation approved=$($assessment.production_activation_approved)"

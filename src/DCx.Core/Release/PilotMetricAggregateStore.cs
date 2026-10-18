@@ -166,9 +166,15 @@ public sealed class PilotMetricAggregateStore : IAsyncDisposable
             command.Transaction = (SqliteTransaction)transaction;
             command.CommandText = "SELECT notice_version FROM consent WHERE singleton = 1;";
             var existingNoticeVersion = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            var effectiveNoticeVersion = noticeVersion;
             if (existingNoticeVersion is long currentVersion && noticeVersion < currentVersion)
             {
-                throw new InvalidOperationException("The pilot consent notice version cannot move backward.");
+                if (enabled)
+                {
+                    throw new InvalidOperationException("The pilot consent notice version cannot move backward.");
+                }
+
+                effectiveNoticeVersion = checked((int)currentVersion);
             }
 
             if (!enabled)
@@ -187,7 +193,7 @@ public sealed class PilotMetricAggregateStore : IAsyncDisposable
                     recorded_utc = excluded.recorded_utc;
                 """;
             command.Parameters.AddWithValue("$enabled", enabled ? 1 : 0);
-            command.Parameters.AddWithValue("$version", noticeVersion);
+            command.Parameters.AddWithValue("$version", effectiveNoticeVersion);
             command.Parameters.AddWithValue("$recorded", now.ToUniversalTime().ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -315,6 +321,21 @@ public sealed class PilotMetricAggregateStore : IAsyncDisposable
         }
 
         return results;
+    }
+
+    public async Task<int> GetAggregateRowCountAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM metric_aggregates;";
+        var count = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        if (count is not long value || value is < 0 or > int.MaxValue)
+        {
+            throw new InvalidOperationException("The stored pilot metric aggregate count is invalid.");
+        }
+
+        return checked((int)value);
     }
 
     public ValueTask DisposeAsync()

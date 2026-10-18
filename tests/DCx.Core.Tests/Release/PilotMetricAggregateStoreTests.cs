@@ -17,6 +17,7 @@ public sealed class PilotMetricAggregateStoreTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             store.RecordAsync("task_duration_ms", Day, 100));
         Assert.Empty(await store.QueryAsync(Day, Day));
+        Assert.Equal(0, await store.GetAggregateRowCountAsync());
     }
 
     [Fact]
@@ -38,6 +39,7 @@ public sealed class PilotMetricAggregateStoreTests : IDisposable
         Assert.Equal(new PilotMetricConsentStatus(true, 1, Now), await reopened.GetConsentAsync());
         var aggregates = await reopened.QueryAsync(Day, Day);
         Assert.Equal(2, aggregates.Count);
+        Assert.Equal(2, await reopened.GetAggregateRowCountAsync());
         Assert.Contains(aggregates, aggregate =>
             aggregate == new PilotMetricAggregate(
                 "task_duration_ms",
@@ -64,6 +66,7 @@ public sealed class PilotMetricAggregateStoreTests : IDisposable
 
         Assert.False((await store.GetConsentAsync()).Enabled);
         Assert.Empty(await store.QueryAsync(Day, Day));
+        Assert.Equal(0, await store.GetAggregateRowCountAsync());
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             store.RecordAsync("crash_count", Day, 1, PilotMetricDimension.WebViewError));
     }
@@ -92,6 +95,19 @@ public sealed class PilotMetricAggregateStoreTests : IDisposable
             store.SetConsentAsync(true, 3, Now.AddMinutes(1)));
 
         Assert.Equal(4, (await store.GetConsentAsync()).NoticeVersion);
+    }
+
+    [Fact]
+    public async Task OptOut_WithOlderNoticeVersion_PreservesVersionAndPurges()
+    {
+        await using var store = await PilotMetricAggregateStore.OpenAsync(root);
+        await store.SetConsentAsync(true, 4, Now);
+        await store.RecordAsync("task_duration_ms", Day, 100);
+
+        await store.SetConsentAsync(false, 1, Now.AddMinutes(1));
+
+        Assert.Equal(new PilotMetricConsentStatus(false, 4, Now.AddMinutes(1)), await store.GetConsentAsync());
+        Assert.Equal(0, await store.GetAggregateRowCountAsync());
     }
 
     public void Dispose()
