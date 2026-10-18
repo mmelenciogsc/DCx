@@ -33,8 +33,11 @@ try {
     }
     $financeResults = @($financeReport.TestRun.Results.UnitTestResult)
     $requiredLiabilityContracts = @(
+        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.CarePeriodRegistration_IsAtomicIdempotentAndConflictSafeAcrossReopen",
+        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.PayoutReservation_RejectsPeriodContributorAmountSubstitutionAndHeldAllocation",
         "DCx.Core.Tests.Finance.DurableCareRepositoryTests.PayoutReservation_RequiresAndAtomicallyReservesOutstandingLiabilityAcrossRepositories",
-        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.PayoutCompletion_RevalidatesLiabilityBeforeFinancialMutation"
+        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.PayoutCompletion_RevalidatesLiabilityBeforeFinancialMutation",
+        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.SchemaTwelve_UnboundTerminalPayoutRemainsReadableButNewReservationsRequireAllocation"
     )
     foreach ($requiredContract in $requiredLiabilityContracts) {
         $matchingResults = @($financeResults | Where-Object {
@@ -61,7 +64,9 @@ try {
     "Qualified attribution split and Net 60=PASS"
     "Owner approval duplicate payout and live-disable gates=PASS"
     "Durable payout reservation terminal state and restart reconciliation=PASS"
-    "Schema-v12 payout preview-total migration and exact binding=PASS"
+    "Schema-v13 registered CARE allocation migration and exact payout binding=PASS"
+    "CARE period replay conflict and atomic ledger accrual=PASS"
+    "Contributor period amount substitution and held-allocation denials=PASS"
     "Outstanding contributor-payable liability required before provider send=PASS"
     "Cross-repository payout over-reservation denial=PASS"
     "Contributor-payable mutation and completion-time liability revalidation=PASS"

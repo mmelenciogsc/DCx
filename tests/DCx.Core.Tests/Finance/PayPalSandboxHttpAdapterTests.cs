@@ -1195,14 +1195,12 @@ public sealed class PayPalSandboxHttpAdapterTests
             var now = DateTimeOffset.Parse("2026-10-17T00:00:00Z");
             var preview = Preview("batch:durable-adapter", 500);
             var repository = await DurableCareRepository.OpenAsync(root);
-            await repository.PostAsync(new LedgerJournalEntry(
-                "accrual:durable-adapter",
-                now,
-                "fixture_contributor_accrual",
-                [
-                    new LedgerPosting(LedgerAccount.ContributorExpense, 500, 0),
-                    new LedgerPosting(LedgerAccount.ContributorPayable, 0, 500),
-                ]));
+            await repository.RegisterCarePeriodAsync(
+                new CarePeriodInput(
+                    2026, 1, 1_250, 0, 0, 0, 0,
+                    MinimumPayoutCents: 0),
+                [new ContributorUsageWeight(DefaultContributor, 1m)],
+                now);
             var submitHandler = new ScriptedHandler(async (index, request, cancellationToken) =>
             {
                 if (index == 0)
@@ -1387,7 +1385,8 @@ public sealed class PayPalSandboxHttpAdapterTests
         [new PayoutItem(
             DefaultContributor,
             cents,
-            PayoutRecipientApproval.Create(DefaultSnapshotId, DefaultEmail))]);
+            PayoutRecipientApproval.Create(DefaultSnapshotId, DefaultEmail))],
+        "care:2026-01");
 
     private static PayPalSandboxWebhookVerificationEvidence Evidence(
         string transmissionId = "transmission:one") => new(

@@ -51,6 +51,14 @@ public static class CareLedgerJournal
 
 public static class PayoutBatchPreviewFactory
 {
+    public static string CarePeriodId(CarePeriodResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var value = $"care:{result.Year:D4}-{result.Month:D2}";
+        PayoutContractValidation.RequireCarePeriodId(value);
+        return value;
+    }
+
     public static PayoutBatchPreview CreateSandbox(
         string batchId,
         CarePeriodResult result,
@@ -76,6 +84,7 @@ public static class PayoutBatchPreviewFactory
                     item.ContributorPseudonym,
                     item.AmountCents,
                     recipientApprovals[item.ContributorPseudonym]))
-                .ToArray());
+                .ToArray(),
+            CarePeriodId(result));
     }
 }

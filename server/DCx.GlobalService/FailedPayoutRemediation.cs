@@ -135,6 +135,10 @@ public sealed partial class DurableCareRepository
                     "The failed payout remediation no longer matches its reviewed items.");
             }
 
+            await ValidatePayoutAllocationAvailabilityAsync(
+                    connection, sqliteTransaction, review.RemediationPreview, cancellationToken)
+                .ConfigureAwait(false);
+
             var availableLiability = await ReadUnreservedContributorPayableCentsAsync(
                     connection, sqliteTransaction, cancellationToken)
                 .ConfigureAwait(false);
@@ -149,9 +153,10 @@ public sealed partial class DurableCareRepository
             command.Transaction = sqliteTransaction;
             command.CommandText = """
                 INSERT INTO payout_batches(
-                    batch_id, preview_sha256, preview_json, preview_total_cents, status,
+                    batch_id, preview_sha256, preview_json, preview_total_cents,
+                    care_period_id, status,
                     remediation_review_sha256, created_utc, updated_utc)
-                VALUES($batch, $sha, $json, $preview_total, 'reserved',
+                VALUES($batch, $sha, $json, $preview_total, $period, 'reserved',
                     $remediation_review, $created, $updated);
                 """;
             command.Parameters.AddWithValue("$batch", review.RemediationPreview.BatchId);
@@ -159,10 +164,14 @@ public sealed partial class DurableCareRepository
             command.Parameters.AddWithValue(
                 "$json", JsonSerializer.Serialize(review.RemediationPreview));
             command.Parameters.AddWithValue("$preview_total", review.RemediationPreview.TotalCents);
+            command.Parameters.AddWithValue("$period", review.RemediationPreview.CarePeriodId!);
             command.Parameters.AddWithValue("$remediation_review", review.ReviewSha256);
             command.Parameters.AddWithValue("$created", approvedUtc.ToString("O"));
             command.Parameters.AddWithValue("$updated", approvedUtc.ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await InsertPayoutAllocationBindingsAsync(
+                    connection, sqliteTransaction, review.RemediationPreview, cancellationToken)
+                .ConfigureAwait(false);
 
             for (var remediationOrdinal = 0; remediationOrdinal < review.Items.Count; remediationOrdinal++)
             {
@@ -269,7 +278,7 @@ public sealed partial class DurableCareRepository
         PayoutBatchPreview remediationPreview)
     {
         PayPalSandboxValidation.RequireLocalBatchId(sourceBatchId);
-        PayoutContractValidation.RequirePreview(remediationPreview);
+        PayoutContractValidation.RequireAllocationBoundPreview(remediationPreview);
         if (string.Equals(sourceBatchId, remediationPreview.BatchId, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
@@ -345,10 +354,14 @@ public sealed partial class DurableCareRepository
             PayoutBatchPreview remediationPreview,
             CancellationToken cancellationToken)
     {
-        if (remediationPreview.EligibilityDate != source.Preview.EligibilityDate)
+        if (remediationPreview.EligibilityDate != source.Preview.EligibilityDate ||
+            !string.Equals(
+                remediationPreview.CarePeriodId,
+                source.Preview.CarePeriodId,
+                StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                "A failed payout remediation must retain the source Net 60 eligibility date.");
+                "A failed payout remediation must retain the source CARE period and Net 60 eligibility date.");
         }
 
         var byContributor = source.Items.ToDictionary(
@@ -407,7 +420,7 @@ public sealed partial class DurableCareRepository
         command.Transaction = transaction;
         command.CommandText = """
             SELECT preview_sha256, preview_json, status, provider_status,
-                   result_sha256, paid_cents, preview_total_cents
+                   result_sha256, paid_cents, preview_total_cents, care_period_id
             FROM payout_batches WHERE batch_id = $batch;
             """;
         command.Parameters.AddWithValue("$batch", sourceBatchId);
@@ -424,6 +437,7 @@ public sealed partial class DurableCareRepository
         var resultSha = reader.IsDBNull(4) ? null : reader.GetString(4);
         var paidCents = reader.GetInt64(5);
         var previewTotalCents = reader.GetInt64(6);
+        var carePeriodId = reader.IsDBNull(7) ? null : reader.GetString(7);
         await reader.DisposeAsync().ConfigureAwait(false);
         if (status is not ("failed" or "partially_succeeded") ||
             string.IsNullOrWhiteSpace(providerStatus) ||
@@ -448,11 +462,15 @@ public sealed partial class DurableCareRepository
         PayoutContractValidation.RequirePreview(preview);
         if (!string.Equals(preview.BatchId, sourceBatchId, StringComparison.Ordinal) ||
             !string.Equals(PayoutPreviewSha(preview), previewSha, StringComparison.Ordinal) ||
-            previewTotalCents != preview.TotalCents)
+            previewTotalCents != preview.TotalCents ||
+            !string.Equals(carePeriodId, preview.CarePeriodId, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 "The source payout preview failed its stored binding.");
         }
+        await ValidatePayoutAllocationBindingsAsync(
+                connection, transaction, preview, cancellationToken)
+            .ConfigureAwait(false);
 
         command.Parameters.Clear();
         command.CommandText = """

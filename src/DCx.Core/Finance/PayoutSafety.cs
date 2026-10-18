@@ -43,7 +43,8 @@ public sealed record PayoutBatchPreview(
     string BatchId,
     PayoutExecutionMode Mode,
     DateOnly EligibilityDate,
-    IReadOnlyList<PayoutItem> Items)
+    IReadOnlyList<PayoutItem> Items,
+    string? CarePeriodId = null)
 {
     public long TotalCents => Items.Sum(item => item.AmountCents);
 }
@@ -144,6 +145,21 @@ public static class PayoutContractValidation
         {
             throw new InvalidOperationException("The sandbox payout total is invalid.");
         }
+
+        if (preview.CarePeriodId is not null)
+        {
+            RequireCarePeriodId(preview.CarePeriodId);
+        }
+    }
+
+    public static void RequireAllocationBoundPreview(PayoutBatchPreview preview)
+    {
+        RequirePreview(preview);
+        if (preview.CarePeriodId is null)
+        {
+            throw new InvalidOperationException(
+                "The sandbox payout preview is not bound to a CARE earning period.");
+        }
     }
 
     public static IReadOnlyList<PayoutItemResult> NormalizeTerminalResult(
@@ -237,6 +253,19 @@ public static class PayoutContractValidation
                 character is not (':' or '.' or '_' or '-')))
         {
             throw new InvalidOperationException("The payout recipient snapshot identifier is invalid.");
+        }
+    }
+
+    public static void RequireCarePeriodId(string value)
+    {
+        if (value is not { Length: 12 } ||
+            !value.StartsWith("care:", StringComparison.Ordinal) ||
+            !int.TryParse(value.AsSpan(5, 4), out var year) || year is < 2000 or > 9999 ||
+            value[9] != '-' ||
+            !int.TryParse(value.AsSpan(10, 2), out var month) || month is < 1 or > 12 ||
+            !string.Equals(value, $"care:{year:D4}-{month:D2}", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The CARE earning-period identifier is invalid.");
         }
     }
 

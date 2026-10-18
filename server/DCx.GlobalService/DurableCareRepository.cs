@@ -283,6 +283,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         CancellationToken cancellationToken = default)
     {
         ValidatePayout(preview, accountEligibilityVerified, ownerApproved, today);
+        PayoutContractValidation.RequireAllocationBoundPreview(preview);
         var previewSha = PayoutPreviewSha(preview);
         await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -291,16 +292,18 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             await using var transaction = connection.BeginTransaction(deferred: false);
             var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "SELECT preview_sha256, preview_total_cents FROM payout_batches WHERE batch_id = $batch;";
+            command.CommandText = "SELECT preview_sha256, preview_total_cents, care_period_id FROM payout_batches WHERE batch_id = $batch;";
             command.Parameters.AddWithValue("$batch", preview.BatchId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 var existingSha = reader.GetString(0);
                 var existingTotal = reader.GetInt64(1);
+                var existingPeriod = reader.IsDBNull(2) ? null : reader.GetString(2);
                 await reader.DisposeAsync().ConfigureAwait(false);
                 if (!string.Equals(existingSha, previewSha, StringComparison.Ordinal) ||
-                    existingTotal != preview.TotalCents)
+                    existingTotal != preview.TotalCents ||
+                    !string.Equals(existingPeriod, preview.CarePeriodId, StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException("The payout batch ID conflicts with another preview.");
                 }
@@ -309,6 +312,9 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             }
             await reader.DisposeAsync().ConfigureAwait(false);
 
+            await ValidatePayoutAllocationAvailabilityAsync(
+                    connection, transaction, preview, cancellationToken)
+                .ConfigureAwait(false);
             var availableLiability = await ReadUnreservedContributorPayableCentsAsync(
                     connection, transaction, cancellationToken)
                 .ConfigureAwait(false);
@@ -322,16 +328,21 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             command.CommandText = """
                 INSERT INTO payout_batches(
                     batch_id, preview_sha256, preview_json, preview_total_cents,
-                    status, created_utc, updated_utc)
-                VALUES($batch, $sha, $json, $preview_total, 'reserved', $created, $updated);
+                    care_period_id, status, created_utc, updated_utc)
+                VALUES($batch, $sha, $json, $preview_total, $period,
+                    'reserved', $created, $updated);
                 """;
             command.Parameters.AddWithValue("$batch", preview.BatchId);
             command.Parameters.AddWithValue("$sha", previewSha);
             command.Parameters.AddWithValue("$json", JsonSerializer.Serialize(preview));
             command.Parameters.AddWithValue("$preview_total", preview.TotalCents);
+            command.Parameters.AddWithValue("$period", preview.CarePeriodId!);
             command.Parameters.AddWithValue("$created", now.ToUniversalTime().ToString("O"));
             command.Parameters.AddWithValue("$updated", now.ToUniversalTime().ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await InsertPayoutAllocationBindingsAsync(
+                    connection, transaction, preview, cancellationToken)
+                .ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }
@@ -358,7 +369,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             await using var transaction = connection.BeginTransaction(deferred: false);
             var command = connection.CreateCommand();
             command.Transaction = (SqliteTransaction)transaction;
-            command.CommandText = "SELECT preview_sha256, preview_total_cents, status, provider_status, result_sha256 FROM payout_batches WHERE batch_id = $batch;";
+            command.CommandText = "SELECT preview_sha256, preview_total_cents, care_period_id, status, provider_status, result_sha256 FROM payout_batches WHERE batch_id = $batch;";
             command.Parameters.AddWithValue("$batch", preview.BatchId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -368,12 +379,14 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
 
             var sha = reader.GetString(0);
             var previewTotalCents = reader.GetInt64(1);
-            var status = reader.GetString(2);
-            var providerStatus = reader.IsDBNull(3) ? null : reader.GetString(3);
-            var existingResultSha = reader.IsDBNull(4) ? null : reader.GetString(4);
+            var carePeriodId = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var status = reader.GetString(3);
+            var providerStatus = reader.IsDBNull(4) ? null : reader.GetString(4);
+            var existingResultSha = reader.IsDBNull(5) ? null : reader.GetString(5);
             await reader.DisposeAsync().ConfigureAwait(false);
             if (!string.Equals(sha, PayoutPreviewSha(preview), StringComparison.Ordinal) ||
-                previewTotalCents != preview.TotalCents)
+                previewTotalCents != preview.TotalCents ||
+                !string.Equals(carePeriodId, preview.CarePeriodId, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("The reserved payout preview was modified.");
             }
@@ -382,6 +395,9 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                     (SqliteTransaction)transaction,
                     preview,
                     cancellationToken)
+                .ConfigureAwait(false);
+            await ValidatePayoutAllocationBindingsAsync(
+                    connection, (SqliteTransaction)transaction, preview, cancellationToken)
                 .ConfigureAwait(false);
 
             var targetStatus = result.Outcome switch
@@ -482,7 +498,8 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT preview_sha256, preview_json, preview_total_cents, created_utc, updated_utc
+            SELECT preview_sha256, preview_json, preview_total_cents, care_period_id,
+                   created_utc, updated_utc
             FROM payout_batches
             WHERE status = 'reserved' AND updated_utc <= $cutoff
             ORDER BY updated_utc, batch_id
@@ -508,21 +525,28 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                 }
 
                 if (!string.Equals(reader.GetString(0), PayoutPreviewSha(preview), StringComparison.Ordinal) ||
-                    reader.GetInt64(2) != preview.TotalCents)
+                    reader.GetInt64(2) != preview.TotalCents ||
+                    !string.Equals(
+                        reader.IsDBNull(3) ? null : reader.GetString(3),
+                        preview.CarePeriodId,
+                        StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException("A durable payout preview failed its stored digest.");
                 }
 
                 pending.Add(new DurablePendingPayout(
                     preview,
-                    DateTimeOffset.Parse(reader.GetString(3)),
-                    DateTimeOffset.Parse(reader.GetString(4))));
+                    DateTimeOffset.Parse(reader.GetString(4)),
+                    DateTimeOffset.Parse(reader.GetString(5))));
             }
         }
 
         foreach (var item in pending)
         {
             await ValidateRemediationTargetLineageAsync(
+                    connection, null, item.Preview, cancellationToken)
+                .ConfigureAwait(false);
+            await ValidatePayoutAllocationBindingsAsync(
                     connection, null, item.Preview, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -539,7 +563,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT preview_sha256, preview_json, preview_total_cents, updated_utc
+            SELECT preview_sha256, preview_json, preview_total_cents, care_period_id, updated_utc
             FROM payout_batches
             WHERE status IN ('succeeded', 'partially_succeeded') AND updated_utc <= $cutoff
             ORDER BY updated_utc, batch_id
@@ -565,20 +589,27 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                 }
 
                 if (!string.Equals(reader.GetString(0), PayoutPreviewSha(preview), StringComparison.Ordinal) ||
-                    reader.GetInt64(2) != preview.TotalCents)
+                    reader.GetInt64(2) != preview.TotalCents ||
+                    !string.Equals(
+                        reader.IsDBNull(3) ? null : reader.GetString(3),
+                        preview.CarePeriodId,
+                        StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException("A durable payout preview failed its stored digest.");
                 }
 
                 terminal.Add(new DurableTerminalPayout(
                     preview,
-                    DateTimeOffset.Parse(reader.GetString(3))));
+                    DateTimeOffset.Parse(reader.GetString(4))));
             }
         }
 
         foreach (var item in terminal)
         {
             await ValidateRemediationTargetLineageAsync(
+                    connection, null, item.Preview, cancellationToken)
+                .ConfigureAwait(false);
+            await ValidatePayoutAllocationBindingsAsync(
                     connection, null, item.Preview, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -603,7 +634,8 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             var command = connection.CreateCommand();
             command.Transaction = sqliteTransaction;
             command.CommandText = """
-                SELECT preview_sha256, preview_total_cents, status, provider_status, result_sha256, paid_cents
+                SELECT preview_sha256, preview_total_cents, care_period_id,
+                       status, provider_status, result_sha256, paid_cents
                 FROM payout_batches WHERE batch_id = $batch;
                 """;
             command.Parameters.AddWithValue("$batch", preview.BatchId);
@@ -615,16 +647,24 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
 
             var previewSha = reader.GetString(0);
             var previewTotalCents = reader.GetInt64(1);
-            var status = reader.GetString(2);
-            var providerStatus = reader.IsDBNull(3) ? null : reader.GetString(3);
-            var existingResultSha = reader.IsDBNull(4) ? null : reader.GetString(4);
-            var paidCents = reader.GetInt64(5);
+            var carePeriodId = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var status = reader.GetString(3);
+            var providerStatus = reader.IsDBNull(4) ? null : reader.GetString(4);
+            var existingResultSha = reader.IsDBNull(5) ? null : reader.GetString(5);
+            var paidCents = reader.GetInt64(6);
             await reader.DisposeAsync().ConfigureAwait(false);
             if (!string.Equals(previewSha, PayoutPreviewSha(preview), StringComparison.Ordinal) ||
-                previewTotalCents != preview.TotalCents)
+                previewTotalCents != preview.TotalCents ||
+                !string.Equals(carePeriodId, preview.CarePeriodId, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("The terminal payout preview failed its stored digest.");
             }
+            await ValidateRemediationTargetLineageAsync(
+                    connection, sqliteTransaction, preview, cancellationToken)
+                .ConfigureAwait(false);
+            await ValidatePayoutAllocationBindingsAsync(
+                    connection, sqliteTransaction, preview, cancellationToken)
+                .ConfigureAwait(false);
 
             if (status is not ("succeeded" or "partially_succeeded") ||
                 string.IsNullOrWhiteSpace(providerStatus) || string.IsNullOrWhiteSpace(existingResultSha))
@@ -1127,7 +1167,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         command.CommandText = "PRAGMA user_version;";
         var schemaVersion = Convert.ToInt32(
             await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
-        if (schemaVersion > 12)
+        if (schemaVersion > 13)
         {
             throw new InvalidOperationException("The CARE ledger schema is newer than this application.");
         }
@@ -1206,6 +1246,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                 preview_sha256 TEXT NOT NULL,
                 preview_json TEXT NOT NULL,
                 preview_total_cents INTEGER NOT NULL CHECK(preview_total_cents > 0),
+                care_period_id TEXT,
                 status TEXT NOT NULL CHECK(status IN (
                     'reserved', 'succeeded', 'failed', 'partially_succeeded', 'review_required')),
                 provider_status TEXT,
@@ -1276,6 +1317,12 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             "preview_total_cents",
             "INTEGER NOT NULL DEFAULT 0 CHECK(preview_total_cents >= 0)",
             cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(
+            connection,
+            "payout_batches",
+            "care_period_id",
+            "TEXT",
+            cancellationToken).ConfigureAwait(false);
         await BackfillPayoutPreviewTotalsAsync(connection, cancellationToken).ConfigureAwait(false);
 
         command.CommandText = """
@@ -1325,6 +1372,51 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                     REFERENCES payout_item_results(batch_id, ordinal),
                 FOREIGN KEY(remediation_batch_id)
                     REFERENCES payout_batches(batch_id)
+            );
+            CREATE TABLE IF NOT EXISTS care_periods(
+                period_id TEXT PRIMARY KEY,
+                earning_year INTEGER NOT NULL CHECK(earning_year BETWEEN 2000 AND 9999),
+                earning_month INTEGER NOT NULL CHECK(earning_month BETWEEN 1 AND 12),
+                subscription_revenue_cents INTEGER NOT NULL CHECK(subscription_revenue_cents >= 0),
+                refund_chargeback_cents INTEGER NOT NULL CHECK(refund_chargeback_cents >= 0),
+                payment_fee_cents INTEGER NOT NULL CHECK(payment_fee_cents >= 0),
+                approved_operating_cost_cents INTEGER NOT NULL CHECK(approved_operating_cost_cents >= 0),
+                tax_risk_reserve_cents INTEGER NOT NULL CHECK(tax_risk_reserve_cents >= 0),
+                contributor_pool_basis_points INTEGER NOT NULL
+                    CHECK(contributor_pool_basis_points BETWEEN 0 AND 4000),
+                minimum_payout_cents INTEGER NOT NULL CHECK(minimum_payout_cents >= 0),
+                distributable_net_profit_cents INTEGER NOT NULL
+                    CHECK(distributable_net_profit_cents >= 0),
+                contributor_pool_cents INTEGER NOT NULL CHECK(contributor_pool_cents >= 0),
+                period_close TEXT NOT NULL,
+                eligibility_date TEXT NOT NULL,
+                registration_sha256 TEXT NOT NULL CHECK(
+                    length(registration_sha256) = 64 AND
+                    registration_sha256 = lower(registration_sha256) AND
+                    registration_sha256 NOT GLOB '*[^0-9a-f]*'),
+                registered_utc TEXT NOT NULL,
+                UNIQUE(earning_year, earning_month)
+            );
+            CREATE TABLE IF NOT EXISTS care_contributor_allocations(
+                period_id TEXT NOT NULL,
+                contributor_pseudonym TEXT NOT NULL,
+                qualified_weight TEXT NOT NULL CHECK(length(qualified_weight) BETWEEN 1 AND 64),
+                allocation_cents INTEGER NOT NULL CHECK(allocation_cents >= 0),
+                held_below_threshold INTEGER NOT NULL CHECK(held_below_threshold IN (0, 1)),
+                PRIMARY KEY(period_id, contributor_pseudonym),
+                FOREIGN KEY(period_id) REFERENCES care_periods(period_id)
+            );
+            CREATE TABLE IF NOT EXISTS payout_allocation_bindings(
+                batch_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+                period_id TEXT NOT NULL,
+                contributor_pseudonym TEXT NOT NULL,
+                amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+                PRIMARY KEY(batch_id, ordinal),
+                UNIQUE(batch_id, contributor_pseudonym),
+                FOREIGN KEY(batch_id) REFERENCES payout_batches(batch_id),
+                FOREIGN KEY(period_id, contributor_pseudonym)
+                    REFERENCES care_contributor_allocations(period_id, contributor_pseudonym)
             );
             CREATE TABLE IF NOT EXISTS webhook_event_quarantine(
                 event_id TEXT PRIMARY KEY,
@@ -1547,7 +1639,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             ON webhook_event_quarantine(state, next_attempt_utc, occurred_utc, event_id);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        command.CommandText = "PRAGMA user_version = 12;";
+        command.CommandText = "PRAGMA user_version = 13;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -1559,11 +1651,18 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT batch_id, preview_sha256, preview_json, preview_total_cents, status
+            SELECT batch_id, preview_sha256, preview_json, preview_total_cents,
+                   status, care_period_id
             FROM payout_batches
             ORDER BY batch_id;
             """;
-        var rows = new List<(string BatchId, string Sha256, string Json, long StoredTotal, string Status)>();
+        var rows = new List<(
+            string BatchId,
+            string Sha256,
+            string Json,
+            long StoredTotal,
+            string Status,
+            string? CarePeriodId)>();
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -1573,7 +1672,8 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                     reader.GetString(1),
                     reader.GetString(2),
                     reader.GetInt64(3),
-                    reader.GetString(4)));
+                    reader.GetString(4),
+                    reader.IsDBNull(5) ? null : reader.GetString(5)));
             }
         }
 
@@ -1595,7 +1695,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                 (exception is JsonException or InvalidOperationException) &&
                 string.Equals(row.Status, "review_required", StringComparison.Ordinal))
             {
-                if (row.StoredTotal != 0)
+                if (row.StoredTotal != 0 || row.CarePeriodId is not null)
                 {
                     throw new InvalidOperationException(
                         "A legacy review-required payout has a conflicting accounting total.");
@@ -1612,20 +1712,26 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             if (!string.Equals(row.BatchId, preview.BatchId, StringComparison.Ordinal) ||
                 !string.Equals(row.Sha256, PayoutPreviewSha(preview), StringComparison.Ordinal) ||
                 row.StoredTotal < 0 ||
-                row.StoredTotal != 0 && row.StoredTotal != preview.TotalCents)
+                row.StoredTotal != 0 && row.StoredTotal != preview.TotalCents ||
+                row.CarePeriodId is not null &&
+                    !string.Equals(row.CarePeriodId, preview.CarePeriodId, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
                     "A durable payout preview conflicts with its accounting binding.");
             }
 
-            if (row.StoredTotal != 0) continue;
+            if (row.StoredTotal != 0 &&
+                (preview.CarePeriodId is null || row.CarePeriodId is not null)) continue;
             command.Parameters.Clear();
             command.CommandText = """
                 UPDATE payout_batches
-                SET preview_total_cents = $total
-                WHERE batch_id = $batch AND preview_total_cents = 0;
+                SET preview_total_cents = $total,
+                    care_period_id = $period
+                WHERE batch_id = $batch;
                 """;
             command.Parameters.AddWithValue("$total", preview.TotalCents);
+            command.Parameters.AddWithValue(
+                "$period", preview.CarePeriodId is null ? DBNull.Value : preview.CarePeriodId);
             command.Parameters.AddWithValue("$batch", row.BatchId);
             if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
             {
@@ -1710,7 +1816,17 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(entry)));
 
     private static string PayoutPreviewSha(PayoutBatchPreview preview) =>
-        Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(preview)));
+        Convert.ToHexStringLower(SHA256.HashData(
+            preview.CarePeriodId is null
+                ? JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    preview.BatchId,
+                    preview.Mode,
+                    preview.EligibilityDate,
+                    preview.Items,
+                    preview.TotalCents,
+                })
+                : JsonSerializer.SerializeToUtf8Bytes(preview)));
 
     private static string PayoutResultSha(
         PayoutBatchResult result,
