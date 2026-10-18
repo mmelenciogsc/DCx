@@ -5,13 +5,12 @@ using System.Text.Json.Serialization;
 namespace DCx.Core.LocalModels;
 
 /// <summary>
-/// Revalidates the internal consistency of an inert, digest-bound Whisper runtime stage without
-/// registering or executing it. The returned result is a point-in-time integrity observation,
-/// not cryptographic receipt authenticity or execution approval.
+/// Revalidates an inert, digest-bound Whisper runtime stage against its separately protected
+/// receipt anchor without registering or executing it. The result is a point-in-time integrity
+/// observation, not publisher authenticity or execution approval.
 /// </summary>
 public sealed class WhisperRuntimeStageVerifier
 {
-    private const int MaximumReceiptBytes = 1024 * 1024;
     private const int MaximumFiles = 1024;
     private const int MaximumDirectories = 1024;
     private const long MaximumExpandedBytes = 3L * 1024 * 1024 * 1024;
@@ -26,6 +25,16 @@ public sealed class WhisperRuntimeStageVerifier
         ReadCommentHandling = JsonCommentHandling.Disallow,
         MaxDepth = 16,
     };
+
+    private readonly IWhisperRuntimeStageAnchorStore anchorStore;
+
+    public WhisperRuntimeStageVerifier()
+        : this(new WindowsWhisperRuntimeStageAnchorStore())
+    {
+    }
+
+    public WhisperRuntimeStageVerifier(IWhisperRuntimeStageAnchorStore anchorStore) =>
+        this.anchorStore = anchorStore ?? throw new ArgumentNullException(nameof(anchorStore));
 
     public async Task<WhisperRuntimeStagingResult> VerifyAsync(
         PinnedLocalModelDependencyCandidate candidate,
@@ -65,7 +74,7 @@ public sealed class WhisperRuntimeStageVerifier
             mustExist: true,
             "Whisper runtime receipt");
         var receiptInfo = new FileInfo(receiptPath);
-        if (receiptInfo.Length is <= 0 or > MaximumReceiptBytes)
+        if (receiptInfo.Length is <= 0 or > WhisperRuntimeStager.MaximumReceiptBytes)
         {
             throw new InvalidOperationException("The Whisper runtime receipt is outside its size limit.");
         }
@@ -85,9 +94,32 @@ public sealed class WhisperRuntimeStageVerifier
 
         var receiptBytes = new byte[checked((int)receiptStream.Length)];
         RuntimeReceiptDto receipt;
+        WhisperRuntimeStageAnchor anchor;
         try
         {
             await receiptStream.ReadExactlyAsync(receiptBytes, cancellationToken).ConfigureAwait(false);
+            var receiptDigestBytes = SHA256.HashData(receiptBytes);
+            string receiptSha256;
+            try
+            {
+                receiptSha256 = Convert.ToHexStringLower(receiptDigestBytes);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(receiptDigestBytes);
+            }
+            anchor = await anchorStore.ReadAsync(candidate, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException(
+                    "The staged Whisper runtime has no protected receipt anchor.");
+            if (anchor.ReceiptBytes != receiptStream.Length)
+            {
+                throw new InvalidOperationException(
+                    "The staged Whisper runtime receipt length does not match its protected anchor.");
+            }
+            LocalModelDependencyCatalogLoader.RequireDigest(
+                receiptSha256,
+                anchor.ReceiptSha256,
+                "protected Whisper runtime stage receipt");
             using var document = JsonDocument.Parse(receiptBytes, new JsonDocumentOptions
             {
                 AllowTrailingCommas = false,
@@ -108,6 +140,11 @@ public sealed class WhisperRuntimeStageVerifier
         }
 
         var files = ValidateReceipt(receipt, candidate);
+        if (receipt.StagedUtc != anchor.StagedUtc)
+        {
+            throw new InvalidOperationException(
+                "The staged Whisper runtime timestamp does not match its protected anchor.");
+        }
         var expectedDirectories = BuildExpectedDirectories(files);
         var expectedFiles = files.ToDictionary(
             file => file.RelativePath,

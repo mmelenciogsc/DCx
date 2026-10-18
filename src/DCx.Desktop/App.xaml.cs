@@ -276,7 +276,8 @@ public partial class App : Application
                 ffmpegStore,
                 applicationDataRoot,
                 catalog,
-                timeProvider: null);
+                timeProvider: null,
+                stageAnchorStore: new FixtureWhisperRuntimeStageAnchorStore());
             MainWindow.Show();
         }
         catch
@@ -325,6 +326,36 @@ public partial class App : Application
         if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
         {
             throw new InvalidOperationException("Whisper staging fixture archive is a reparse point.");
+        }
+    }
+
+    private sealed class FixtureWhisperRuntimeStageAnchorStore : IWhisperRuntimeStageAnchorStore
+    {
+        private WhisperRuntimeStageAnchor? anchor;
+
+        public Task<WhisperRuntimeStageAnchor?> ReadAsync(
+            PinnedLocalModelDependencyCandidate candidate,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(anchor is not null &&
+                string.Equals(anchor.CandidateId, candidate.Id, StringComparison.Ordinal) &&
+                string.Equals(anchor.ArchiveSha256, candidate.Sha256, StringComparison.Ordinal)
+                    ? anchor
+                    : null);
+        }
+
+        public Task BindAsync(
+            WhisperRuntimeStageAnchor value,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (anchor is not null && anchor != value)
+            {
+                throw new InvalidOperationException("The fixture stage anchor conflicts.");
+            }
+            anchor = value;
+            return Task.CompletedTask;
         }
     }
 

@@ -27,7 +27,7 @@ public sealed class WhisperRuntimeStager
 {
     public const int CurrentReceiptSchemaVersion = 1;
     public const string ReceiptFileName = ".dcx-runtime-receipt.json";
-    private const int MaximumReceiptBytes = 1024 * 1024;
+    internal const int MaximumReceiptBytes = 1024 * 1024;
 
     private static readonly JsonSerializerOptions ReceiptJsonOptions = new()
     {
@@ -38,10 +38,14 @@ public sealed class WhisperRuntimeStager
 
     private readonly TimeProvider timeProvider;
     private readonly LocalModelDependencyArtifactReviewer reviewer;
+    private readonly IWhisperRuntimeStageAnchorStore anchorStore;
 
-    public WhisperRuntimeStager(TimeProvider? timeProvider = null)
+    public WhisperRuntimeStager(
+        TimeProvider? timeProvider = null,
+        IWhisperRuntimeStageAnchorStore? anchorStore = null)
     {
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.anchorStore = anchorStore ?? new WindowsWhisperRuntimeStageAnchorStore();
         reviewer = new LocalModelDependencyArtifactReviewer(this.timeProvider);
     }
 
@@ -88,6 +92,8 @@ public sealed class WhisperRuntimeStager
             "Whisper runtime storage");
         var destinationName = $"{candidate.Id}-{candidate.Sha256}";
         EnsureDestinationAbsent(runtimeRoot, destinationName);
+        var existingAnchor = await anchorStore.ReadAsync(candidate, cancellationToken)
+            .ConfigureAwait(false);
         var destination = Path.Combine(runtimeRoot, destinationName);
         var operationId = Guid.NewGuid().ToString("N");
         var temporaryDirectory = Path.Combine(runtimeRoot, $".stage-{operationId}");
@@ -108,7 +114,7 @@ public sealed class WhisperRuntimeStager
                     temporaryDirectory,
                     cancellationToken)
                 .ConfigureAwait(false);
-            var stagedUtc = timeProvider.GetUtcNow();
+            var stagedUtc = existingAnchor?.StagedUtc ?? timeProvider.GetUtcNow();
             if (stagedUtc == default || stagedUtc.Offset != TimeSpan.Zero)
             {
                 throw new InvalidOperationException("The Whisper runtime staging clock did not return UTC.");
@@ -146,33 +152,22 @@ public sealed class WhisperRuntimeStager
                 throw new InvalidOperationException("The private Whisper runtime source could not be removed safely.");
             }
 
+            await BindReceiptAsync(
+                    candidate,
+                    receiptPath,
+                    stagedUtc,
+                    cancellationToken)
+                .ConfigureAwait(false);
             EnsureDestinationAbsent(runtimeRoot, destinationName);
             Directory.Move(temporaryDirectory, destination);
-            var published = LocalModelStoragePathGuard.RequireDirectory(
+            _ = LocalModelStoragePathGuard.RequireDirectory(
                 destination,
                 "staged Whisper runtime");
-            var publishedReceipt = LocalModelStoragePathGuard.ValidateFile(
-                Path.Combine(published, ReceiptFileName),
-                mustExist: true,
-                "Whisper runtime receipt");
-            var cliPath = LocalModelStoragePathGuard.ValidateFile(
-                CombineUnder(published, extraction.Inventory.WhisperCliEntry),
-                mustExist: true,
-                "staged Whisper CLI");
-
-            return new WhisperRuntimeStagingResult(
-                candidate.Id,
-                candidate.Sha256,
-                published,
-                cliPath,
-                publishedReceipt,
-                stagedUtc,
-                extraction.Inventory.FileCount,
-                extraction.Inventory.DirectoryCount,
-                extraction.Inventory.ExpandedBytes,
-                extraction.Inventory.LicenseNoticeEntryCount,
-                extraction.Inventory.LicenseNoticeEntries,
-                extraction.Files);
+            return await new WhisperRuntimeStageVerifier(anchorStore).VerifyAsync(
+                    candidate,
+                    applicationRoot,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -185,6 +180,57 @@ public sealed class WhisperRuntimeStager
                 temporaryDirectory,
                 "temporary Whisper runtime");
         }
+    }
+
+    private async Task BindReceiptAsync(
+        PinnedLocalModelDependencyCandidate candidate,
+        string receiptPath,
+        DateTimeOffset stagedUtc,
+        CancellationToken cancellationToken)
+    {
+        var canonical = LocalModelStoragePathGuard.ValidateFile(
+            receiptPath,
+            mustExist: true,
+            "Whisper runtime receipt anchor source");
+        await using var receipt = new FileStream(
+            canonical,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            16 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        LocalModelStoragePathGuard.ValidateFile(
+            canonical,
+            mustExist: true,
+            "Whisper runtime receipt anchor source");
+        if (receipt.Length is <= 0 or > MaximumReceiptBytes)
+        {
+            throw new InvalidOperationException("The Whisper runtime receipt anchor source is outside its size limit.");
+        }
+        var digestBytes = await SHA256.HashDataAsync(receipt, cancellationToken).ConfigureAwait(false);
+        string digest;
+        try
+        {
+            digest = Convert.ToHexStringLower(digestBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(digestBytes);
+        }
+        LocalModelStoragePathGuard.ValidateFile(
+            canonical,
+            mustExist: true,
+            "Whisper runtime receipt anchor source");
+        await anchorStore.BindAsync(
+                new WhisperRuntimeStageAnchor(
+                    WindowsWhisperRuntimeStageAnchorStore.CurrentSchemaVersion,
+                    candidate.Id,
+                    candidate.Sha256,
+                    digest,
+                    receipt.Length,
+                    stagedUtc),
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private async Task<ExtractionReview> ReviewAndExtractAsync(

@@ -73,11 +73,18 @@ try {
         "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_NeverOverwritesExistingDigestBoundDestination",
         "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_DeniesLinkedRuntimeRootWithoutWritingOutside",
         "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_HonorsPreCanceledOperationBeforeCreatingApplicationStorage",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_FailsClosedWhenProtectedAnchorCannotBeWrittenAndPublishesNothing",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_FailsBeforeCopyOrExtractionWhenProtectedAnchorCannotBeRead",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_ReusesProtectedTimestampWhenExactRemovedStageIsRecreated",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_DefaultWindowsVaultAnchorRoundTripsThroughDefaultVerifierAndIsCleanedUp",
         "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Verify_RehashesExactStageWithoutRegisteringOrExecutingRuntime",
         "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Verify_DeniesTamperedRuntimeFile",
         "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Verify_DeniesUnexpectedFileAndDirectory",
         "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Verify_DeniesLinkedContentWithoutReadingOutside",
-        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Verify_DeniesUnknownDuplicateOrMismatchedReceiptIdentity"
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Verify_DeniesUnknownDuplicateOrMismatchedReceiptIdentity",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Verify_DeniesMissingAnchorAndCoordinatedReceiptPayloadReplacement",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStageAnchorStoreTests.WindowsVaultAnchor_RoundTripsIsolatesAndRejectsConflictUnknownAndDuplicateState",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStageAnchorStoreTests.WindowsVaultAnchor_HonorsPreCanceledReadAndBindWithoutCreatingCredential"
     )
     $localModelResults = @($localModelsReport.TestRun.Results.UnitTestResult)
     foreach ($requiredStorageDenial in $requiredStorageDenials) {
@@ -136,6 +143,7 @@ try {
         $whisperRegistrationEvidence.dependency_runtime_staging_result_focus -ne $true -or
         $whisperRegistrationEvidence.dependency_runtime_staging_source_preserved -ne $true -or
         $whisperRegistrationEvidence.dependency_runtime_staging_receipt_source_path_retained -ne $false -or
+        $whisperRegistrationEvidence.dependency_runtime_staging_protected_anchor -ne $true -or
         $whisperRegistrationEvidence.dependency_runtime_staging_registered_or_executed -ne $false -or
         $whisperRegistrationEvidence.accessible_viewer_cancellation -ne $true -or
         $whisperRegistrationEvidence.canceled_partial_transcript_retained -ne $false -or

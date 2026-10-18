@@ -329,7 +329,7 @@ public sealed class LocalModelDependencyCatalogLoader
         }
     }
 
-    private static void ValidateIdentifier(string? value, string label)
+    internal static void ValidateIdentifier(string? value, string label)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Length > 64 || value != value.Trim() ||
             value.Any(character => !(char.IsAsciiLetterOrDigit(character) || character == '-')))

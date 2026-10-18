@@ -841,6 +841,7 @@ try {
             $candidate = Find-ById $stagingWindow "DependencyArtifactResult"
             if ($null -ne $candidate -and
                 $candidate.Current.Name -like "Staged synthetic-whisper-runtime inertly.*" -and
+                $candidate.Current.Name -like "*receipt identity is separately protected*" -and
                 $candidate.Current.Name -like "*No installation, registration, execution, or selection occurred*") {
                 $candidate
             }
@@ -912,6 +913,7 @@ try {
         dependency_runtime_staging_result_focus = $true
         dependency_runtime_staging_source_preserved = $true
         dependency_runtime_staging_receipt_source_path_retained = $false
+        dependency_runtime_staging_protected_anchor = $true
         dependency_runtime_staging_registered_or_executed = $false
         keyboard_focusable_unique_access_keys = $true
         benchmark_native_uia = "pass"
@@ -956,6 +958,7 @@ try {
     "Exact four-file digest review UIA=PASS"
     "Immutable dependency catalog and staged-mismatch denial UIA=PASS"
     "Explicit default-off inert Whisper runtime staging UIA=PASS"
+    "Protected runtime staging receipt anchor composition UIA=PASS"
     "UI-approved production adapter transcript=$($transcription.Text)"
     "Approval-bound aggregate benchmark review and execution UIA=PASS"
     "Benchmark cancellation and evidence preservation UIA=PASS"

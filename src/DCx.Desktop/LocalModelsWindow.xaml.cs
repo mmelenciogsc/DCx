@@ -40,7 +40,8 @@ public partial class LocalModelsWindow : Window
             ffmpegStore,
             ApplicationDataRoot.Resolve(),
             dependencyCatalogFixture: null,
-            timeProvider: null)
+            timeProvider: null,
+            stageAnchorStore: null)
     {
     }
 
@@ -50,14 +51,15 @@ public partial class LocalModelsWindow : Window
         FfmpegBackendSelectionStore ffmpegStore,
         string applicationDataRoot,
         LocalModelDependencyCatalogReview? dependencyCatalogFixture,
-        TimeProvider? timeProvider)
+        TimeProvider? timeProvider,
+        IWhisperRuntimeStageAnchorStore? stageAnchorStore)
     {
         this.store = store ?? throw new ArgumentNullException(nameof(store));
         this.whisperStore = whisperStore ?? throw new ArgumentNullException(nameof(whisperStore));
         this.ffmpegStore = ffmpegStore ?? throw new ArgumentNullException(nameof(ffmpegStore));
         this.applicationDataRoot = applicationDataRoot ?? throw new ArgumentNullException(nameof(applicationDataRoot));
         this.dependencyCatalogFixture = dependencyCatalogFixture;
-        whisperRuntimeStager = new WhisperRuntimeStager(timeProvider);
+        whisperRuntimeStager = new WhisperRuntimeStager(timeProvider, stageAnchorStore);
         InitializeComponent();
         Loaded += async (_, _) =>
         {
@@ -254,8 +256,9 @@ public partial class LocalModelsWindow : Window
                 $"Staged {result.CandidateId} inertly. {result.FileCount:N0} files and " +
                 $"{result.DirectoryCount:N0} archive directories; {result.ExpandedBytes:N0} bytes. " +
                 $"Archive SHA-256 {result.ArchiveSha256}. CLI {result.WhisperCliPath}. " +
-                $"Receipt {result.ReceiptPath}. No installation, registration, execution, or selection occurred.");
-            SetStatus("The exact runtime was staged inertly. Registering or executing it requires separate review and approval.");
+                $"Receipt {result.ReceiptPath}. Its exact receipt identity is separately protected. " +
+                "No installation, registration, execution, or selection occurred.");
+            SetStatus("The exact runtime and protected receipt anchor were staged inertly. Registering or executing it requires separate review and approval.");
             DependencyArtifactResult.Focus();
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
@@ -264,7 +267,7 @@ public partial class LocalModelsWindow : Window
         catch
         {
             ResetDependencyArtifactReview(
-                "Runtime staging failed closed. No runtime was published or activated; review the source again before retrying.");
+                "Runtime staging failed closed. No runtime was activated. An inert untrusted stage may remain for later review; review the source again before retrying.");
             SetStatus("Runtime staging was rejected. Nothing was installed, registered, executed, or selected.");
         }
         finally

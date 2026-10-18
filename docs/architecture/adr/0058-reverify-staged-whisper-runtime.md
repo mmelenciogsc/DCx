@@ -1,6 +1,6 @@
 # ADR 0058: Reverify inert Whisper stages before later trust decisions
 
-- Status: Accepted for read-only local integrity review
+- Status: Superseded in part by ADR 0059 (tree verification retained; unanchored-receipt limitation closed for filesystem-only mutation)
 - Date: 2026-10-18
 
 ## Context
