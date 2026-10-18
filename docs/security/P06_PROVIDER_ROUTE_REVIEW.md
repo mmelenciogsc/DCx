@@ -16,7 +16,7 @@ Omitting the switch fails before any network request. The audit uses the native 
 
 ## Measured observation
 
-Evidence: `artifacts/test-results/p06-route-audit-318dda5a3468441da437d54a86fb0fc2/provider-route-audit.json` (intentionally uncommitted; generated before the implementation commit and superseded by the exact-commit evidence recorded in `docs/progress/PHASE-06.md`).
+Evidence: `artifacts/test-results/p06-route-audit-89f5876ba34549cba66bf32d8941dcc5/provider-route-audit.json` (intentionally uncommitted; generated from clean exact source `b82c270636aedd521b5e2c7a44e6ce4207df9484`).
 
 - Plan items: 9.
 - HEAD requests: 12.
