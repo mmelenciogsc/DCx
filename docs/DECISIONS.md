@@ -55,11 +55,12 @@
 | [0051](architecture/adr/0051-accessible-local-benchmark-review.md) | Admit strict local benchmark manifests through one accessible exact-review approval | Accepted for fixture-backed local execution; real backend acceptance blocked | 2026-10-18 |
 | [0052](architecture/adr/0052-exact-ollama-embedding-benchmark.md) | Bind Ollama embedding benchmarks to exact runtime, loaded resources and confirmed unload | Accepted for already-installed approved models; real model acceptance blocked | 2026-10-18 |
 | [0053](architecture/adr/0053-confined-global-storage-paths.md) | Confine global replica and authoritative registry files to non-reparse digest-derived storage | Accepted for local/simulation storage; deployment blocked | 2026-10-18 |
-| [0054](architecture/adr/0054-confined-local-model-state.md) | Confine local-model approvals and benchmark evidence to revalidated non-reparse storage | Accepted for per-user local-model controls | 2026-10-18 |
+| [0054](architecture/adr/0054-confined-local-model-state.md) | Confine local-model approvals and benchmark evidence to revalidated non-reparse storage | Accepted for storage confinement; approval-replay limit superseded by 0060 | 2026-10-18 |
 | [0055](architecture/adr/0055-pinned-offline-local-dependency-admission.md) | Pin and review local-model dependencies without installation authority | Accepted for consent-safe offline admission | 2026-10-18 |
 | [0056](architecture/adr/0056-bounded-whisper-runtime-archive-inspection.md) | Inspect pinned Whisper runtime archives before any extraction | Accepted for pre-extraction admission | 2026-10-18 |
 | [0057](architecture/adr/0057-explicit-inert-whisper-runtime-staging.md) | Stage approved Whisper runtimes as inert digest-bound trees | Accepted for non-elevated local staging only | 2026-10-18 |
 | [0058](architecture/adr/0058-reverify-staged-whisper-runtime.md) | Reverify inert Whisper stages before later trust decisions | Accepted; filesystem-provenance limit superseded by 0059 | 2026-10-18 |
 | [0059](architecture/adr/0059-protected-whisper-stage-receipt-anchor.md) | Anchor exact inert Whisper stage receipts in Windows Credential Manager | Accepted for per-user filesystem-replacement defense | 2026-10-18 |
+| [0060](architecture/adr/0060-protected-local-model-approval-state.md) | Protect local-model approval state from filesystem replay | Accepted for per-user filesystem-replacement defense | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
