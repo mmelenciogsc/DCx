@@ -150,9 +150,22 @@ public partial class LocalModelsWindow : Window
         try
         {
             var review = await dependencyArtifactReviewer.ReviewAsync(candidate, path, lifetime.Token);
+            var runtimeInventory = review.RuntimeArchive is null
+                ? string.Empty
+                : $" Runtime archive: {review.RuntimeArchive.FileCount:N0} files and " +
+                  $"{review.RuntimeArchive.DirectoryCount:N0} directories; {review.RuntimeArchive.ExpandedBytes:N0} expanded bytes; " +
+                  $"CLI {review.RuntimeArchive.WhisperCliEntry}; " +
+                  (review.RuntimeArchive.LicenseNoticeEntryCount == 0
+                      ? "no contained license or notice file was found, so external and redistribution terms still require review."
+                      : $"{review.RuntimeArchive.LicenseNoticeEntryCount:N0} contained license or notice files" +
+                        (review.RuntimeArchive.LicenseNoticeEntryCount > review.RuntimeArchive.LicenseNoticeEntries.Count
+                            ? $"; first {review.RuntimeArchive.LicenseNoticeEntries.Count:N0} shown: "
+                            : ": ") +
+                        $"{string.Join(", ", review.RuntimeArchive.LicenseNoticeEntries)}. All contained terms require review.");
             SetDependencyArtifactResult(
                 $"Verified {review.CandidateId}. {review.Bytes:N0} bytes. SHA-256 {review.Sha256}. " +
-                $"Reviewed {review.ReviewedUtc:u}. No installation, extraction, model pull, execution, approval, or selection occurred.");
+                $"Reviewed {review.ReviewedUtc:u}.{runtimeInventory} " +
+                "No installation, extraction, model pull, execution, approval, or selection occurred.");
             SetStatus("The already-staged dependency artifact matches the immutable catalog identity. This integrity result is not installation, execution, legal, or production approval.");
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)

@@ -495,7 +495,8 @@ public sealed record LocalModelDependencyArtifactReview(
     string ArtifactPath,
     long Bytes,
     string Sha256,
-    DateTimeOffset ReviewedUtc);
+    DateTimeOffset ReviewedUtc,
+    WhisperRuntimeArchiveInventory? RuntimeArchive);
 
 public sealed class LocalModelDependencyArtifactReviewer
 {
@@ -542,6 +543,14 @@ public sealed class LocalModelDependencyArtifactReviewer
         }
         LocalModelDependencyCatalogLoader.RequireDigest(actual, candidate.Sha256, "dependency artifact");
 
+        WhisperRuntimeArchiveInventory? runtimeArchive = null;
+        if (candidate.Kind == LocalModelDependencyKind.WhisperRuntimeArchive)
+        {
+            stream.Position = 0;
+            runtimeArchive = await WhisperRuntimeArchiveInspector.InspectAsync(stream, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var reviewedUtc = timeProvider.GetUtcNow();
         if (reviewedUtc == default || reviewedUtc.Offset != TimeSpan.Zero)
         {
@@ -553,7 +562,8 @@ public sealed class LocalModelDependencyArtifactReviewer
             canonical,
             candidate.ExpectedBytes,
             actual,
-            reviewedUtc);
+            reviewedUtc,
+            runtimeArchive);
     }
 
     private static async Task ValidateSignatureAsync(

@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -115,7 +117,7 @@ public sealed class LocalModelDependencyCatalogTests : IDisposable
     public async Task ArtifactReview_LeasesAndAuthenticatesRuntimeArchive()
     {
         Directory.CreateDirectory(root);
-        var bytes = new byte[] { 0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4 };
+        var bytes = RuntimeArchiveBytes();
         var path = Path.Combine(root, "runtime.zip");
         await File.WriteAllBytesAsync(path, bytes);
         var candidate = RuntimeCandidate(bytes);
@@ -128,6 +130,12 @@ public sealed class LocalModelDependencyCatalogTests : IDisposable
         Assert.Equal(bytes.Length, review.Bytes);
         Assert.Equal(Digest(bytes), review.Sha256);
         Assert.Equal(ReviewedUtc, review.ReviewedUtc);
+        var inventory = Assert.IsType<WhisperRuntimeArchiveInventory>(review.RuntimeArchive);
+        Assert.Equal(3, inventory.FileCount);
+        Assert.Equal(1, inventory.DirectoryCount);
+        Assert.Equal("Release/whisper-cli.exe", inventory.WhisperCliEntry);
+        Assert.Equal(["LICENSE"], inventory.LicenseNoticeEntries);
+        Assert.Equal(inventory.LicenseNoticeEntries.Count, inventory.LicenseNoticeEntryCount);
     }
 
     [Theory]
@@ -138,9 +146,9 @@ public sealed class LocalModelDependencyCatalogTests : IDisposable
     public async Task ArtifactReview_DeniesLengthDigestSignatureOrTypeMismatch(string mutation)
     {
         Directory.CreateDirectory(root);
-        var valid = new byte[] { 0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4 };
+        var valid = RuntimeArchiveBytes();
         var artifact = mutation == "signature"
-            ? new byte[] { 0, 1, 2, 3, 1, 2, 3, 4 }
+            ? new byte[valid.Length]
             : valid;
         var path = Path.Combine(root, mutation == "extension" ? "runtime.bin" : "runtime.zip");
         await File.WriteAllBytesAsync(path, artifact);
@@ -171,6 +179,88 @@ public sealed class LocalModelDependencyCatalogTests : IDisposable
 
         Assert.Equal(LocalModelDependencyKind.OllamaManifest, review.Kind);
         Assert.Equal(Digest(bytes), review.Sha256);
+        Assert.Null(review.RuntimeArchive);
+    }
+
+    [Theory]
+    [InlineData("traversal")]
+    [InlineData("case-collision")]
+    [InlineData("missing-cli")]
+    [InlineData("device-name")]
+    [InlineData("linked-entry")]
+    [InlineData("compression-bomb")]
+    [InlineData("corrupt-crc")]
+    [InlineData("encrypted")]
+    public async Task ArtifactReview_DeniesUnsafeWhisperRuntimeArchiveContents(string mutation)
+    {
+        Directory.CreateDirectory(root);
+        var entries = mutation switch
+        {
+            "traversal" => new[]
+            {
+                new RuntimeEntry("../whisper-cli.exe", [1]),
+                new RuntimeEntry("LICENSE", [2]),
+            },
+            "case-collision" => new[]
+            {
+                new RuntimeEntry("Release/whisper-cli.exe", [1]),
+                new RuntimeEntry("release/WHISPER-CLI.EXE", [2]),
+            },
+            "missing-cli" => new[]
+            {
+                new RuntimeEntry("Release/whisper-server.exe", [1]),
+                new RuntimeEntry("LICENSE", [2]),
+            },
+            "device-name" => new[]
+            {
+                new RuntimeEntry("Release/whisper-cli.exe", [1]),
+                new RuntimeEntry("Release/CON.txt", [2]),
+            },
+            "linked-entry" => new[]
+            {
+                new RuntimeEntry("Release/whisper-cli.exe", [1]),
+                new RuntimeEntry("Release/current", Encoding.UTF8.GetBytes("whisper-cli.exe"), unchecked((int)0xA0000000)),
+            },
+            "compression-bomb" => new[]
+            {
+                new RuntimeEntry("Release/whisper-cli.exe", new byte[2 * 1024 * 1024]),
+            },
+            "corrupt-crc" => null,
+            "encrypted" => null,
+            _ => throw new InvalidOperationException("Unknown runtime archive mutation."),
+        };
+        var bytes = mutation switch
+        {
+            "corrupt-crc" => CorruptCliCrc(RuntimeArchiveBytes()),
+            "encrypted" => MarkCliEncrypted(RuntimeArchiveBytes()),
+            _ => RuntimeArchiveBytes(entries),
+        };
+        var path = Path.Combine(root, "runtime.zip");
+        await File.WriteAllBytesAsync(path, bytes);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new LocalModelDependencyArtifactReviewer().ReviewAsync(RuntimeCandidate(bytes), path));
+    }
+
+    [Fact]
+    public async Task ArtifactReview_BoundsReportedLicenseInventoryWithoutHidingTotal()
+    {
+        Directory.CreateDirectory(root);
+        var entries = Enumerable.Range(1, 33)
+            .Select(index => new RuntimeEntry($"licenses/NOTICE-{index:D2}.txt", [(byte)index]))
+            .Prepend(new RuntimeEntry("Release/whisper-cli.exe", [1, 2, 3, 4]))
+            .ToArray();
+        var bytes = RuntimeArchiveBytes(entries);
+        var path = Path.Combine(root, "runtime.zip");
+        await File.WriteAllBytesAsync(path, bytes);
+
+        var review = await new LocalModelDependencyArtifactReviewer().ReviewAsync(RuntimeCandidate(bytes), path);
+
+        var inventory = Assert.IsType<WhisperRuntimeArchiveInventory>(review.RuntimeArchive);
+        Assert.Equal(33, inventory.LicenseNoticeEntryCount);
+        Assert.Equal(32, inventory.LicenseNoticeEntries.Count);
+        Assert.Equal("licenses/NOTICE-01.txt", inventory.LicenseNoticeEntries[0]);
+        Assert.Equal("licenses/NOTICE-32.txt", inventory.LicenseNoticeEntries[^1]);
     }
 
     [Fact]
@@ -195,7 +285,7 @@ public sealed class LocalModelDependencyCatalogTests : IDisposable
     public async Task ArtifactReview_DeniesLinkedArtifactWithoutChangingOutsideFile()
     {
         Directory.CreateDirectory(root);
-        var bytes = new byte[] { 0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4 };
+        var bytes = RuntimeArchiveBytes();
         var outside = Path.Combine(root, "outside.zip");
         await File.WriteAllBytesAsync(outside, bytes);
         var linked = Path.Combine(root, "runtime.zip");
@@ -211,7 +301,7 @@ public sealed class LocalModelDependencyCatalogTests : IDisposable
     public async Task ArtifactReview_DeniesLinkedAncestorWithoutChangingOutsideFile()
     {
         Directory.CreateDirectory(root);
-        var bytes = new byte[] { 0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4 };
+        var bytes = RuntimeArchiveBytes();
         var outside = Path.Combine(root, "outside");
         Directory.CreateDirectory(outside);
         var outsideFile = Path.Combine(outside, "runtime.zip");
@@ -292,6 +382,86 @@ public sealed class LocalModelDependencyCatalogTests : IDisposable
             }),
         });
 
+    private static byte[] RuntimeArchiveBytes(params RuntimeEntry[]? entries)
+    {
+        if (entries is null || entries.Length == 0)
+        {
+            entries =
+            [
+                new RuntimeEntry("Release/", []),
+                new RuntimeEntry("Release/whisper-cli.exe", [1, 2, 3, 4]),
+                new RuntimeEntry("Release/cublas64_11.dll", [5, 6, 7, 8]),
+                new RuntimeEntry("LICENSE", Encoding.UTF8.GetBytes("MIT fixture license")),
+            ];
+        }
+        using var bytes = new MemoryStream();
+        using (var archive = new ZipArchive(bytes, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var specification in entries)
+            {
+                var entry = archive.CreateEntry(specification.Name, CompressionLevel.Optimal);
+                if (specification.ExternalAttributes is { } attributes)
+                {
+                    entry.ExternalAttributes = attributes;
+                }
+                if (specification.Content.Length == 0) continue;
+                using var content = entry.Open();
+                content.Write(specification.Content);
+            }
+        }
+        return bytes.ToArray();
+    }
+
+    private static byte[] CorruptCliCrc(byte[] bytes)
+    {
+        const uint centralDirectorySignature = 0x02014b50;
+        for (var offset = 0; offset + 46 <= bytes.Length; offset++)
+        {
+            if (BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset, 4)) != centralDirectorySignature)
+            {
+                continue;
+            }
+            var nameLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset + 28, 2));
+            if (offset + 46 + nameLength > bytes.Length) break;
+            var name = Encoding.UTF8.GetString(bytes, offset + 46, nameLength);
+            if (!name.EndsWith("whisper-cli.exe", StringComparison.OrdinalIgnoreCase)) continue;
+            bytes[offset + 16] ^= 0xff;
+            return bytes;
+        }
+        throw new InvalidOperationException("The test archive CLI central-directory entry was not found.");
+    }
+
+    private static byte[] MarkCliEncrypted(byte[] bytes)
+    {
+        var changedLocal = SetZipFlag(bytes, 0x04034b50, 26, 30, 6);
+        var changedCentral = SetZipFlag(bytes, 0x02014b50, 28, 46, 8);
+        if (!changedLocal || !changedCentral)
+        {
+            throw new InvalidOperationException("The test archive CLI headers were not found.");
+        }
+        return bytes;
+    }
+
+    private static bool SetZipFlag(
+        byte[] bytes,
+        uint signature,
+        int nameLengthOffset,
+        int nameOffset,
+        int flagOffset)
+    {
+        for (var offset = 0; offset + nameOffset <= bytes.Length; offset++)
+        {
+            if (BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset, 4)) != signature) continue;
+            var nameLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset + nameLengthOffset, 2));
+            if (offset + nameOffset + nameLength > bytes.Length) break;
+            var name = Encoding.UTF8.GetString(bytes, offset + nameOffset, nameLength);
+            if (!name.EndsWith("whisper-cli.exe", StringComparison.OrdinalIgnoreCase)) continue;
+            bytes[offset + flagOffset] |= 1;
+            return true;
+        }
+        return false;
+    }
+
     private static string ValidCatalogJson() => """
         {
           "schemaVersion": 1,
@@ -324,4 +494,6 @@ public sealed class LocalModelDependencyCatalogTests : IDisposable
     {
         public override DateTimeOffset GetUtcNow() => utcNow;
     }
+
+    private sealed record RuntimeEntry(string Name, byte[] Content, int? ExternalAttributes = null);
 }

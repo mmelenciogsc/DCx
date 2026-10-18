@@ -78,6 +78,13 @@ try {
             throw "P06 did not prove required pinned-dependency contract: $requiredDependencyContract"
         }
     }
+    $runtimeArchiveDenials = @($localModelResults | Where-Object {
+        $_.testName -like "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.ArtifactReview_DeniesUnsafeWhisperRuntimeArchiveContents*"
+    })
+    if ($runtimeArchiveDenials.Count -ne 8 -or
+        @($runtimeArchiveDenials | Where-Object { $_.outcome -cne "Passed" }).Count -ne 0) {
+        throw "P06 did not prove all eight hostile Whisper runtime archive denials."
+    }
     & (Join-Path $repoRoot "scripts\validate-p06-whisper-registration.ps1") -RunRoot $whisperRegistrationRoot
     if (-not (Test-Path -LiteralPath $whisperRegistrationEvidencePath -PathType Leaf)) {
         throw "The native Whisper registration evidence was not retained."
@@ -446,6 +453,7 @@ $manifest = [ordered]@{
     dependency_catalog_sha256 = [string]$dependencyCatalog.CatalogSha256
     dependency_catalog_candidates = @($dependencyCandidateIds)
     dependency_catalog_contract_tests = $requiredDependencyContracts.Count
+    dependency_runtime_archive_denials = $runtimeArchiveDenials.Count
     dependency_downloads_or_installs = 0
     model_unload_verified = $unloaded
 }
@@ -480,6 +488,7 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Local-model linked-root, linked-file and swapped-directory denials=PASS ($($manifest.local_model_storage_link_denials)/$($manifest.local_model_storage_link_denials)); external writes=$($manifest.local_model_storage_external_writes)"
 "Pinned dependency catalog=$($manifest.dependency_catalog_id); SHA-256=$($manifest.dependency_catalog_sha256)"
 "Pinned dependency catalog/reviewer contracts=PASS ($($manifest.dependency_catalog_contract_tests)/$($manifest.dependency_catalog_contract_tests)); downloads or installs=$($manifest.dependency_downloads_or_installs)"
+"Whisper runtime traversal, collision, device, link, missing-CLI, compression-bomb, CRC and encryption denials=PASS ($($manifest.dependency_runtime_archive_denials)/$($manifest.dependency_runtime_archive_denials))"
 "Model unload verified=PASS"
 "P06 local-model tests=PASS ($localModelTestsPassed/$localModelTestsPassed)"
 "Hardware manifest=$manifestPath"
