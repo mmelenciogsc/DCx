@@ -155,6 +155,89 @@ public sealed class LocalModelDependencyTransferPlanner
         }
     }
 
+    internal static void ValidateForTransfer(LocalModelDependencyTransferPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (plan.SchemaVersion != CurrentSchemaVersion)
+        {
+            throw new InvalidOperationException("The dependency transfer plan schema is unsupported.");
+        }
+        LocalModelDependencyCatalogLoader.ValidateIdentifier(plan.CatalogId, "transfer catalog");
+        LocalModelDependencyCatalogLoader.ValidateSha256(plan.CatalogSha256, "transfer catalog");
+        LocalModelDependencyCatalogLoader.ValidateSha256(plan.PlanSha256, "transfer plan");
+        if (plan.CandidateIds is null || plan.CandidateIds.Count is < 1 or > 16 ||
+            plan.Items is null || plan.Items.Count is < 1 or > 64)
+        {
+            throw new InvalidOperationException("The dependency transfer plan shape is invalid.");
+        }
+
+        var previousCandidate = string.Empty;
+        foreach (var candidateId in plan.CandidateIds)
+        {
+            LocalModelDependencyCatalogLoader.ValidateIdentifier(candidateId, "transfer candidate");
+            if (previousCandidate.Length > 0 &&
+                string.CompareOrdinal(previousCandidate, candidateId) >= 0)
+            {
+                throw new InvalidOperationException("The dependency transfer candidates are not uniquely ordered.");
+            }
+            previousCandidate = candidateId;
+        }
+
+        long transferBytes = 0;
+        var previousSource = string.Empty;
+        foreach (var item in plan.Items)
+        {
+            ArgumentNullException.ThrowIfNull(item);
+            LocalModelDependencyCatalogLoader.ValidateUri(item.SourceUri, "transfer item");
+            LocalModelDependencyCatalogLoader.ValidateSha256(item.Sha256, "transfer item");
+            if (item.ExpectedBytes is < 1 or > 1024L * 1024 * 1024 ||
+                item.Roles is null || item.Roles.Count is < 1 or > 32)
+            {
+                throw new InvalidOperationException("The dependency transfer item is invalid.");
+            }
+            var source = item.SourceUri.AbsoluteUri;
+            if (previousSource.Length > 0 && string.CompareOrdinal(previousSource, source) >= 0)
+            {
+                throw new InvalidOperationException("The dependency transfer items are not uniquely ordered.");
+            }
+            previousSource = source;
+
+            var previousRole = string.Empty;
+            foreach (var role in item.Roles)
+            {
+                if (string.IsNullOrWhiteSpace(role) || role.Length > 320 ||
+                    role != role.Trim() || role.Any(char.IsControl) ||
+                    (previousRole.Length > 0 && string.CompareOrdinal(previousRole, role) >= 0))
+                {
+                    throw new InvalidOperationException("The dependency transfer item roles are invalid.");
+                }
+                previousRole = role;
+            }
+            transferBytes = checked(transferBytes + item.ExpectedBytes);
+        }
+
+        var minimumFreeBytes = checked(
+            checked(transferBytes * TransferAndRetainedCopyCount) + WorkspaceReserveBytes);
+        if (plan.TransferBytes != transferBytes || plan.MinimumFreeBytes != minimumFreeBytes ||
+            plan.ObservedAvailableFreeBytes is < 0 ||
+            plan.CapacitySufficient != (plan.ObservedAvailableFreeBytes >= minimumFreeBytes))
+        {
+            throw new InvalidOperationException("The dependency transfer plan totals or capacity observation are invalid.");
+        }
+
+        var actualPlanSha256 = ComputePlanSha256(
+            plan.CatalogId,
+            plan.CatalogSha256,
+            plan.CandidateIds,
+            plan.Items,
+            transferBytes,
+            minimumFreeBytes);
+        LocalModelDependencyCatalogLoader.RequireDigest(
+            actualPlanSha256,
+            plan.PlanSha256,
+            "dependency transfer plan");
+    }
+
     private static void ValidateCatalog(LocalModelDependencyCatalogReview catalog)
     {
         ArgumentNullException.ThrowIfNull(catalog);

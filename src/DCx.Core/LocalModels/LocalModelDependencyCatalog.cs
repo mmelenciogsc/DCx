@@ -355,7 +355,7 @@ public sealed class LocalModelDependencyCatalogLoader
         return uri;
     }
 
-    private static void ValidateUri(Uri uri, string label)
+    internal static void ValidateUri(Uri uri, string label)
     {
         ArgumentNullException.ThrowIfNull(uri);
         if (!uri.IsAbsoluteUri || uri.Scheme != Uri.UriSchemeHttps || !uri.IsDefaultPort ||

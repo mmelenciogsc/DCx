@@ -72,6 +72,16 @@ try {
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferPlanTests.Plan_RejectsUnknownDuplicateOrMalformedSelectionsAndCatalogs",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferPlanTests.Plan_RejectsConflictingIdentityForOneExactSource"
     )
+    $requiredDependencyHttpTransferContracts = @(
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.ProductionHandler_DisablesRedirectsCookiesProxyAndDecompression",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.ExactApprovedItem_StreamsAndReturnsDigestBoundEvidence",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.MissingApprovalOrCapacity_DeniesBeforeNetworkAndLeavesDestinationEmpty",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.RedirectFinalUriEncodingRangeAndChunkedResponsesFailClosed",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.MissingWrongShortAndExtraLengthsRemovePartialOutput",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.CallerCancellationAfterPartialReadTruncatesDestination",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.ReadFailureAfterWrittenChunkTruncatesPartialDestination",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.SelfConsistentPlanFromDifferentCatalogIsDeniedBeforeNetwork"
+    )
     $requiredHardwareProfileContracts = @(
         "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.Capture_ValidatesDeduplicatesAndOrdersBoundedHardwareEvidence",
         "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.Capture_RejectsMalformedCapacityTextAndGraphicsEvidence",
@@ -124,6 +134,12 @@ try {
         $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredDependencyTransferContract })
         if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
             throw "P06 did not prove required dependency transfer-preflight contract: $requiredDependencyTransferContract"
+        }
+    }
+    foreach ($requiredDependencyHttpTransferContract in $requiredDependencyHttpTransferContracts) {
+        $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredDependencyHttpTransferContract })
+        if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
+            throw "P06 did not prove required dependency HTTP-transfer contract: $requiredDependencyHttpTransferContract"
         }
     }
     foreach ($requiredHardwareProfileContract in $requiredHardwareProfileContracts) {
@@ -593,6 +609,7 @@ $manifest = [ordered]@{
     dependency_catalog_candidates = @($dependencyCandidateIds)
     dependency_catalog_contract_tests = $requiredDependencyContracts.Count
     dependency_transfer_contract_tests = $requiredDependencyTransferContracts.Count
+    dependency_http_transfer_contract_tests = $requiredDependencyHttpTransferContracts.Count
     dependency_transfer_plan_sha256 = [string]$dependencyTransferPlan.PlanSha256
     dependency_transfer_items = [int]$dependencyTransferPlan.Items.Count
     dependency_transfer_bytes = [long]$dependencyTransferPlan.TransferBytes
@@ -638,6 +655,7 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Pinned dependency catalog=$($manifest.dependency_catalog_id); SHA-256=$($manifest.dependency_catalog_sha256)"
 "Pinned dependency catalog/reviewer contracts=PASS ($($manifest.dependency_catalog_contract_tests)/$($manifest.dependency_catalog_contract_tests)); downloads or installs=$($manifest.dependency_downloads_or_installs)"
 "Dependency transfer preflight contracts=PASS ($($manifest.dependency_transfer_contract_tests)/$($manifest.dependency_transfer_contract_tests)); plan SHA-256=$($manifest.dependency_transfer_plan_sha256); network bytes=$($manifest.dependency_transfer_bytes); minimum free bytes=$($manifest.dependency_transfer_minimum_free_bytes); observed free bytes=$($manifest.dependency_transfer_observed_free_bytes); authority granted=False"
+"Dependency HTTP transfer contracts=PASS ($($manifest.dependency_http_transfer_contract_tests)/$($manifest.dependency_http_transfer_contract_tests)); production transfer actions=0"
 "Whisper runtime traversal, collision, device, link, missing-CLI, compression-bomb, CRC and encryption denials=PASS ($($manifest.dependency_runtime_archive_denials)/$($manifest.dependency_runtime_archive_denials))"
 "Model unload verified=PASS"
 "P06 local-model tests=PASS ($localModelTestsPassed/$localModelTestsPassed)"
