@@ -43,6 +43,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
     public int? ProcessId => _process is { HasExited: false } process ? process.Id : null;
 
+    internal int ActiveTurnCount => _turns.Count;
+
     public string Diagnostics
     {
         get

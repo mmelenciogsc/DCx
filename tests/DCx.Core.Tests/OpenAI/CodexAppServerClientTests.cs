@@ -36,11 +36,23 @@ public sealed class CodexAppServerClientTests
     {
         await using var client = CreateClient();
         await client.StartAsync();
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        using var cancellation = new CancellationTokenSource();
 
-        var result = await client.RunTurnAsync("fixture-model", "Cancel this fixture turn.", cancellation.Token);
+        var pending = client.RunTurnAsync(
+            "fixture-model",
+            "Cancel this fixture turn.",
+            cancellation.Token);
+        using var activeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (client.ActiveTurnCount != 1)
+        {
+            await Task.Delay(10, activeTimeout.Token);
+        }
+        cancellation.Cancel();
+
+        var result = await pending;
 
         Assert.Equal("interrupted", result.Status);
+        Assert.Equal(0, client.ActiveTurnCount);
     }
 
     private static CodexAppServerClient CreateClient()
