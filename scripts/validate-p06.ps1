@@ -138,6 +138,8 @@ try {
     )
     $requiredOllamaRuntimeResourceContracts = @(
         "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.ProductionInference_DeniesCurrentResourceFailureBeforeModelOperation",
+        "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.ProductionInference_DeniesPreloadedRuntimeWithoutInterfering",
+        "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.ProductionInference_DeniesUnrelatedModelIntroducedDuringCleanup",
         "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.NormalInference_FailsClosedWhenExactUnloadIsNotConfirmed",
         "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.InspectionAndEmbedding_ValidateCapabilitiesAndBoundedVectors"
     )
@@ -500,6 +502,16 @@ if ($answer -notmatch "(?i)blue" -or $answer -notmatch "(?i)red" -or $answer -no
 }
 
 # Keep one separately measured invocation loaded just long enough to record actual Ollama VRAM allocation.
+$quietObservations = 0
+for ($attempt = 0; $attempt -lt 3; $attempt++) {
+    $quietState = Invoke-RestMethod -Method Get -Uri "http://localhost:11434/api/ps" `
+        -TimeoutSec 10 -NoProxy -MaximumRedirection 0
+    if (@($quietState.models).Count -ne 0) {
+        throw "The shared Ollama runtime was not quiet before the measured invocation. DCx did not alter the existing workload."
+    }
+    $quietObservations++
+    if ($quietObservations -lt 3) { Start-Sleep -Milliseconds 250 }
+}
 $body = @{
     model = $model
     messages = @(@{
@@ -539,12 +551,23 @@ finally {
     $unloadBody = @{ model = $model; keep_alive = 0 } | ConvertTo-Json
     $null = Invoke-RestMethod -Method Post -Uri "http://localhost:11434/api/generate" `
         -ContentType "application/json" -Body $unloadBody -TimeoutSec 30 -NoProxy -MaximumRedirection 0
+    $absentObservations = 0
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         $remaining = Invoke-RestMethod -Method Get -Uri "http://localhost:11434/api/ps" `
             -TimeoutSec 10 -NoProxy -MaximumRedirection 0
-        if (@($remaining.models | Where-Object { [string]$_.digest -ceq $modelDigest }).Count -eq 0) {
-            $unloaded = $true
-            break
+        $unrelated = @($remaining.models | Where-Object { [string]$_.digest -cne $modelDigest })
+        if ($unrelated.Count -ne 0) {
+            throw "An unrelated Ollama model appeared during the measured invocation. DCx did not unload it."
+        }
+        if (@($remaining.models).Count -eq 0) {
+            $absentObservations++
+            if ($absentObservations -ge 3) {
+                $unloaded = $true
+                break
+            }
+        }
+        else {
+            $absentObservations = 0
         }
         Start-Sleep -Milliseconds 250
     }

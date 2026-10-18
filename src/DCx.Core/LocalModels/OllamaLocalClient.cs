@@ -17,6 +17,8 @@ public sealed class OllamaLocalClient : IDisposable
     private const int MaximumEmbeddingDimensions = 8192;
     private const int MaximumResponseBytes = 16 * 1024 * 1024;
     private const int MaximumVisionResponseCharacters = 32 * 1024;
+    private const int RequiredQuiescentObservations = 3;
+    private static readonly TimeSpan QuiescentObservationInterval = TimeSpan.FromMilliseconds(250);
     private static readonly byte[] PngSignature = [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A];
     private static readonly byte[] JpegSignature = [0xFF, 0xD8, 0xFF];
     private readonly HttpClient _httpClient;
@@ -311,6 +313,7 @@ public sealed class OllamaLocalClient : IDisposable
         ValidateEmbeddingRequest(model, expectedDigest, expectedLicenseSha256, inputs, keepAlive: 0);
         using var inferenceLease = await inferenceLeaseCoordinator.AcquireAsync(cancellationToken)
             .ConfigureAwait(false);
+        await EnsureRuntimeQuiescentAsync(cancellationToken).ConfigureAwait(false);
         return await EmbedPinnedCoreAsync(
             model, expectedDigest, expectedLicenseSha256, inputs, keepAlive: 0, cancellationToken)
             .ConfigureAwait(false);
@@ -348,11 +351,7 @@ public sealed class OllamaLocalClient : IDisposable
         {
             throw new InvalidOperationException("The reviewed Ollama runtime version changed.");
         }
-        var alreadyLoaded = await ListRunningModelsAsync(cancellationToken).ConfigureAwait(false);
-        if (alreadyLoaded.Any(item => string.Equals(item.Digest, expectedDigest, StringComparison.OrdinalIgnoreCase)))
-        {
-            throw new InvalidOperationException("The benchmark model was already loaded, so isolated resource measurement is unavailable.");
-        }
+        await EnsureRuntimeQuiescentAsync(cancellationToken).ConfigureAwait(false);
 
         var stopwatch = Stopwatch.StartNew();
         OllamaEmbeddingResult? result = null;
@@ -419,6 +418,7 @@ public sealed class OllamaLocalClient : IDisposable
 
         using var inferenceLease = await inferenceLeaseCoordinator.AcquireAsync(cancellationToken)
             .ConfigureAwait(false);
+        await EnsureRuntimeQuiescentAsync(cancellationToken).ConfigureAwait(false);
         var imageBytes = new byte[checked((int)file.Length)];
         await using (var stream = new FileStream(
                          file.FullName,
@@ -603,10 +603,16 @@ public sealed class OllamaLocalClient : IDisposable
         for (var attempt = 0; attempt < 20; attempt++)
         {
             var remaining = await ListRunningModelsAsync(cancellationToken).ConfigureAwait(false);
+            if (remaining.Any(item =>
+                    !string.Equals(item.Digest, expectedDigest, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException(
+                    "An unrelated Ollama model appeared during the operation. DCx did not unload it, and runtime quiescence could not be verified.");
+            }
             if (!remaining.Any(item => string.Equals(item.Digest, expectedDigest, StringComparison.OrdinalIgnoreCase)))
             {
                 consecutiveAbsent++;
-                if (consecutiveAbsent >= 3) return;
+                if (consecutiveAbsent >= RequiredQuiescentObservations) return;
             }
             else
             {
@@ -615,6 +621,22 @@ public sealed class OllamaLocalClient : IDisposable
             await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken).ConfigureAwait(false);
         }
         throw new InvalidOperationException("The exact Ollama model did not unload within its bounded window.");
+    }
+
+    private async Task EnsureRuntimeQuiescentAsync(CancellationToken cancellationToken)
+    {
+        for (var observation = 0; observation < RequiredQuiescentObservations; observation++)
+        {
+            if ((await ListRunningModelsAsync(cancellationToken).ConfigureAwait(false)).Count != 0)
+            {
+                throw new InvalidOperationException(
+                    "Ollama is already running a model. DCx will not interfere with another workload; retry after the local runtime is quiet.");
+            }
+            if (observation + 1 < RequiredQuiescentObservations)
+            {
+                await Task.Delay(QuiescentObservationInterval, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     private async Task UnloadAfterOperationAsync(string model, string expectedDigest)

@@ -268,6 +268,67 @@ public sealed class OllamaLocalClientTests
     }
 
     [Fact]
+    public async Task ProductionInference_DeniesPreloadedRuntimeWithoutInterfering()
+    {
+        var visionHandler = new FixtureHandler { InitiallyLoaded = true };
+        using var visionClient = new OllamaLocalClient(visionHandler, new Uri("http://localhost:11434/"));
+        var image = Path.GetTempFileName();
+        await File.WriteAllBytesAsync(image, [0xFF, 0xD8, 0xFF]);
+        try
+        {
+            var visionFailure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                visionClient.DescribeImagePinnedAsync(
+                    VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."));
+
+            Assert.Contains("already running", visionFailure.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(visionHandler.ChatRequest);
+            Assert.False(visionHandler.UnloadRequested);
+            Assert.True(visionHandler.Loaded);
+
+            var embeddingHandler = new FixtureHandler { InitiallyLoaded = true };
+            using var embeddingClient = new OllamaLocalClient(
+                embeddingHandler,
+                new Uri("http://localhost:11434/"));
+            var embeddingFailure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                embeddingClient.EmbedPinnedAsync(
+                    EmbeddingModel, EmbeddingDigest, LicenseDigest, ["first", "second"]));
+
+            Assert.Contains("already running", embeddingFailure.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(embeddingHandler.EmbeddingRequest);
+            Assert.False(embeddingHandler.UnloadRequested);
+            Assert.True(embeddingHandler.Loaded);
+        }
+        finally
+        {
+            File.Delete(image);
+        }
+    }
+
+    [Fact]
+    public async Task ProductionInference_DeniesUnrelatedModelIntroducedDuringCleanup()
+    {
+        var handler = new FixtureHandler { InjectUnexpectedModelAfterUnload = true };
+        using var client = new OllamaLocalClient(handler, new Uri("http://localhost:11434/"));
+        var image = Path.GetTempFileName();
+        await File.WriteAllBytesAsync(image, [0xFF, 0xD8, 0xFF]);
+        try
+        {
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                client.DescribeImagePinnedAsync(
+                    VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."));
+
+            Assert.Contains("unrelated Ollama model", failure.Message, StringComparison.Ordinal);
+            Assert.True(handler.UnloadRequested);
+            Assert.False(handler.Loaded);
+            Assert.True(handler.UnrelatedLoaded);
+        }
+        finally
+        {
+            File.Delete(image);
+        }
+    }
+
+    [Fact]
     public async Task NormalInference_FailsClosedWhenExactUnloadIsNotConfirmed()
     {
         var handler = new FixtureHandler { RefuseUnload = true };
@@ -427,10 +488,13 @@ public sealed class OllamaLocalClientTests
             LicenseDigest,
             new DateTimeOffset(2026, 10, 18, 3, 0, 0, TimeSpan.Zero));
         using var backend = await OllamaEmbeddingBenchmarkBackend.CreateAsync(binding, client);
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        using var cancellation = new CancellationTokenSource();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            backend.EmbedAsync(["first", "second"], cancellation.Token));
+        var operation = backend.EmbedAsync(["first", "second"], cancellation.Token);
+        await handler.EmbeddingStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation);
 
         Assert.True(handler.UnloadRequested);
         Assert.False(handler.Loaded);
@@ -502,6 +566,7 @@ public sealed class OllamaLocalClientTests
         }
         public bool ChangeRuntimeAfterEmbedding { get; init; }
         public bool RefuseUnload { get; init; }
+        public bool InjectUnexpectedModelAfterUnload { get; init; }
         public bool DelayEmbedding { get; init; }
         public ConcurrencyProbe? VisionProbe { get; init; }
         public Func<bool>? LeaseIsActive { get; init; }
@@ -511,6 +576,9 @@ public sealed class OllamaLocalClientTests
         public bool ReturnInvalidRunningResources { get; init; }
         public Uri? ResponseUri { get; init; }
         public bool Loaded { get; private set; }
+        public bool UnrelatedLoaded { get; private set; }
+        public TaskCompletionSource<bool> EmbeddingStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool UnloadRequested { get; private set; }
         public int RunningModelRequests { get; private set; }
         private int inventoryCalls;
@@ -536,7 +604,9 @@ public sealed class OllamaLocalClientTests
             if (request.RequestUri?.AbsolutePath == "/api/ps")
             {
                 RunningModelRequests++;
-                return Json(Loaded
+                return Json(UnrelatedLoaded
+                    ? $"{{\"models\":[{{\"name\":\"unrelated:{OtherDigest}\",\"digest\":\"{OtherDigest}\",\"size\":200000000,\"size_vram\":100000000,\"expires_at\":\"2026-10-18T04:00:00Z\"}}]}}"
+                    : Loaded
                     ? $"{{\"models\":[{{\"name\":\"{EmbeddingModel}\",\"digest\":\"{EmbeddingDigest}\",\"size\":400000000,\"size_vram\":{(ReturnInvalidRunningResources ? 500000000 : 300000000)},\"expires_at\":\"2026-10-18T04:00:00Z\"}}]}}"
                     : "{\"models\":[]}", request);
             }
@@ -578,6 +648,7 @@ public sealed class OllamaLocalClientTests
             {
                 EmbeddingRequest = await request.Content!.ReadAsStringAsync(cancellationToken);
                 embedded = true;
+                EmbeddingStarted.TrySetResult(true);
                 if (EmbeddingRequest.Contains("\"keep_alive\":\"1m\"", StringComparison.Ordinal)) Loaded = true;
                 if (DelayEmbedding) await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
                 return Json(ReturnInconsistentEmbeddings
@@ -593,6 +664,7 @@ public sealed class OllamaLocalClientTests
                     ? VisionModel
                     : EmbeddingModel;
                 if (!RefuseUnload) Loaded = false;
+                if (InjectUnexpectedModelAfterUnload) UnrelatedLoaded = true;
                 return Json(RefuseUnload
                     ? $"{{\"model\":\"{unloadModel}\",\"response\":\"\",\"done\":true,\"done_reason\":\"stop\"}}"
                     : $"{{\"model\":\"{unloadModel}\",\"response\":\"\",\"done\":true,\"done_reason\":\"unload\"}}", request);
