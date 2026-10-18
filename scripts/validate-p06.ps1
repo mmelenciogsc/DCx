@@ -55,11 +55,27 @@ try {
         "DCx.Core.Tests.LocalModels.LocalModelBenchmarkManifestTests.EvidenceStore_RejectsDirectorySwappedForLinkAfterOpen",
         "DCx.Core.Tests.LocalModels.LocalModelBenchmarkManifestTests.EvidenceStore_RejectsLinkedTargetWithoutChangingOutsideFile"
     )
+    $requiredDependencyContracts = @(
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.EmbeddedCatalog_BindsExactReviewedCandidatesLicensesAndLayers",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.Catalog_BindsOnlyWhenExactDigestAndSchemaMatch",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.CatalogFile_DeniesLinkedFileWithoutReadingOutsideContent",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.ArtifactReview_LeasesAndAuthenticatesRuntimeArchive",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.ArtifactReview_BindsExactOllamaManagedLayerInventory",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.ArtifactReview_DeniesOllamaLayerSubstitutionEvenWithMatchingManifestDigest",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.ArtifactReview_DeniesLinkedArtifactWithoutChangingOutsideFile",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.ArtifactReview_DeniesLinkedAncestorWithoutChangingOutsideFile"
+    )
     $localModelResults = @($localModelsReport.TestRun.Results.UnitTestResult)
     foreach ($requiredStorageDenial in $requiredStorageDenials) {
         $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredStorageDenial })
         if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
             throw "P06 did not prove required local-model storage denial: $requiredStorageDenial"
+        }
+    }
+    foreach ($requiredDependencyContract in $requiredDependencyContracts) {
+        $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredDependencyContract })
+        if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
+            throw "P06 did not prove required pinned-dependency contract: $requiredDependencyContract"
         }
     }
     & (Join-Path $repoRoot "scripts\validate-p06-whisper-registration.ps1") -RunRoot $whisperRegistrationRoot
@@ -162,6 +178,14 @@ finally {
 $imageBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($fixtureImage))
 $coreAssembly = Join-Path $repoRoot "src\DCx.Core\bin\Release\net10.0\DCx.Core.dll"
 [void][Reflection.Assembly]::LoadFrom($coreAssembly)
+$dependencyCatalog = [DCx.Core.LocalModels.LocalModelDependencyCatalogLoader]::new().LoadEmbeddedAsync(
+    [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+$dependencyCandidateIds = @($dependencyCatalog.Candidates | ForEach-Object { $_.Id } | Sort-Object)
+if ($dependencyCatalog.CatalogId -cne "dcx-p06-dependencies-2026-10-18" -or
+    $dependencyCatalog.CatalogSha256 -cne "1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325" -or
+    $dependencyCandidateIds.Count -ne 4) {
+    throw "The embedded P06 dependency catalog identity changed."
+}
 $client = [DCx.Core.LocalModels.OllamaLocalClient]::new(
     [Uri]"http://localhost:11434/", [TimeSpan]::FromMinutes(3))
 try {
@@ -412,6 +436,11 @@ $manifest = [ordered]@{
     local_model_contract_tests = $localModelTestsPassed
     local_model_storage_link_denials = $requiredStorageDenials.Count
     local_model_storage_external_writes = 0
+    dependency_catalog_id = [string]$dependencyCatalog.CatalogId
+    dependency_catalog_sha256 = [string]$dependencyCatalog.CatalogSha256
+    dependency_catalog_candidates = @($dependencyCandidateIds)
+    dependency_catalog_contract_tests = $requiredDependencyContracts.Count
+    dependency_downloads_or_installs = 0
     model_unload_verified = $unloaded
 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding utf8
@@ -443,6 +472,8 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Ollama redirect/cookie/proxy denial and response-origin validation=PASS"
 "Low-resource and local-first fallback tests=PASS"
 "Local-model linked-root, linked-file and swapped-directory denials=PASS ($($manifest.local_model_storage_link_denials)/$($manifest.local_model_storage_link_denials)); external writes=$($manifest.local_model_storage_external_writes)"
+"Pinned dependency catalog=$($manifest.dependency_catalog_id); SHA-256=$($manifest.dependency_catalog_sha256)"
+"Pinned dependency catalog/reviewer contracts=PASS ($($manifest.dependency_catalog_contract_tests)/$($manifest.dependency_catalog_contract_tests)); downloads or installs=$($manifest.dependency_downloads_or_installs)"
 "Model unload verified=PASS"
 "P06 local-model tests=PASS ($localModelTestsPassed/$localModelTestsPassed)"
 "Hardware manifest=$manifestPath"

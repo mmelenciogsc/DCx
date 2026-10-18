@@ -56,5 +56,6 @@
 | [0052](architecture/adr/0052-exact-ollama-embedding-benchmark.md) | Bind Ollama embedding benchmarks to exact runtime, loaded resources and confirmed unload | Accepted for already-installed approved models; real model acceptance blocked | 2026-10-18 |
 | [0053](architecture/adr/0053-confined-global-storage-paths.md) | Confine global replica and authoritative registry files to non-reparse digest-derived storage | Accepted for local/simulation storage; deployment blocked | 2026-10-18 |
 | [0054](architecture/adr/0054-confined-local-model-state.md) | Confine local-model approvals and benchmark evidence to revalidated non-reparse storage | Accepted for per-user local-model controls | 2026-10-18 |
+| [0055](architecture/adr/0055-pinned-offline-local-dependency-admission.md) | Pin and review local-model dependencies without installation authority | Accepted for consent-safe offline admission | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

@@ -10,4 +10,8 @@
     <InternalsVisibleTo Include="DCx.Core.Tests" />
     <InternalsVisibleTo Include="DCx.GlobalService" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\p06-local-dependencies-v1.json"
+                      LogicalName="DCx.Core.LocalModels.p06-local-dependencies-v1.json" />
+  </ItemGroup>
 </Project>

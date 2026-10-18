@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "catalogId": "dcx-p06-dependencies-2026-10-18",
+  "candidates": [
+    {
+      "id": "whisper-cuda-runtime-b5454",
+      "kind": "whisperRuntimeArchive",
+      "displayName": "whisper.cpp b5454 Windows CUDA 11.8 x64 runtime",
+      "sourceUri": "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-win-cuda-11.8.0-x64.zip",
+      "expectedBytes": 284761231,
+      "sha256": "e81c86c542be6e3d7b7245392d4e1c52ab6e5c61dbe38721754bc0ab59d4d027",
+      "license": {
+        "identifier": "MIT plus contained third-party notices",
+        "sourceUri": "https://raw.githubusercontent.com/ggml-org/whisper.cpp/d1be6fde11ac6e0407606b4e42fe72d34add8037/LICENSE",
+        "expectedBytes": 1078,
+        "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+        "requiresContainedReview": true
+      },
+      "managedLayers": []
+    },
+    {
+      "id": "whisper-model-base-multilingual",
+      "kind": "whisperModel",
+      "displayName": "Whisper base multilingual model",
+      "sourceUri": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+      "expectedBytes": 147951465,
+      "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+      "license": {
+        "identifier": "MIT",
+        "sourceUri": "https://raw.githubusercontent.com/openai/whisper/v20250625/LICENSE",
+        "expectedBytes": 1063,
+        "sha256": "b5d65a59060e68c4ff940e1eddfa6f94b2d68fdf58ed7f4dd57721c997e35e9d",
+        "requiresContainedReview": false
+      },
+      "managedLayers": []
+    },
+    {
+      "id": "whisper-model-large-v3-turbo-q5-0",
+      "kind": "whisperModel",
+      "displayName": "Whisper large v3 turbo multilingual Q5_0 model",
+      "sourceUri": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+      "expectedBytes": 574041195,
+      "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+      "license": {
+        "identifier": "MIT",
+        "sourceUri": "https://raw.githubusercontent.com/openai/whisper/v20250625/LICENSE",
+        "expectedBytes": 1063,
+        "sha256": "b5d65a59060e68c4ff940e1eddfa6f94b2d68fdf58ed7f4dd57721c997e35e9d",
+        "requiresContainedReview": false
+      },
+      "managedLayers": []
+    },
+    {
+      "id": "ollama-nomic-embed-text-latest",
+      "kind": "ollamaManifest",
+      "displayName": "Ollama Nomic Embed Text 137M F16 manifest",
+      "sourceUri": "https://registry.ollama.ai/v2/library/nomic-embed-text/manifests/latest",
+      "expectedBytes": 708,
+      "sha256": "0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+      "license": {
+        "identifier": "Apache-2.0",
+        "sourceUri": "https://registry.ollama.ai/v2/library/nomic-embed-text/blobs/sha256:c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "expectedBytes": 11357,
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "requiresContainedReview": false
+      },
+      "managedLayers": [
+        {
+          "mediaType": "application/vnd.ollama.image.model",
+          "sha256": "970aa74c0a90ef7482477cf803618e776e173c007bf957f635f1015bfcfef0e6",
+          "expectedBytes": 274290656
+        },
+        {
+          "mediaType": "application/vnd.ollama.image.license",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "expectedBytes": 11357
+        },
+        {
+          "mediaType": "application/vnd.ollama.image.params",
+          "sha256": "ce4a164fc04605703b485251fe9f1a181688ba0eb6badb80cc6335c0de17ca0d",
+          "expectedBytes": 17
+        }
+      ]
+    }
+  ]
+}
