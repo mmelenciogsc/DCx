@@ -160,7 +160,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(11L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(12L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -177,7 +177,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         {
             await connection.OpenAsync();
             var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 12;";
+            command.CommandText = "PRAGMA user_version = 13;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -189,7 +189,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(12L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(13L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -249,7 +249,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await verifiedConnection.OpenAsync();
         var version = verifiedConnection.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(11L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(12L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -286,7 +286,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await verified.OpenAsync();
         var version = verified.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(11L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(12L, (long)(await version.ExecuteScalarAsync())!);
         var table = verified.CreateCommand();
         table.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'payout_item_remediations';";
         Assert.Equal(1L, (long)(await table.ExecuteScalarAsync())!);
@@ -387,12 +387,132 @@ public sealed class DurableCareRepositoryTests : IDisposable
             PayoutExecutionMode.Sandbox,
             new DateOnly(2026, 4, 1),
             [new PayoutItem("contributor:one", 500, Approval("contributor:one"))]);
+        await AccrueAsync(repository, preview);
         var result = await new DurablePayoutCoordinator(repository, new FixtureProvider(false)).ExecuteAsync(
             preview, true, true, new DateOnly(2026, 4, 1), now);
 
         Assert.False(result.Succeeded);
         Assert.Equal("failed", (await repository.GetPayoutStateAsync(preview.BatchId))!.Status);
         Assert.Equal(0, await repository.BalanceAsync(LedgerAccount.Cash));
+    }
+
+    [Fact]
+    public async Task PayoutReservation_RequiresAndAtomicallyReservesOutstandingLiabilityAcrossRepositories()
+    {
+        var firstRepository = await DurableCareRepository.OpenAsync(root);
+        var secondRepository = await DurableCareRepository.OpenAsync(root);
+        var first = Preview("batch:liability-first");
+        var second = Preview("batch:liability-second");
+
+        var missingLiability = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            firstRepository.ReservePayoutAsync(
+                first, true, true, first.EligibilityDate, now));
+        Assert.Contains("unreserved contributor payable", missingLiability.Message,
+            StringComparison.Ordinal);
+        Assert.Null(await firstRepository.GetPayoutStateAsync(first.BatchId));
+
+        await AccrueAsync(firstRepository, first);
+        var start = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task<string> AttemptAsync(
+            DurableCareRepository repository,
+            PayoutBatchPreview preview)
+        {
+            await start.Task;
+            try
+            {
+                return await repository.ReservePayoutAsync(
+                    preview, true, true, preview.EligibilityDate, now)
+                    ? "reserved"
+                    : "replay";
+            }
+            catch (InvalidOperationException exception) when (
+                exception.Message.Contains("unreserved contributor payable", StringComparison.Ordinal))
+            {
+                return "liability_denied";
+            }
+        }
+
+        var attempts = new[]
+        {
+            AttemptAsync(firstRepository, first),
+            AttemptAsync(secondRepository, second),
+        };
+        start.SetResult(true);
+        var results = await Task.WhenAll(attempts);
+
+        Assert.Single(results, result => result == "reserved");
+        Assert.Single(results, result => result == "liability_denied");
+        var pending = await firstRepository.GetPendingPayoutsAsync(now.AddMinutes(1));
+        var reservation = Assert.Single(pending);
+        Assert.Equal(500, reservation.Preview.TotalCents);
+        Assert.Equal(-500, await firstRepository.BalanceAsync(LedgerAccount.ContributorPayable));
+
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(root, "care-ledger.sqlite3"),
+            Pooling = false,
+        }.ToString());
+        await connection.OpenAsync();
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT preview_total_cents FROM payout_batches WHERE status = 'reserved';";
+        Assert.Equal(500L, (long)(await command.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task PayoutCompletion_RevalidatesLiabilityBeforeFinancialMutation()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var preview = Preview("batch:liability-recheck");
+        await AccrueAsync(repository, preview);
+        Assert.True(await repository.ReservePayoutAsync(
+            preview, true, true, preview.EligibilityDate, now));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.PostAsync(new LedgerJournalEntry(
+            "fixture:liability-release",
+            now.AddSeconds(1),
+            "fixture_liability_release",
+            [
+                new LedgerPosting(LedgerAccount.ContributorPayable, 500, 0),
+                new LedgerPosting(LedgerAccount.SubscriptionRevenue, 0, 500),
+            ])));
+        Assert.Equal(-500, await repository.BalanceAsync(LedgerAccount.ContributorPayable));
+
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(root, "care-ledger.sqlite3"),
+            Pooling = false,
+        }.ToString()))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO ledger_entries(event_id, occurred_utc, description_code, canonical_sha256)
+                VALUES('fixture:hostile-liability-edit', $occurred, 'fixture_hostile_edit', $sha);
+                INSERT INTO ledger_postings(event_id, ordinal, account, debit_cents, credit_cents)
+                VALUES('fixture:hostile-liability-edit', 0, $payable, 500, 0);
+                INSERT INTO ledger_postings(event_id, ordinal, account, debit_cents, credit_cents)
+                VALUES('fixture:hostile-liability-edit', 1, $revenue, 0, 500);
+                """;
+            command.Parameters.AddWithValue("$occurred", now.AddSeconds(1).ToString("O"));
+            command.Parameters.AddWithValue("$sha", new string('a', 64));
+            command.Parameters.AddWithValue("$payable", (int)LedgerAccount.ContributorPayable);
+            command.Parameters.AddWithValue("$revenue", (int)LedgerAccount.SubscriptionRevenue);
+            await command.ExecuteNonQueryAsync();
+        }
+        var result = new PayoutBatchResult(
+            preview.BatchId,
+            PayoutBatchOutcome.Succeeded,
+            "SUCCESS",
+            [new PayoutItemResult("contributor:one", 500, true, "SUCCESS")]);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.CompletePayoutAsync(preview, result, now.AddSeconds(2)));
+
+        Assert.Contains("outstanding contributor payable", exception.Message,
+            StringComparison.Ordinal);
+        Assert.Equal("reserved", (await repository.GetPayoutStateAsync(preview.BatchId))!.Status);
+        Assert.Empty(await repository.GetPayoutItemStatesAsync(preview.BatchId));
+        Assert.Equal(0, await repository.BalanceAsync(LedgerAccount.Cash));
+        Assert.True(await repository.ReconcilesAsync());
     }
 
     [Fact]
@@ -443,6 +563,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
     {
         var repository = await DurableCareRepository.OpenAsync(root);
         var preview = Preview("batch:provider-pending");
+        await AccrueAsync(repository, preview);
         Assert.True(await repository.ReservePayoutAsync(
             preview, true, true, preview.EligibilityDate, now));
         var provider = new ReconcilableFixtureProvider();
@@ -461,6 +582,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
     {
         var repository = await DurableCareRepository.OpenAsync(root);
         var preview = Preview("batch:asynchronous-provider");
+        await AccrueAsync(repository, preview);
         var provider = new PendingFixtureProvider();
 
         var result = await new DurablePayoutCoordinator(repository, provider).ExecuteAsync(
@@ -479,6 +601,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
     {
         var repository = await DurableCareRepository.OpenAsync(root);
         var preview = Preview("batch:provider-reference");
+        await AccrueAsync(repository, preview);
         Assert.True(await repository.ReservePayoutAsync(
             preview, true, true, preview.EligibilityDate, now));
 
@@ -493,6 +616,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
             reopened.StoreProviderBatchIdAsync("batch:not-reserved", "PB-NEW"));
 
         var second = Preview("batch:provider-reference-two");
+        await AccrueAsync(reopened, second);
         Assert.True(await reopened.ReservePayoutAsync(
             second, true, true, second.EligibilityDate, now));
         await Assert.ThrowsAsync<SqliteException>(() =>
@@ -933,7 +1057,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var version = reopened.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(11L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(12L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     public void Dispose()

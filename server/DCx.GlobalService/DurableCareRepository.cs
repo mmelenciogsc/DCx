@@ -288,31 +288,51 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            await using var transaction = connection.BeginTransaction(deferred: false);
             var command = connection.CreateCommand();
-            command.CommandText = "SELECT preview_sha256 FROM payout_batches WHERE batch_id = $batch;";
+            command.Transaction = transaction;
+            command.CommandText = "SELECT preview_sha256, preview_total_cents FROM payout_batches WHERE batch_id = $batch;";
             command.Parameters.AddWithValue("$batch", preview.BatchId);
-            var existing = (string?)await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-            if (existing is not null)
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                if (!string.Equals(existing, previewSha, StringComparison.Ordinal))
+                var existingSha = reader.GetString(0);
+                var existingTotal = reader.GetInt64(1);
+                await reader.DisposeAsync().ConfigureAwait(false);
+                if (!string.Equals(existingSha, previewSha, StringComparison.Ordinal) ||
+                    existingTotal != preview.TotalCents)
                 {
                     throw new InvalidOperationException("The payout batch ID conflicts with another preview.");
                 }
 
                 return false;
             }
+            await reader.DisposeAsync().ConfigureAwait(false);
+
+            var availableLiability = await ReadUnreservedContributorPayableCentsAsync(
+                    connection, transaction, cancellationToken)
+                .ConfigureAwait(false);
+            if (preview.TotalCents > availableLiability)
+            {
+                throw new InvalidOperationException(
+                    "The payout exceeds the unreserved contributor payable liability.");
+            }
 
             command.Parameters.Clear();
             command.CommandText = """
-                INSERT INTO payout_batches(batch_id, preview_sha256, preview_json, status, created_utc, updated_utc)
-                VALUES($batch, $sha, $json, 'reserved', $created, $updated);
+                INSERT INTO payout_batches(
+                    batch_id, preview_sha256, preview_json, preview_total_cents,
+                    status, created_utc, updated_utc)
+                VALUES($batch, $sha, $json, $preview_total, 'reserved', $created, $updated);
                 """;
             command.Parameters.AddWithValue("$batch", preview.BatchId);
             command.Parameters.AddWithValue("$sha", previewSha);
             command.Parameters.AddWithValue("$json", JsonSerializer.Serialize(preview));
+            command.Parameters.AddWithValue("$preview_total", preview.TotalCents);
             command.Parameters.AddWithValue("$created", now.ToUniversalTime().ToString("O"));
             command.Parameters.AddWithValue("$updated", now.ToUniversalTime().ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }
         finally
@@ -335,10 +355,10 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-            await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            await using var transaction = connection.BeginTransaction(deferred: false);
             var command = connection.CreateCommand();
             command.Transaction = (SqliteTransaction)transaction;
-            command.CommandText = "SELECT preview_sha256, status, provider_status, result_sha256 FROM payout_batches WHERE batch_id = $batch;";
+            command.CommandText = "SELECT preview_sha256, preview_total_cents, status, provider_status, result_sha256 FROM payout_batches WHERE batch_id = $batch;";
             command.Parameters.AddWithValue("$batch", preview.BatchId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -347,11 +367,13 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             }
 
             var sha = reader.GetString(0);
-            var status = reader.GetString(1);
-            var providerStatus = reader.IsDBNull(2) ? null : reader.GetString(2);
-            var existingResultSha = reader.IsDBNull(3) ? null : reader.GetString(3);
+            var previewTotalCents = reader.GetInt64(1);
+            var status = reader.GetString(2);
+            var providerStatus = reader.IsDBNull(3) ? null : reader.GetString(3);
+            var existingResultSha = reader.IsDBNull(4) ? null : reader.GetString(4);
             await reader.DisposeAsync().ConfigureAwait(false);
-            if (!string.Equals(sha, PayoutPreviewSha(preview), StringComparison.Ordinal))
+            if (!string.Equals(sha, PayoutPreviewSha(preview), StringComparison.Ordinal) ||
+                previewTotalCents != preview.TotalCents)
             {
                 throw new InvalidOperationException("The reserved payout preview was modified.");
             }
@@ -378,6 +400,15 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                 }
 
                 throw new InvalidOperationException("The payout batch has a conflicting terminal state.");
+            }
+
+            var outstandingLiability = await ReadContributorPayableLiabilityCentsAsync(
+                    connection, (SqliteTransaction)transaction, cancellationToken)
+                .ConfigureAwait(false);
+            if (paidCents > outstandingLiability)
+            {
+                throw new InvalidOperationException(
+                    "The payout result exceeds the outstanding contributor payable liability.");
             }
 
             command.Parameters.Clear();
@@ -451,7 +482,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT preview_sha256, preview_json, created_utc, updated_utc
+            SELECT preview_sha256, preview_json, preview_total_cents, created_utc, updated_utc
             FROM payout_batches
             WHERE status = 'reserved' AND updated_utc <= $cutoff
             ORDER BY updated_utc, batch_id
@@ -476,15 +507,16 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                         $"A durable payout preview is unreadable: {exception.GetType().Name}.");
                 }
 
-                if (!string.Equals(reader.GetString(0), PayoutPreviewSha(preview), StringComparison.Ordinal))
+                if (!string.Equals(reader.GetString(0), PayoutPreviewSha(preview), StringComparison.Ordinal) ||
+                    reader.GetInt64(2) != preview.TotalCents)
                 {
                     throw new InvalidOperationException("A durable payout preview failed its stored digest.");
                 }
 
                 pending.Add(new DurablePendingPayout(
                     preview,
-                    DateTimeOffset.Parse(reader.GetString(2)),
-                    DateTimeOffset.Parse(reader.GetString(3))));
+                    DateTimeOffset.Parse(reader.GetString(3)),
+                    DateTimeOffset.Parse(reader.GetString(4))));
             }
         }
 
@@ -507,7 +539,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT preview_sha256, preview_json, updated_utc
+            SELECT preview_sha256, preview_json, preview_total_cents, updated_utc
             FROM payout_batches
             WHERE status IN ('succeeded', 'partially_succeeded') AND updated_utc <= $cutoff
             ORDER BY updated_utc, batch_id
@@ -532,14 +564,15 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                         $"A durable payout preview is unreadable: {exception.GetType().Name}.");
                 }
 
-                if (!string.Equals(reader.GetString(0), PayoutPreviewSha(preview), StringComparison.Ordinal))
+                if (!string.Equals(reader.GetString(0), PayoutPreviewSha(preview), StringComparison.Ordinal) ||
+                    reader.GetInt64(2) != preview.TotalCents)
                 {
                     throw new InvalidOperationException("A durable payout preview failed its stored digest.");
                 }
 
                 terminal.Add(new DurableTerminalPayout(
                     preview,
-                    DateTimeOffset.Parse(reader.GetString(2))));
+                    DateTimeOffset.Parse(reader.GetString(3))));
             }
         }
 
@@ -570,7 +603,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             var command = connection.CreateCommand();
             command.Transaction = sqliteTransaction;
             command.CommandText = """
-                SELECT preview_sha256, status, provider_status, result_sha256, paid_cents
+                SELECT preview_sha256, preview_total_cents, status, provider_status, result_sha256, paid_cents
                 FROM payout_batches WHERE batch_id = $batch;
                 """;
             command.Parameters.AddWithValue("$batch", preview.BatchId);
@@ -581,12 +614,14 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             }
 
             var previewSha = reader.GetString(0);
-            var status = reader.GetString(1);
-            var providerStatus = reader.IsDBNull(2) ? null : reader.GetString(2);
-            var existingResultSha = reader.IsDBNull(3) ? null : reader.GetString(3);
-            var paidCents = reader.GetInt64(4);
+            var previewTotalCents = reader.GetInt64(1);
+            var status = reader.GetString(2);
+            var providerStatus = reader.IsDBNull(3) ? null : reader.GetString(3);
+            var existingResultSha = reader.IsDBNull(4) ? null : reader.GetString(4);
+            var paidCents = reader.GetInt64(5);
             await reader.DisposeAsync().ConfigureAwait(false);
-            if (!string.Equals(previewSha, PayoutPreviewSha(preview), StringComparison.Ordinal))
+            if (!string.Equals(previewSha, PayoutPreviewSha(preview), StringComparison.Ordinal) ||
+                previewTotalCents != preview.TotalCents)
             {
                 throw new InvalidOperationException("The terminal payout preview failed its stored digest.");
             }
@@ -1026,6 +1061,65 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             : null;
     }
 
+    private static async Task<long> ReadContributorPayableLiabilityCentsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT COALESCE(SUM(debit_cents - credit_cents), 0)
+            FROM ledger_postings
+            WHERE account = $account;
+            """;
+        command.Parameters.AddWithValue("$account", (int)LedgerAccount.ContributorPayable);
+        var balance = Convert.ToInt64(
+            await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
+        if (balance > 0 || balance == long.MinValue)
+        {
+            throw new InvalidOperationException(
+                "The contributor payable ledger balance is invalid for payout.");
+        }
+
+        return checked(-balance);
+    }
+
+    private static async Task<long> ReadUnreservedContributorPayableCentsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var outstanding = await ReadContributorPayableLiabilityCentsAsync(
+                connection, transaction, cancellationToken)
+            .ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT COALESCE(SUM(preview_total_cents), 0),
+                   COUNT(*),
+                   COALESCE(MIN(preview_total_cents), 0)
+            FROM payout_batches
+            WHERE status = 'reserved';
+            """;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException("The reserved payout liability could not be read.");
+        }
+
+        var reserved = reader.GetInt64(0);
+        var count = reader.GetInt64(1);
+        var minimum = reader.GetInt64(2);
+        if (reserved < 0 || reserved > outstanding || count < 0 || (count > 0 && minimum <= 0))
+        {
+            throw new InvalidOperationException(
+                "The reserved payout liability conflicts with the contributor payable ledger.");
+        }
+
+        return outstanding - reserved;
+    }
+
     private async Task InitializeAsync(CancellationToken cancellationToken)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
@@ -1033,7 +1127,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         command.CommandText = "PRAGMA user_version;";
         var schemaVersion = Convert.ToInt32(
             await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
-        if (schemaVersion > 11)
+        if (schemaVersion > 12)
         {
             throw new InvalidOperationException("The CARE ledger schema is newer than this application.");
         }
@@ -1111,6 +1205,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                 batch_id TEXT PRIMARY KEY,
                 preview_sha256 TEXT NOT NULL,
                 preview_json TEXT NOT NULL,
+                preview_total_cents INTEGER NOT NULL CHECK(preview_total_cents > 0),
                 status TEXT NOT NULL CHECK(status IN (
                     'reserved', 'succeeded', 'failed', 'partially_succeeded', 'review_required')),
                 provider_status TEXT,
@@ -1175,6 +1270,13 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             "remediation_review_sha256",
             "TEXT",
             cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(
+            connection,
+            "payout_batches",
+            "preview_total_cents",
+            "INTEGER NOT NULL DEFAULT 0 CHECK(preview_total_cents >= 0)",
+            cancellationToken).ConfigureAwait(false);
+        await BackfillPayoutPreviewTotalsAsync(connection, cancellationToken).ConfigureAwait(false);
 
         command.CommandText = """
             CREATE TABLE IF NOT EXISTS payout_item_results(
@@ -1445,8 +1547,94 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             ON webhook_event_quarantine(state, next_attempt_utc, occurred_utc, event_id);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        command.CommandText = "PRAGMA user_version = 11;";
+        command.CommandText = "PRAGMA user_version = 12;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task BackfillPayoutPreviewTotalsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT batch_id, preview_sha256, preview_json, preview_total_cents, status
+            FROM payout_batches
+            ORDER BY batch_id;
+            """;
+        var rows = new List<(string BatchId, string Sha256, string Json, long StoredTotal, string Status)>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                rows.Add((
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetInt64(3),
+                    reader.GetString(4)));
+            }
+        }
+
+        foreach (var row in rows)
+        {
+            if (row.Json.Length is < 2 or > 262_144)
+            {
+                throw new InvalidOperationException("A durable payout preview is not bounded.");
+            }
+
+            PayoutBatchPreview preview;
+            try
+            {
+                preview = JsonSerializer.Deserialize<PayoutBatchPreview>(row.Json)
+                    ?? throw new InvalidOperationException("A durable payout preview is empty.");
+                PayoutContractValidation.RequirePreview(preview);
+            }
+            catch (Exception exception) when (
+                (exception is JsonException or InvalidOperationException) &&
+                string.Equals(row.Status, "review_required", StringComparison.Ordinal))
+            {
+                if (row.StoredTotal != 0)
+                {
+                    throw new InvalidOperationException(
+                        "A legacy review-required payout has a conflicting accounting total.");
+                }
+
+                continue;
+            }
+            catch (JsonException exception)
+            {
+                throw new InvalidOperationException(
+                    $"A durable payout preview is unreadable: {exception.GetType().Name}.");
+            }
+
+            if (!string.Equals(row.BatchId, preview.BatchId, StringComparison.Ordinal) ||
+                !string.Equals(row.Sha256, PayoutPreviewSha(preview), StringComparison.Ordinal) ||
+                row.StoredTotal < 0 ||
+                row.StoredTotal != 0 && row.StoredTotal != preview.TotalCents)
+            {
+                throw new InvalidOperationException(
+                    "A durable payout preview conflicts with its accounting binding.");
+            }
+
+            if (row.StoredTotal != 0) continue;
+            command.Parameters.Clear();
+            command.CommandText = """
+                UPDATE payout_batches
+                SET preview_total_cents = $total
+                WHERE batch_id = $batch AND preview_total_cents = 0;
+                """;
+            command.Parameters.AddWithValue("$total", preview.TotalCents);
+            command.Parameters.AddWithValue("$batch", row.BatchId);
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+            {
+                throw new InvalidOperationException(
+                    "The durable payout preview total migration conflicted.");
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
@@ -1500,6 +1688,13 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             command.Parameters.AddWithValue("$debit", posting.DebitCents);
             command.Parameters.AddWithValue("$credit", posting.CreditCents);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        if (entry.Postings.Any(posting => posting.Account == LedgerAccount.ContributorPayable))
+        {
+            _ = await ReadUnreservedContributorPayableCentsAsync(
+                    connection, transaction, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         return true;

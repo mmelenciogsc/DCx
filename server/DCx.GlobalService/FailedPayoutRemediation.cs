@@ -92,9 +92,8 @@ public sealed partial class DurableCareRepository
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-            await using var transaction = await connection.BeginTransactionAsync(cancellationToken)
-                .ConfigureAwait(false);
-            var sqliteTransaction = (SqliteTransaction)transaction;
+            await using var transaction = connection.BeginTransaction(deferred: false);
+            var sqliteTransaction = transaction;
             var source = await ReadFailedPayoutSourceAsync(
                     connection, sqliteTransaction, review.SourceBatchId, cancellationToken)
                 .ConfigureAwait(false);
@@ -136,20 +135,30 @@ public sealed partial class DurableCareRepository
                     "The failed payout remediation no longer matches its reviewed items.");
             }
 
+            var availableLiability = await ReadUnreservedContributorPayableCentsAsync(
+                    connection, sqliteTransaction, cancellationToken)
+                .ConfigureAwait(false);
+            if (review.RemediationPreview.TotalCents > availableLiability)
+            {
+                throw new InvalidOperationException(
+                    "The failed payout remediation exceeds the unreserved contributor payable liability.");
+            }
+
             var approvedUtc = now.ToUniversalTime();
             var command = connection.CreateCommand();
             command.Transaction = sqliteTransaction;
             command.CommandText = """
                 INSERT INTO payout_batches(
-                    batch_id, preview_sha256, preview_json, status,
+                    batch_id, preview_sha256, preview_json, preview_total_cents, status,
                     remediation_review_sha256, created_utc, updated_utc)
-                VALUES($batch, $sha, $json, 'reserved',
+                VALUES($batch, $sha, $json, $preview_total, 'reserved',
                     $remediation_review, $created, $updated);
                 """;
             command.Parameters.AddWithValue("$batch", review.RemediationPreview.BatchId);
             command.Parameters.AddWithValue("$sha", PayoutPreviewSha(review.RemediationPreview));
             command.Parameters.AddWithValue(
                 "$json", JsonSerializer.Serialize(review.RemediationPreview));
+            command.Parameters.AddWithValue("$preview_total", review.RemediationPreview.TotalCents);
             command.Parameters.AddWithValue("$remediation_review", review.ReviewSha256);
             command.Parameters.AddWithValue("$created", approvedUtc.ToString("O"));
             command.Parameters.AddWithValue("$updated", approvedUtc.ToString("O"));
@@ -398,7 +407,7 @@ public sealed partial class DurableCareRepository
         command.Transaction = transaction;
         command.CommandText = """
             SELECT preview_sha256, preview_json, status, provider_status,
-                   result_sha256, paid_cents
+                   result_sha256, paid_cents, preview_total_cents
             FROM payout_batches WHERE batch_id = $batch;
             """;
         command.Parameters.AddWithValue("$batch", sourceBatchId);
@@ -414,6 +423,7 @@ public sealed partial class DurableCareRepository
         var providerStatus = reader.IsDBNull(3) ? null : reader.GetString(3);
         var resultSha = reader.IsDBNull(4) ? null : reader.GetString(4);
         var paidCents = reader.GetInt64(5);
+        var previewTotalCents = reader.GetInt64(6);
         await reader.DisposeAsync().ConfigureAwait(false);
         if (status is not ("failed" or "partially_succeeded") ||
             string.IsNullOrWhiteSpace(providerStatus) ||
@@ -437,7 +447,8 @@ public sealed partial class DurableCareRepository
 
         PayoutContractValidation.RequirePreview(preview);
         if (!string.Equals(preview.BatchId, sourceBatchId, StringComparison.Ordinal) ||
-            !string.Equals(PayoutPreviewSha(preview), previewSha, StringComparison.Ordinal))
+            !string.Equals(PayoutPreviewSha(preview), previewSha, StringComparison.Ordinal) ||
+            previewTotalCents != preview.TotalCents)
         {
             throw new InvalidOperationException(
                 "The source payout preview failed its stored binding.");

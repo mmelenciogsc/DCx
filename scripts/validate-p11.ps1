@@ -31,6 +31,19 @@ try {
         [int]$financeCounters.aborted -ne 0) {
         throw "P11 TRX counters did not prove that every selected finance test passed."
     }
+    $financeResults = @($financeReport.TestRun.Results.UnitTestResult)
+    $requiredLiabilityContracts = @(
+        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.PayoutReservation_RequiresAndAtomicallyReservesOutstandingLiabilityAcrossRepositories",
+        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.PayoutCompletion_RevalidatesLiabilityBeforeFinancialMutation"
+    )
+    foreach ($requiredContract in $requiredLiabilityContracts) {
+        $matchingResults = @($financeResults | Where-Object {
+            $_.testName -ceq $requiredContract -and $_.outcome -ceq "Passed"
+        })
+        if ($matchingResults.Count -ne 1) {
+            throw "P11 mandatory payout-liability contract did not pass exactly once: $requiredContract"
+        }
+    }
 
     & (Join-Path $repoRoot "scripts\validate-p11-recipient-ui.ps1") -RunRoot $runRoot
 
@@ -48,6 +61,10 @@ try {
     "Qualified attribution split and Net 60=PASS"
     "Owner approval duplicate payout and live-disable gates=PASS"
     "Durable payout reservation terminal state and restart reconciliation=PASS"
+    "Schema-v12 payout preview-total migration and exact binding=PASS"
+    "Outstanding contributor-payable liability required before provider send=PASS"
+    "Cross-repository payout over-reservation denial=PASS"
+    "Contributor-payable mutation and completion-time liability revalidation=PASS"
     "Crash-before-send not-found reconciliation and idempotent resubmission=PASS"
     "Crash-after-provider-acceptance reconciliation without resubmission=PASS"
     "Provider-pending batch remains reserved=PASS"
