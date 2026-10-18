@@ -59,6 +59,7 @@
 | [0055](architecture/adr/0055-pinned-offline-local-dependency-admission.md) | Pin and review local-model dependencies without installation authority | Accepted for consent-safe offline admission | 2026-10-18 |
 | [0056](architecture/adr/0056-bounded-whisper-runtime-archive-inspection.md) | Inspect pinned Whisper runtime archives before any extraction | Accepted for pre-extraction admission | 2026-10-18 |
 | [0057](architecture/adr/0057-explicit-inert-whisper-runtime-staging.md) | Stage approved Whisper runtimes as inert digest-bound trees | Accepted for non-elevated local staging only | 2026-10-18 |
-| [0058](architecture/adr/0058-reverify-staged-whisper-runtime.md) | Reverify inert Whisper stages before later trust decisions | Accepted for read-only local integrity review | 2026-10-18 |
+| [0058](architecture/adr/0058-reverify-staged-whisper-runtime.md) | Reverify inert Whisper stages before later trust decisions | Accepted; filesystem-provenance limit superseded by 0059 | 2026-10-18 |
+| [0059](architecture/adr/0059-protected-whisper-stage-receipt-anchor.md) | Anchor exact inert Whisper stage receipts in Windows Credential Manager | Accepted for per-user filesystem-replacement defense | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

@@ -1,7 +1,7 @@
 # P04 — OpenAI identity and local Codex integration
 
 - Status: Complete (offline/native mock gate; external account invocation unverified)
-- Implementation commit: `8ba629c`
+- Implementation commits: `8ba629c`, `e559975`
 
 Commercial ChatGPT sign-in for DCx distribution is a strict eligibility blocker. API-key mode remains independent.
 
@@ -53,6 +53,7 @@ Native Windows 11 build/test after final hardening:
 - A deliberately leaked fixture bearer secret was redacted from bounded diagnostics.
 - P00 smoke and P01–P03 native UIA regressions passed.
 - P04 UIA E2E passed: blocked ChatGPT state/reason, isolated test runtime, JSONL connection, one selected model, streamed response and explicit disconnect.
+- Active-turn cancellation now waits for the exact in-flight turn before requesting interruption, then proves the turn is removed. This eliminates the test's load-sensitive timer race without weakening the production cancellation contract. The current committed-source P04 native validator passed again after this change.
 - Secret-pattern filename scan found no matches outside ignored build/test artifacts.
 
 ## Changed files
