@@ -15,9 +15,12 @@ Create every output with `CreateNew`, recompute its CRC-32 and SHA-256 while wri
 
 On failure, cleanup may inspect and remove only the generated direct-child temporary tree. It must first reject reparse points and out-of-root entries and must never recursively follow a link merely to clean up. Unsafe leftovers remain inert for later user review. The service does not execute, register, select, install, elevate, modify `PATH`, or write outside the supplied per-user application-data root.
 
+Expose staging in the local-model window only after the selected runtime archive passes exact catalog review. A separate acknowledgment starts unchecked and unavailable, becomes available only for a reviewed runtime, and is revoked by any candidate or path change. Reauthenticate through the staging service after activation, reset approval after use, move focus to the assertive result, and describe the resulting files as inert rather than installed. Native positive-path automation uses only a generated archive behind an explicit environment-and-root-confined fixture launch; the same launch must fail when that gate is absent.
+
 ## Consequences
 
 - Synthetic native-Windows tests can prove approval denial, exact extraction and hashing, source-path minimization, partial-state cleanup, receipt collision denial, immutable-destination behavior, cancellation, and linked-root confinement without downloading a real dependency.
+- Native UIA can additionally prove default-off consent, keyboard access, approval revocation on source edits, completion focus, source preservation, receipt minimization, temporary-copy removal, and zero backend registration through the guarded generated-only fixture.
 - Staging deliberately incurs a private copy plus two full decompression passes so that extraction never trusts mutable source bytes or a partial structural scan.
 - A staged digest tree is not an approved backend. Exact executable/model/license registration, benchmarking, runtime behavior, redistribution review and human accessibility acceptance remain separate gates.
 - Real archive transfer and staging remain blocked until the owner explicitly authorizes that bounded local action.

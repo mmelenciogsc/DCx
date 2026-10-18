@@ -26,6 +26,9 @@ $runtimeLicense = Join-Path $runRoot "runtime-license.txt"
 $modelLicense = Join-Path $runRoot "model-license.md"
 $ffmpegLicense = Join-Path $runRoot "ffmpeg-license.txt"
 $invalidDependencyArchive = Join-Path $runRoot "invalid-runtime.zip"
+$stagingFixtureRoot = Join-Path $runRoot "staging-fixture-source"
+$stagingArchive = Join-Path $runRoot "synthetic-whisper-runtime.zip"
+$stagingDataRoot = Join-Path $runRoot "staging-data"
 $audio = Join-Path $runRoot "fixture.wav"
 $timeoutAudio = Join-Path $runRoot "timeout.wav"
 $mp3Audio = Join-Path $runRoot "fixture.mp3"
@@ -36,7 +39,10 @@ $benchmarkEvidencePath = Join-Path $dataRoot "local-models\benchmark-evidence\tr
 $evidencePath = Join-Path $runRoot "whisper-registration-evidence.json"
 $previousDataRoot = $env:DCX_DATA_ROOT
 $previousOfflineStartup = $env:DCX_OFFLINE_STARTUP
+$previousStagingFixture = $env:DCX_WHISPER_STAGING_FIXTURE
+$previousStagingFixtureRoot = $env:DCX_WHISPER_STAGING_FIXTURE_ROOT
 $process = $null
+$stagingProcess = $null
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -85,6 +91,21 @@ New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 [IO.File]::WriteAllText($modelLicense, "Fixture model license.`nComplete second line.")
 [IO.File]::WriteAllText($ffmpegLicense, "Fixture FFmpeg license.`nComplete second line.")
 [IO.File]::WriteAllBytes($invalidDependencyArchive, [byte[]]@(0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4))
+New-Item -ItemType Directory -Path (Join-Path $stagingFixtureRoot "Release") -Force | Out-Null
+[IO.File]::WriteAllBytes(
+    (Join-Path $stagingFixtureRoot "Release\whisper-cli.exe"),
+    [byte[]]@(1, 2, 3, 4))
+[IO.File]::WriteAllBytes(
+    (Join-Path $stagingFixtureRoot "Release\cublas64_11.dll"),
+    [byte[]]@(5, 6, 7, 8))
+[IO.File]::WriteAllText(
+    (Join-Path $stagingFixtureRoot "LICENSE"),
+    "Synthetic MIT fixture license")
+[IO.Compression.ZipFile]::CreateFromDirectory(
+    $stagingFixtureRoot,
+    $stagingArchive,
+    [IO.Compression.CompressionLevel]::Optimal,
+    $false)
 [IO.File]::WriteAllBytes($audio, [byte[]]@(
     [byte][char]'R', [byte][char]'I', [byte][char]'F', [byte][char]'F', 4, 0, 0, 0,
     [byte][char]'W', [byte][char]'A', [byte][char]'V', [byte][char]'E'))
@@ -147,6 +168,9 @@ $runtimeLicenseDigest = (Get-FileHash -LiteralPath $runtimeLicense -Algorithm SH
 $modelLicenseDigest = (Get-FileHash -LiteralPath $modelLicense -Algorithm SHA256).Hash.ToLowerInvariant()
 $ffmpegLicenseDigest = (Get-FileHash -LiteralPath $ffmpegLicense -Algorithm SHA256).Hash.ToLowerInvariant()
 $invalidDependencyDigest = (Get-FileHash -LiteralPath $invalidDependencyArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+$stagingArchiveDigest = (Get-FileHash -LiteralPath $stagingArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+$stagingDestination = Join-Path $stagingDataRoot "local-models\whisper-runtime\synthetic-whisper-runtime-$stagingArchiveDigest"
+$stagingReceipt = Join-Path $stagingDestination ".dcx-runtime-receipt.json"
 $benchmarkManifestDigest = (Get-FileHash -LiteralPath $benchmarkManifest -Algorithm SHA256).Hash.ToLowerInvariant()
 
 $env:DCX_DATA_ROOT = $dataRoot
@@ -195,7 +219,8 @@ try {
             $candidate.Current.Name -like "Catalog dcx-p06-dependencies-2026-10-18.*" -and
             $candidate.Current.Name -like "*SHA-256 1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325*" -and
             $candidate.Current.Name -like "*4 immutable candidates*" -and
-            $candidate.Current.Name -like "*download, install, pull, extraction, execution, approval, and selection actions are absent*") {
+            $candidate.Current.Name -like "*Network, download, install, pull, execution, registration, and selection actions are absent*" -and
+            $candidate.Current.Name -like "*separately approved exact Whisper runtime can be staged inertly*") {
             $candidate
         }
     } "The immutable dependency catalog identity and no-authority notice were not exposed."
@@ -689,6 +714,183 @@ try {
         throw "Clearing registration deleted a source file."
     }
 
+    $env:DCX_DATA_ROOT = $stagingDataRoot
+    $env:DCX_WHISPER_STAGING_FIXTURE = $null
+    $env:DCX_WHISPER_STAGING_FIXTURE_ROOT = $null
+    $deniedStagingProcess = Start-Process $exe -ArgumentList @(
+        "--whisper-staging-fixture",
+        $stagingArchive) -PassThru -Wait
+    if ($deniedStagingProcess.ExitCode -ne 2 -or (Test-Path -LiteralPath $stagingDataRoot)) {
+        throw "The synthetic runtime staging launch mode was available without its explicit fixture gate."
+    }
+    $env:DCX_WHISPER_STAGING_FIXTURE = "1"
+    $env:DCX_WHISPER_STAGING_FIXTURE_ROOT = $runRoot
+    $stagingProcess = Start-Process $exe -ArgumentList @(
+        "--whisper-staging-fixture",
+        $stagingArchive) -PassThru
+    try {
+        $stagingWindow = Wait-For {
+            Find-WindowByProcessAndId $stagingProcess.Id "LocalModelsWindow"
+        } "The gated Whisper runtime staging fixture window did not open."
+        $null = Wait-For {
+            $candidate = Find-ById $stagingWindow "DependencyCatalogSummary"
+            if ($null -ne $candidate -and
+                $candidate.Current.Name -like "Synthetic validation catalog dcx-p06-staging-fixture.*" -and
+                $candidate.Current.Name -like "*1 generated candidate*" -and
+                $candidate.Current.Name -like "*Network, download, install, pull, execution, registration, and selection are unavailable*") {
+                $candidate
+            }
+        } "The gated synthetic staging catalog was not exposed."
+        $stagingList = Find-ById $stagingWindow "DependencyCandidatesList"
+        $stagingItem = Wait-For {
+            $items = $stagingList.FindAll(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.PropertyCondition]::new(
+                    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                    [System.Windows.Automation.ControlType]::ListItem))
+            @($items | Where-Object {
+                $_.Current.Name -like "Synthetic Whisper runtime staging fixture.*"
+            }) | Select-Object -First 1
+        } "The generated runtime staging candidate was not exposed."
+        $stagingItem.GetCurrentPattern(
+            [System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+        Set-Value $stagingWindow "DependencyArtifactPath" $stagingArchive
+
+        $stagingApproval = Find-ById $stagingWindow "ApproveDependencyStagingBox"
+        $stagingApprovalToggle = $stagingApproval.GetCurrentPattern(
+            [System.Windows.Automation.TogglePattern]::Pattern)
+        if ($stagingApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off -or
+            $stagingApproval.Current.IsEnabled) {
+            throw "Runtime staging approval did not begin unchecked and unavailable before exact review."
+        }
+        $stageButton = Find-ById $stagingWindow "StageDependencyRuntimeButton"
+        if ($stageButton.Current.IsEnabled) {
+            throw "Runtime staging was enabled before exact review and explicit approval."
+        }
+
+        Invoke-ById $stagingWindow "ReviewDependencyArtifactButton" | Out-Null
+        $null = Wait-For {
+            $candidate = Find-ById $stagingWindow "DependencyArtifactResult"
+            if ($null -ne $candidate -and
+                $candidate.Current.Name -like "Verified synthetic-whisper-runtime.*" -and
+                $candidate.Current.Name -like "*Runtime archive: 3 files and 0 directories*" -and
+                $candidate.Current.Name -like "*No installation, extraction, model pull, execution, approval, or selection occurred*") {
+                $candidate
+            }
+        } "The synthetic runtime archive did not complete exact accessible review."
+        $stagingApproval = Find-ById $stagingWindow "ApproveDependencyStagingBox"
+        $stagingApprovalToggle = $stagingApproval.GetCurrentPattern(
+            [System.Windows.Automation.TogglePattern]::Pattern)
+        $stageButton = Find-ById $stagingWindow "StageDependencyRuntimeButton"
+        if (-not $stagingApproval.Current.IsEnabled -or
+            $stagingApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off -or
+            $stageButton.Current.IsEnabled) {
+            throw "Runtime staging did not remain default-off after exact review."
+        }
+        $stagingActionIds = @(
+            "BrowseDependencyArtifactButton",
+            "ReviewDependencyArtifactButton",
+            "ApproveDependencyStagingBox",
+            "StageDependencyRuntimeButton")
+        $stagingAccessKeys = @()
+        foreach ($automationId in $stagingActionIds) {
+            $action = Find-ById $stagingWindow $automationId
+            if ($null -eq $action -or [string]::IsNullOrWhiteSpace($action.Current.AccessKey)) {
+                throw "The $automationId staging control lacks an access key."
+            }
+            $stagingAccessKeys += $action.Current.AccessKey
+        }
+        if (@($stagingAccessKeys | Sort-Object -Unique).Count -ne $stagingAccessKeys.Count) {
+            throw "Runtime staging controls expose duplicate access keys."
+        }
+
+        $stagingApprovalToggle.Toggle()
+        $null = Wait-For {
+            $candidate = Find-ById $stagingWindow "StageDependencyRuntimeButton"
+            if ($null -ne $candidate -and $candidate.Current.IsEnabled -and
+                $candidate.Current.IsKeyboardFocusable) { $candidate }
+        } "The staging action did not become keyboard available after explicit approval."
+        Set-Value $stagingWindow "DependencyArtifactPath" $invalidDependencyArchive
+        $stagingApproval = Find-ById $stagingWindow "ApproveDependencyStagingBox"
+        $stageButton = Find-ById $stagingWindow "StageDependencyRuntimeButton"
+        if ($stagingApproval.GetCurrentPattern(
+                [System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne
+            [System.Windows.Automation.ToggleState]::Off -or
+            $stagingApproval.Current.IsEnabled -or $stageButton.Current.IsEnabled) {
+            throw "Changing the reviewed source path did not revoke runtime staging approval."
+        }
+        Set-Value $stagingWindow "DependencyArtifactPath" $stagingArchive
+        Invoke-ById $stagingWindow "ReviewDependencyArtifactButton" | Out-Null
+        $null = Wait-For {
+            $candidate = Find-ById $stagingWindow "DependencyArtifactResult"
+            if ($null -ne $candidate -and $candidate.Current.Name -like "Verified synthetic-whisper-runtime.*") {
+                $candidate
+            }
+        } "The synthetic runtime archive could not be re-reviewed after approval revocation."
+        $stagingApproval = Find-ById $stagingWindow "ApproveDependencyStagingBox"
+        $stagingApprovalToggle = $stagingApproval.GetCurrentPattern(
+            [System.Windows.Automation.TogglePattern]::Pattern)
+        $stagingApprovalToggle.Toggle()
+        $stageButton = Wait-For {
+            $candidate = Find-ById $stagingWindow "StageDependencyRuntimeButton"
+            if ($null -ne $candidate -and $candidate.Current.IsEnabled -and
+                $candidate.Current.IsKeyboardFocusable) { $candidate }
+        } "The re-reviewed staging action did not become available after renewed approval."
+        $stageButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        $stagingResult = Wait-For {
+            $candidate = Find-ById $stagingWindow "DependencyArtifactResult"
+            if ($null -ne $candidate -and
+                $candidate.Current.Name -like "Staged synthetic-whisper-runtime inertly.*" -and
+                $candidate.Current.Name -like "*No installation, registration, execution, or selection occurred*") {
+                $candidate
+            }
+        } "The explicitly approved synthetic runtime did not stage successfully."
+        if (-not $stagingResult.Current.HasKeyboardFocus) {
+            throw "Focus did not move to the completed staging result."
+        }
+        $stagingApproval = Find-ById $stagingWindow "ApproveDependencyStagingBox"
+        if ($stagingApproval.GetCurrentPattern(
+                [System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne
+            [System.Windows.Automation.ToggleState]::Off) {
+            throw "Runtime staging approval was not reset after use."
+        }
+        $stagingCurrentWhisper = Find-ById $stagingWindow "CurrentWhisperBackend"
+        if ($stagingCurrentWhisper.Current.Name -ne "Transcription: none selected.") {
+            throw "Inert staging unexpectedly registered or selected a Whisper backend."
+        }
+    }
+    finally {
+        if ($null -ne $stagingProcess -and -not $stagingProcess.HasExited) {
+            $null = $stagingProcess.CloseMainWindow()
+            if (-not $stagingProcess.WaitForExit(5000)) { $stagingProcess.Kill($true) }
+        }
+        $stagingProcess = $null
+        $env:DCX_DATA_ROOT = $dataRoot
+        $env:DCX_WHISPER_STAGING_FIXTURE = $previousStagingFixture
+        $env:DCX_WHISPER_STAGING_FIXTURE_ROOT = $previousStagingFixtureRoot
+    }
+    if (-not (Test-Path -LiteralPath $stagingDestination -PathType Container) -or
+        -not (Test-Path -LiteralPath (Join-Path $stagingDestination "Release\whisper-cli.exe") -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $stagingReceipt -PathType Leaf)) {
+        throw "The inert runtime staging tree or minimized receipt is incomplete."
+    }
+    if ((Get-FileHash -LiteralPath $stagingArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne
+        $stagingArchiveDigest) {
+        throw "Inert runtime staging changed the selected source archive."
+    }
+    $receiptText = [IO.File]::ReadAllText($stagingReceipt)
+    if ($receiptText.Contains($stagingArchive, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "The runtime staging receipt retained the selected local source path."
+    }
+    $stagingRuntimeRoot = Split-Path -Parent $stagingDestination
+    $unexpectedStagingState = @(
+        Get-ChildItem -LiteralPath $stagingRuntimeRoot -Force |
+            Where-Object { $_.FullName -cne $stagingDestination }
+    )
+    if ($unexpectedStagingState.Count -ne 0) {
+        throw "Private archive or temporary runtime staging state was retained."
+    }
+
     $evidence = [ordered]@{
         captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
         native_uia = "pass"
@@ -703,6 +905,14 @@ try {
         dependency_staged_mismatch_denied = $true
         dependency_rejected_source_preserved = $true
         dependency_external_actions_exposed = $false
+        dependency_runtime_staging_native_uia = "pass"
+        dependency_runtime_staging_fixture_without_gate_denied = $true
+        dependency_runtime_staging_approval_default_unchecked = $true
+        dependency_runtime_staging_path_change_revoked_approval = $true
+        dependency_runtime_staging_result_focus = $true
+        dependency_runtime_staging_source_preserved = $true
+        dependency_runtime_staging_receipt_source_path_retained = $false
+        dependency_runtime_staging_registered_or_executed = $false
         keyboard_focusable_unique_access_keys = $true
         benchmark_native_uia = "pass"
         benchmark_approval_default_unchecked = $true
@@ -745,6 +955,7 @@ try {
     "Complete runtime/model licenses UIA=PASS"
     "Exact four-file digest review UIA=PASS"
     "Immutable dependency catalog and staged-mismatch denial UIA=PASS"
+    "Explicit default-off inert Whisper runtime staging UIA=PASS"
     "UI-approved production adapter transcript=$($transcription.Text)"
     "Approval-bound aggregate benchmark review and execution UIA=PASS"
     "Benchmark cancellation and evidence preservation UIA=PASS"
@@ -763,4 +974,6 @@ finally {
     }
     $env:DCX_DATA_ROOT = $previousDataRoot
     $env:DCX_OFFLINE_STARTUP = $previousOfflineStartup
+    $env:DCX_WHISPER_STAGING_FIXTURE = $previousStagingFixture
+    $env:DCX_WHISPER_STAGING_FIXTURE_ROOT = $previousStagingFixtureRoot
 }

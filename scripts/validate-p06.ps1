@@ -124,6 +124,14 @@ try {
         $whisperRegistrationEvidence.dependency_staged_mismatch_denied -ne $true -or
         $whisperRegistrationEvidence.dependency_rejected_source_preserved -ne $true -or
         $whisperRegistrationEvidence.dependency_external_actions_exposed -ne $false -or
+        $whisperRegistrationEvidence.dependency_runtime_staging_native_uia -ne "pass" -or
+        $whisperRegistrationEvidence.dependency_runtime_staging_fixture_without_gate_denied -ne $true -or
+        $whisperRegistrationEvidence.dependency_runtime_staging_approval_default_unchecked -ne $true -or
+        $whisperRegistrationEvidence.dependency_runtime_staging_path_change_revoked_approval -ne $true -or
+        $whisperRegistrationEvidence.dependency_runtime_staging_result_focus -ne $true -or
+        $whisperRegistrationEvidence.dependency_runtime_staging_source_preserved -ne $true -or
+        $whisperRegistrationEvidence.dependency_runtime_staging_receipt_source_path_retained -ne $false -or
+        $whisperRegistrationEvidence.dependency_runtime_staging_registered_or_executed -ne $false -or
         $whisperRegistrationEvidence.accessible_viewer_cancellation -ne $true -or
         $whisperRegistrationEvidence.canceled_partial_transcript_retained -ne $false -or
         $whisperRegistrationEvidence.cleared_backend_consumer_denied -ne $true -or

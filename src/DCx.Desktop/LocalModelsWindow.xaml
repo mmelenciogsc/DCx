@@ -72,10 +72,10 @@
                         AutomationProperties.HelpText="Reviews bounded local fixtures and exact quality thresholds. It never installs a model or changes a production selection."
                         Click="OnOpenBenchmarkReviewClick" />
 
-                <GroupBox Margin="0,20,0,0" Header="Audited dependency candidates — no download">
+                <GroupBox Margin="0,20,0,0" Header="Audited dependency candidates — review and inert runtime staging">
                     <StackPanel Margin="12,8">
                         <TextBlock TextWrapping="Wrap"
-                                   Text="Review the immutable runtime and model candidates audited for P06. This inventory is informational. DCx does not download, install, pull, extract, execute, approve, or select anything here." />
+                                   Text="Review immutable P06 candidates and an existing local artifact. An exact Whisper runtime archive can be copied and extracted into private per-user DCx storage only after a separate acknowledgment. DCx does not download, install, pull, execute, register, or select it." />
                         <TextBlock x:Name="DependencyCatalogSummary"
                                    Margin="0,10,0,0"
                                    Text="Loading the built-in dependency catalog."
@@ -140,9 +140,31 @@
                                    Margin="0,10,0,0"
                                    Text="No staged artifact has been verified."
                                    TextWrapping="Wrap"
+                                   Focusable="True"
                                    AutomationProperties.AutomationId="DependencyArtifactResult"
                                    AutomationProperties.Name="No staged artifact has been verified."
                                    AutomationProperties.LiveSetting="Assertive" />
+                        <CheckBox x:Name="DependencyStagingApprovalBox"
+                                  Margin="0,12,0,0"
+                                  FontWeight="SemiBold"
+                                  IsEnabled="False"
+                                  Content="I reviewed this exact runtime archive and _approve copying and extracting it into private DCx storage"
+                                  AutomationProperties.AutomationId="ApproveDependencyStagingBox"
+                                  AutomationProperties.Name="I reviewed this exact runtime archive and approve copying and extracting it into private DCx storage"
+                                  AutomationProperties.HelpText="Unchecked by default. This permits inert per-user staging only, not installation, registration, execution, or model selection."
+                                  Checked="OnDependencyStagingApprovalChanged"
+                                  Unchecked="OnDependencyStagingApprovalChanged" />
+                        <Button x:Name="StageDependencyRuntimeButton"
+                                Width="260"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="_Stage verified runtime inertly"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="StageDependencyRuntimeButton"
+                                AutomationProperties.Name="Stage the verified Whisper runtime inertly"
+                                AutomationProperties.HelpText="Reauthenticates the selected archive, creates a digest-bound private copy with a minimized receipt, and does not install, register, execute, or select it."
+                                Click="OnStageDependencyRuntimeClick" />
                     </StackPanel>
                 </GroupBox>
 

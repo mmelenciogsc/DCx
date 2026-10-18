@@ -1,7 +1,9 @@
 using System.IO;
+using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Threading;
 using DCx.Core.Deployment;
+using DCx.Core.LocalModels;
 using DCx.Core.Reliability;
 using DCx.Core.Storage;
 
@@ -22,6 +24,13 @@ public partial class App : Application
             string.Equals(e.Args[0], "--package-approval-fixture", StringComparison.Ordinal))
         {
             StartPackageApprovalFixture(e.Args[1]);
+            return;
+        }
+
+        if (e.Args.Length == 2 &&
+            string.Equals(e.Args[0], "--whisper-staging-fixture", StringComparison.Ordinal))
+        {
+            StartWhisperStagingFixture(e.Args[1]);
             return;
         }
 
@@ -179,7 +188,7 @@ public partial class App : Application
                     Environment.GetEnvironmentVariable("DCX_PACKAGE_APPROVAL_FIXTURE"),
                     "1",
                     StringComparison.Ordinal) ||
-                !IsWithinFixtureRoot(packagePath))
+                !IsWithinFixtureRoot(packagePath, "DCX_PACKAGE_APPROVAL_FIXTURE_ROOT"))
             {
                 throw new PackageInstallReviewException("package_review_fixture_disabled");
             }
@@ -199,9 +208,88 @@ public partial class App : Application
         }
     }
 
-    private static bool IsWithinFixtureRoot(string packagePath)
+    private void StartWhisperStagingFixture(string archivePath)
     {
-        var configuredRoot = Environment.GetEnvironmentVariable("DCX_PACKAGE_APPROVAL_FIXTURE_ROOT");
+        try
+        {
+            if (!string.Equals(
+                    Environment.GetEnvironmentVariable("DCX_WHISPER_STAGING_FIXTURE"),
+                    "1",
+                    StringComparison.Ordinal) ||
+                !IsWithinFixtureRoot(archivePath, "DCX_WHISPER_STAGING_FIXTURE_ROOT"))
+            {
+                throw new InvalidOperationException("Whisper staging fixture is disabled.");
+            }
+
+            var applicationDataRoot = ApplicationDataRoot.Resolve();
+            if (!IsWithinFixtureRoot(applicationDataRoot, "DCX_WHISPER_STAGING_FIXTURE_ROOT"))
+            {
+                throw new InvalidOperationException("Whisper staging fixture storage is outside its root.");
+            }
+            runtimeLease = ApplicationDataOperationLease.Acquire(
+                applicationDataRoot,
+                "starting the Whisper staging fixture");
+            var canonicalArchive = Path.GetFullPath(archivePath);
+            var archive = new FileInfo(canonicalArchive);
+            if (!archive.Exists || archive.Length is <= 0 or > 1024L * 1024 * 1024 ||
+                !string.Equals(archive.Extension, ".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Whisper staging fixture archive is unavailable.");
+            }
+            RejectFixtureReparseChain(canonicalArchive);
+            using var stream = new FileStream(
+                canonicalArchive,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                64 * 1024,
+                FileOptions.SequentialScan);
+            var digest = Convert.ToHexStringLower(SHA256.HashData(stream));
+            var candidate = new PinnedLocalModelDependencyCandidate(
+                "synthetic-whisper-runtime",
+                LocalModelDependencyKind.WhisperRuntimeArchive,
+                "Synthetic Whisper runtime staging fixture",
+                new Uri("https://github.com/ggml-org/whisper.cpp/releases/download/test/runtime.zip"),
+                archive.Length,
+                digest,
+                new LocalModelDependencyLicense(
+                    "Synthetic MIT fixture with contained notice",
+                    new Uri("https://raw.githubusercontent.com/ggml-org/whisper.cpp/test/LICENSE"),
+                    100,
+                    new string('a', 64),
+                    true),
+                []);
+            var catalog = new LocalModelDependencyCatalogReview(
+                LocalModelDependencyCatalogLoader.CurrentSchemaVersion,
+                "dcx-p06-staging-fixture",
+                digest,
+                Array.AsReadOnly([candidate]));
+            var modelStore = LocalModelSelectionStore.OpenAsync(applicationDataRoot)
+                .GetAwaiter().GetResult();
+            var whisperStore = WhisperBackendSelectionStore.OpenAsync(applicationDataRoot)
+                .GetAwaiter().GetResult();
+            var ffmpegStore = FfmpegBackendSelectionStore.OpenAsync(applicationDataRoot)
+                .GetAwaiter().GetResult();
+            MainWindow = new LocalModelsWindow(
+                modelStore,
+                whisperStore,
+                ffmpegStore,
+                applicationDataRoot,
+                catalog,
+                timeProvider: null);
+            MainWindow.Show();
+        }
+        catch
+        {
+            runtimeLease?.Dispose();
+            runtimeLease = null;
+            Shutdown(2);
+        }
+    }
+
+    private static bool IsWithinFixtureRoot(string path, string environmentVariable)
+    {
+        var configuredRoot = Environment.GetEnvironmentVariable(environmentVariable);
         if (string.IsNullOrWhiteSpace(configuredRoot)) return false;
         try
         {
@@ -215,13 +303,28 @@ public partial class App : Application
                 return false;
             }
 
-            var candidate = Path.GetFullPath(packagePath);
+            var candidate = Path.GetFullPath(path);
             return candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception exception) when (
             exception is ArgumentException or NotSupportedException or PathTooLongException)
         {
             return false;
+        }
+    }
+
+    private static void RejectFixtureReparseChain(string path)
+    {
+        for (var current = new FileInfo(path).Directory; current is not null; current = current.Parent)
+        {
+            if (current.Exists && (current.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException("Whisper staging fixture path crosses a reparse point.");
+            }
+        }
+        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new InvalidOperationException("Whisper staging fixture archive is a reparse point.");
         }
     }
 

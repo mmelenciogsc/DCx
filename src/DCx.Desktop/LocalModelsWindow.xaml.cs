@@ -19,21 +19,45 @@ public partial class LocalModelsWindow : Window
     private readonly FfmpegBackendReviewer ffmpegReviewer = new();
     private readonly LocalModelDependencyCatalogLoader dependencyCatalogLoader = new();
     private readonly LocalModelDependencyArtifactReviewer dependencyArtifactReviewer = new();
+    private readonly WhisperRuntimeStager whisperRuntimeStager;
+    private readonly string applicationDataRoot;
+    private readonly LocalModelDependencyCatalogReview? dependencyCatalogFixture;
     private readonly CancellationTokenSource lifetime = new();
     private CandidateRow? reviewedCandidate;
     private string? reviewedLicenseSha256;
     private WhisperBackendReview? reviewedWhisperBackend;
     private FfmpegBackendReview? reviewedFfmpegBackend;
     private DependencyCandidateRow? selectedDependencyCandidate;
+    private LocalModelDependencyArtifactReview? reviewedDependencyArtifact;
 
     public LocalModelsWindow(
         LocalModelSelectionStore store,
         WhisperBackendSelectionStore whisperStore,
         FfmpegBackendSelectionStore ffmpegStore)
+        : this(
+            store,
+            whisperStore,
+            ffmpegStore,
+            ApplicationDataRoot.Resolve(),
+            dependencyCatalogFixture: null,
+            timeProvider: null)
+    {
+    }
+
+    internal LocalModelsWindow(
+        LocalModelSelectionStore store,
+        WhisperBackendSelectionStore whisperStore,
+        FfmpegBackendSelectionStore ffmpegStore,
+        string applicationDataRoot,
+        LocalModelDependencyCatalogReview? dependencyCatalogFixture,
+        TimeProvider? timeProvider)
     {
         this.store = store ?? throw new ArgumentNullException(nameof(store));
         this.whisperStore = whisperStore ?? throw new ArgumentNullException(nameof(whisperStore));
         this.ffmpegStore = ffmpegStore ?? throw new ArgumentNullException(nameof(ffmpegStore));
+        this.applicationDataRoot = applicationDataRoot ?? throw new ArgumentNullException(nameof(applicationDataRoot));
+        this.dependencyCatalogFixture = dependencyCatalogFixture;
+        whisperRuntimeStager = new WhisperRuntimeStager(timeProvider);
         InitializeComponent();
         Loaded += async (_, _) =>
         {
@@ -57,18 +81,23 @@ public partial class LocalModelsWindow : Window
     private async Task LoadDependencyCatalogAsync()
     {
         SetDependencyControlsEnabled(false);
-        SetDependencyCatalogSummary("Loading and authenticating the built-in dependency catalog.");
+        SetDependencyCatalogSummary(dependencyCatalogFixture is null
+            ? "Loading and authenticating the built-in dependency catalog."
+            : "Loading the gated synthetic runtime-staging catalog.");
         try
         {
-            var catalog = await dependencyCatalogLoader.LoadEmbeddedAsync(lifetime.Token);
+            var catalog = dependencyCatalogFixture ??
+                await dependencyCatalogLoader.LoadEmbeddedAsync(lifetime.Token);
             var rows = catalog.Candidates
                 .OrderBy(candidate => candidate.Id, StringComparer.Ordinal)
                 .Select(candidate => new DependencyCandidateRow(candidate))
                 .ToArray();
             DependencyCandidatesList.ItemsSource = rows;
-            SetDependencyCatalogSummary(
-                $"Catalog {catalog.CatalogId}. SHA-256 {catalog.CatalogSha256}. " +
-                $"{rows.Length} immutable candidates. Review only; network, download, install, pull, extraction, execution, approval, and selection actions are absent.");
+            SetDependencyCatalogSummary(dependencyCatalogFixture is null
+                ? $"Catalog {catalog.CatalogId}. SHA-256 {catalog.CatalogSha256}. " +
+                  $"{rows.Length} immutable candidates. Network, download, install, pull, execution, registration, and selection actions are absent; only a separately approved exact Whisper runtime can be staged inertly."
+                : $"Synthetic validation catalog {catalog.CatalogId}. SHA-256 {catalog.CatalogSha256}. " +
+                  $"{rows.Length} generated candidate. Network, download, install, pull, execution, registration, and selection are unavailable.");
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
         {
@@ -89,7 +118,7 @@ public partial class LocalModelsWindow : Window
     {
         selectedDependencyCandidate = DependencyCandidatesList.SelectedItem as DependencyCandidateRow;
         DependencyArtifactPath.Clear();
-        SetDependencyArtifactResult("No staged artifact has been verified.");
+        ResetDependencyArtifactReview("No staged artifact has been verified.");
         if (selectedDependencyCandidate is null)
         {
             SetDependencyCandidateDetails("Select a candidate to review its immutable identity.");
@@ -103,7 +132,7 @@ public partial class LocalModelsWindow : Window
 
     private void OnDependencyArtifactPathChanged(object sender, TextChangedEventArgs e)
     {
-        SetDependencyArtifactResult("No staged artifact has been verified.");
+        ResetDependencyArtifactReview("No staged artifact has been verified.");
         if (ReviewDependencyArtifactButton is not null)
         {
             ReviewDependencyArtifactButton.IsEnabled =
@@ -144,12 +173,13 @@ public partial class LocalModelsWindow : Window
 
         var candidate = selectedDependencyCandidate.Candidate;
         var path = DependencyArtifactPath.Text;
+        ResetDependencyArtifactReview("Verifying the staged artifact under a read-only lease.");
         SetDependencyControlsEnabled(false);
-        SetDependencyArtifactResult("Verifying the staged artifact under a read-only lease.");
         SetStatus("Verifying exact staged-artifact type, length, SHA-256, and managed metadata. Nothing is downloaded, extracted, installed, pulled, or executed.");
         try
         {
             var review = await dependencyArtifactReviewer.ReviewAsync(candidate, path, lifetime.Token);
+            reviewedDependencyArtifact = review;
             var runtimeInventory = review.RuntimeArchive is null
                 ? string.Empty
                 : $" Runtime archive: {review.RuntimeArchive.FileCount:N0} files and " +
@@ -176,6 +206,66 @@ public partial class LocalModelsWindow : Window
             SetDependencyArtifactResult(
                 "Verification failed closed. The file did not match the selected immutable identity or its path could not be reviewed safely. No external action or model-state change occurred.");
             SetStatus("The staged dependency artifact was rejected. Nothing was downloaded, extracted, installed, pulled, executed, approved, or selected.");
+        }
+        finally
+        {
+            SetDependencyControlsEnabled(true);
+        }
+    }
+
+    private void OnDependencyStagingApprovalChanged(object sender, RoutedEventArgs e)
+    {
+        if (StageDependencyRuntimeButton is null) return;
+        StageDependencyRuntimeButton.IsEnabled =
+            DependencyStagingApprovalBox.IsChecked == true &&
+            reviewedDependencyArtifact?.RuntimeArchive is not null;
+    }
+
+    private async void OnStageDependencyRuntimeClick(object sender, RoutedEventArgs e)
+    {
+        if (selectedDependencyCandidate is null || reviewedDependencyArtifact?.RuntimeArchive is null ||
+            DependencyStagingApprovalBox.IsChecked != true ||
+            !string.Equals(
+                selectedDependencyCandidate.Candidate.Id,
+                reviewedDependencyArtifact.CandidateId,
+                StringComparison.Ordinal))
+        {
+            SetStatus("Runtime staging was denied. Verify one exact Whisper runtime archive and check the separate staging acknowledgment first.");
+            DependencyStagingApprovalBox.Focus();
+            return;
+        }
+
+        var candidate = selectedDependencyCandidate.Candidate;
+        var source = reviewedDependencyArtifact.ArtifactPath;
+        SetDependencyControlsEnabled(false);
+        SetDependencyArtifactResult("Reauthenticating and staging the verified runtime as inert per-user files.");
+        SetStatus("Staging the exact reviewed runtime in private DCx storage. It will not be installed, registered, executed, or selected.");
+        try
+        {
+            var result = await whisperRuntimeStager.StageAsync(
+                candidate,
+                source,
+                applicationDataRoot,
+                explicitlyApproved: true,
+                lifetime.Token);
+            reviewedDependencyArtifact = null;
+            DependencyStagingApprovalBox.IsChecked = false;
+            SetDependencyArtifactResult(
+                $"Staged {result.CandidateId} inertly. {result.FileCount:N0} files and " +
+                $"{result.DirectoryCount:N0} archive directories; {result.ExpandedBytes:N0} bytes. " +
+                $"Archive SHA-256 {result.ArchiveSha256}. CLI {result.WhisperCliPath}. " +
+                $"Receipt {result.ReceiptPath}. No installation, registration, execution, or selection occurred.");
+            SetStatus("The exact runtime was staged inertly. Registering or executing it requires separate review and approval.");
+            DependencyArtifactResult.Focus();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            ResetDependencyArtifactReview(
+                "Runtime staging failed closed. No runtime was published or activated; review the source again before retrying.");
+            SetStatus("Runtime staging was rejected. Nothing was installed, registered, executed, or selected.");
         }
         finally
         {
@@ -668,6 +758,23 @@ public partial class LocalModelsWindow : Window
         ReviewDependencyArtifactButton.IsEnabled =
             enabled && selectedDependencyCandidate is not null &&
             !string.IsNullOrWhiteSpace(DependencyArtifactPath.Text);
+        DependencyStagingApprovalBox.IsEnabled =
+            enabled && reviewedDependencyArtifact?.RuntimeArchive is not null;
+        StageDependencyRuntimeButton.IsEnabled =
+            enabled && reviewedDependencyArtifact?.RuntimeArchive is not null &&
+            DependencyStagingApprovalBox.IsChecked == true;
+    }
+
+    private void ResetDependencyArtifactReview(string message)
+    {
+        reviewedDependencyArtifact = null;
+        if (DependencyStagingApprovalBox is not null)
+        {
+            DependencyStagingApprovalBox.IsChecked = false;
+            DependencyStagingApprovalBox.IsEnabled = false;
+        }
+        if (StageDependencyRuntimeButton is not null) StageDependencyRuntimeButton.IsEnabled = false;
+        SetDependencyArtifactResult(message);
     }
 
     private void BrowseInto(TextBox target, string filter, string title)
