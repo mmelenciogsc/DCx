@@ -234,8 +234,8 @@ try {
             $candidate.Current.Name -like "Catalog dcx-p06-dependencies-2026-10-18.*" -and
             $candidate.Current.Name -like "*SHA-256 1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325*" -and
             $candidate.Current.Name -like "*4 immutable candidates*" -and
-            $candidate.Current.Name -like "*Network, download, install, pull, execution, registration, and selection actions are absent*" -and
-            $candidate.Current.Name -like "*separately approved exact Whisper runtime can be staged inertly*") {
+            $candidate.Current.Name -like "*Provider contact is available only through the separate default-off exact-plan transfer approval*" -and
+            $candidate.Current.Name -like "*Transferred content remains inert*installation, extraction, pull, execution, registration, and selection are not authorized*") {
             $candidate
         }
     } "The immutable dependency catalog identity and no-authority notice were not exposed."
@@ -246,14 +246,25 @@ try {
             $candidate.Current.Name -like "*4 candidates. 9 immutable transfer items.*" -and
             $candidate.Current.Name -like "*1,281,058,770 network bytes. 3,098,988,452 minimum free bytes.*" -and
             $candidate.Current.Name -like "*reloads the authenticated catalog, requires exact-item approval, disables redirects, proxy, cookies and decompression, and rolls back any partial stream*" -and
-            $candidate.Current.Name -like "*private set coordinator rechecks capacity, uses random incoming storage, protects a source-path-free receipt, atomically publishes only a complete plan, and can rehash the completed set*" -and
-            $candidate.Current.Name -like "*Neither boundary is connected to a transfer action in this window*" -and
+            $candidate.Current.Name -like "*private set coordinator serializes transfer, verification and cleanup*rechecks capacity*uses random incoming storage*protects a source-path-free receipt*atomically publishes only a complete plan*can rehash the completed set*" -and
+            $candidate.Current.Name -like "*separately approved exact-plan transfer, cancellation, protected verification and abandoned-partial recovery*" -and
+            $candidate.Current.Name -like "*current strict transport rejects provider redirects*" -and
             $candidate.Current.Name -like "*No transfer approval exists. Nothing was downloaded, installed, extracted, pulled, registered, selected, or executed.*") {
             $candidate
         }
     } "The exact dependency transfer preflight and no-authority notice were not exposed."
     if (-not $dependencyTransferPreflight.Current.IsKeyboardFocusable) {
         throw "The exact dependency transfer preflight is not keyboard focusable."
+    }
+    $dependencyTransferApproval = Find-ById $localModelsWindow "ApproveDependencyTransferBox"
+    $dependencyTransferToggle = $dependencyTransferApproval.GetCurrentPattern(
+        [System.Windows.Automation.TogglePattern]::Pattern)
+    $dependencyTransferStart = Find-ById $localModelsWindow "StartDependencyTransferButton"
+    $dependencyTransferCancel = Find-ById $localModelsWindow "CancelDependencyTransferButton"
+    if ($dependencyTransferToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off -or
+        -not $dependencyTransferApproval.Current.IsEnabled -or
+        $dependencyTransferStart.Current.IsEnabled -or $dependencyTransferCancel.Current.IsEnabled) {
+        throw "The production dependency transfer did not begin default-off with start and cancellation unavailable."
     }
     $dependencyList = Find-ById $localModelsWindow "DependencyCandidatesList"
     if ($null -eq $dependencyList -or -not $dependencyList.Current.IsKeyboardFocusable) {
@@ -807,6 +818,7 @@ try {
             if ($null -ne $candidate -and
                 $candidate.Current.Name -like "Transfer preflight only. Plan SHA-256 *" -and
                 $candidate.Current.Name -like "*1 candidate. 2 immutable transfer items.*" -and
+                $candidate.Current.Name -like "*These boundaries are not connected to a transfer action in this validation window.*" -and
                 $candidate.Current.Name -like "*No transfer approval exists. Nothing was downloaded, installed, extracted, pulled, registered, selected, or executed.*") {
                 $candidate
             }
@@ -980,9 +992,12 @@ try {
         dependency_transfer_minimum_free_bytes = 3098988452
         dependency_transfer_item_count = 9
         dependency_transfer_authority_granted = $false
+        dependency_transfer_action_exposed = $true
+        dependency_transfer_approval_default_unchecked = $true
+        dependency_transfer_start_without_approval_denied = $true
         dependency_staged_mismatch_denied = $true
         dependency_rejected_source_preserved = $true
-        dependency_external_actions_exposed = $false
+        dependency_forbidden_activation_actions_exposed = $false
         dependency_runtime_staging_native_uia = "pass"
         dependency_runtime_staging_fixture_without_gate_denied = $true
         dependency_runtime_staging_approval_default_unchecked = $true

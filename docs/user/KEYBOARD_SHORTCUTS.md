@@ -18,3 +18,15 @@ These shortcuts follow common desktop-browser conventions and apply while the DC
 
 DCx does not register system-wide hotkeys. These keystrokes are handled only while its window is focused. Human JAWS/NVDA/Narrator conflict testing remains required.
 
+## Local dependency transfer access keys
+
+These window-local access keys are available only in **Local models**. Approval starts unchecked.
+
+| Shortcut | Action |
+|---|---|
+| `Alt+B` | Begin the separately approved exact-plan dependency transfer. |
+| `Alt+C` | Cancel the active transfer and clean its incomplete private state. |
+| `Alt+V` | Reverify the protected completed transfer set. |
+| `Alt+R` | Recover strict abandoned partial-transfer directories under the DCx data lease. |
+
+These actions do not install, register, select or execute transferred content. Human JAWS/NVDA/Narrator conflict testing remains required.

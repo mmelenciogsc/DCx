@@ -15,6 +15,8 @@ $ffmpegAudioFixture = Join-Path $runRoot "ffmpeg-audio-fixture.mp3"
 $manifestPath = Join-Path $runRoot "hardware-manifest.json"
 $whisperRegistrationRoot = Join-Path $runRoot "whisper-registration"
 $whisperRegistrationEvidencePath = Join-Path $whisperRegistrationRoot "whisper-registration-evidence.json"
+$dependencyTransferUiRoot = Join-Path $runRoot "dependency-transfer-ui"
+$dependencyTransferUiEvidencePath = Join-Path $dependencyTransferUiRoot "dependency-transfer-ui-evidence.json"
 $ollama = "D:\Programs\Ollama\ollama.exe"
 $modelDigest = "ef33995bb2ac37689e49c1a15cd627354d05a3c21d1f4bdcd6a5c83825349c1f"
 $model = "llamacpp:$modelDigest"
@@ -91,7 +93,8 @@ try {
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Verify_DeniesLinkedPayloadWithoutReadingOutsideContent",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Transfer_RejectsLinkedStorageRootWithoutWritingOutside",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Cleanup_RemovesOnlyStrictIncomingNamesAndLeavesOtherDirectories",
-        "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.ExistingCompletedSetIsNeverOverwritten"
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.ExistingCompletedSetIsNeverOverwritten",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.ActiveTransfer_SerializesVerificationAndCleanupUntilItFinishes"
     )
     $requiredHardwareProfileContracts = @(
         "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.Capture_ValidatesDeduplicatesAndOrdersBoundedHardwareEvidence",
@@ -212,9 +215,12 @@ try {
         $whisperRegistrationEvidence.dependency_transfer_minimum_free_bytes -ne 3098988452 -or
         $whisperRegistrationEvidence.dependency_transfer_item_count -ne 9 -or
         $whisperRegistrationEvidence.dependency_transfer_authority_granted -ne $false -or
+        $whisperRegistrationEvidence.dependency_transfer_action_exposed -ne $true -or
+        $whisperRegistrationEvidence.dependency_transfer_approval_default_unchecked -ne $true -or
+        $whisperRegistrationEvidence.dependency_transfer_start_without_approval_denied -ne $true -or
         $whisperRegistrationEvidence.dependency_staged_mismatch_denied -ne $true -or
         $whisperRegistrationEvidence.dependency_rejected_source_preserved -ne $true -or
-        $whisperRegistrationEvidence.dependency_external_actions_exposed -ne $false -or
+        $whisperRegistrationEvidence.dependency_forbidden_activation_actions_exposed -ne $false -or
         $whisperRegistrationEvidence.dependency_runtime_staging_native_uia -ne "pass" -or
         $whisperRegistrationEvidence.dependency_runtime_staging_fixture_without_gate_denied -ne $true -or
         $whisperRegistrationEvidence.dependency_runtime_staging_approval_default_unchecked -ne $true -or
@@ -239,6 +245,34 @@ try {
         $whisperRegistrationEvidence.source_files_preserved -ne $true -or
         $whisperRegistrationEvidence.real_backend_accuracy_validated -ne $false) {
         throw "The native Whisper registration evidence did not prove the expected safe fixture boundary."
+    }
+    & (Join-Path $repoRoot "scripts\validate-p06-transfer-ui.ps1") -RunRoot $dependencyTransferUiRoot
+    if (-not (Test-Path -LiteralPath $dependencyTransferUiEvidencePath -PathType Leaf)) {
+        throw "The native dependency-transfer UI evidence was not retained."
+    }
+    $dependencyTransferUiEvidence = Get-Content -LiteralPath $dependencyTransferUiEvidencePath -Raw |
+        ConvertFrom-Json
+    if ($dependencyTransferUiEvidence.native_uia -ne "pass" -or
+        $dependencyTransferUiEvidence.fixture_without_gate_denied -ne $true -or
+        $dependencyTransferUiEvidence.approval_default_unchecked -ne $true -or
+        $dependencyTransferUiEvidence.start_without_approval_denied -ne $true -or
+        $dependencyTransferUiEvidence.keyboard_focusable_unique_access_keys -ne $true -or
+        $dependencyTransferUiEvidence.item_and_byte_progress_announced -ne $true -or
+        $dependencyTransferUiEvidence.cancellation_available -ne $true -or
+        $dependencyTransferUiEvidence.cancellation_result_focus -ne $true -or
+        $dependencyTransferUiEvidence.approval_reset_after_cancellation -ne $true -or
+        $dependencyTransferUiEvidence.completed_set_reverified -ne $true -or
+        $dependencyTransferUiEvidence.completion_result_focus -ne $true -or
+        $dependencyTransferUiEvidence.approval_reset_after_completion -ne $true -or
+        $dependencyTransferUiEvidence.completed_progress_percent -ne 100 -or
+        $dependencyTransferUiEvidence.protected_reverification_result_focus -ne $true -or
+        $dependencyTransferUiEvidence.exclusive_lease_recovery -ne $true -or
+        $dependencyTransferUiEvidence.recovery_result_focus -ne $true -or
+        $dependencyTransferUiEvidence.provider_requests -ne 0 -or
+        $dependencyTransferUiEvidence.downloads -ne 0 -or
+        $dependencyTransferUiEvidence.installs -ne 0 -or
+        $dependencyTransferUiEvidence.executions -ne 0) {
+        throw "The native dependency-transfer workflow did not prove the required safe fixture boundary."
     }
 }
 finally {
@@ -635,6 +669,12 @@ $manifest = [ordered]@{
     dependency_transfer_observed_free_bytes = [long]$dependencyTransferPlan.ObservedAvailableFreeBytes
     dependency_transfer_capacity_sufficient = [bool]$dependencyTransferPlan.CapacitySufficient
     dependency_transfer_authority_granted = $false
+    dependency_transfer_native_uia = "pass"
+    dependency_transfer_ui_evidence = $dependencyTransferUiEvidencePath
+    dependency_transfer_ui_provider_requests = 0
+    dependency_transfer_ui_downloads = 0
+    dependency_transfer_ui_installs = 0
+    dependency_transfer_ui_executions = 0
     dependency_runtime_archive_denials = $runtimeArchiveDenials.Count
     dependency_downloads_or_installs = 0
     model_unload_verified = $unloaded
@@ -675,6 +715,7 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Dependency transfer preflight contracts=PASS ($($manifest.dependency_transfer_contract_tests)/$($manifest.dependency_transfer_contract_tests)); plan SHA-256=$($manifest.dependency_transfer_plan_sha256); network bytes=$($manifest.dependency_transfer_bytes); minimum free bytes=$($manifest.dependency_transfer_minimum_free_bytes); observed free bytes=$($manifest.dependency_transfer_observed_free_bytes); authority granted=False"
 "Dependency HTTP transfer contracts=PASS ($($manifest.dependency_http_transfer_contract_tests)/$($manifest.dependency_http_transfer_contract_tests)); production transfer actions=0"
 "Dependency transfer-set coordinator contracts=PASS ($($manifest.dependency_transfer_set_contract_tests)/$($manifest.dependency_transfer_set_contract_tests)); production transfer actions=0"
+"Accessible default-off transfer progress/cancellation/reverification/recovery UIA=PASS; provider requests/downloads/installs/executions=0"
 "Whisper runtime traversal, collision, device, link, missing-CLI, compression-bomb, CRC and encryption denials=PASS ($($manifest.dependency_runtime_archive_denials)/$($manifest.dependency_runtime_archive_denials))"
 "Model unload verified=PASS"
 "P06 local-model tests=PASS ($localModelTestsPassed/$localModelTestsPassed)"

@@ -34,6 +34,13 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 1 &&
+            string.Equals(e.Args[0], "--dependency-transfer-fixture", StringComparison.Ordinal))
+        {
+            StartDependencyTransferFixture();
+            return;
+        }
+
         if (e.Args.Length == 1 && string.Equals(e.Args[0], "--recovery", StringComparison.Ordinal))
         {
             MainWindow = new RecoveryWindow();
@@ -289,6 +296,75 @@ public partial class App : Application
         }
     }
 
+    private void StartDependencyTransferFixture()
+    {
+        try
+        {
+            if (!string.Equals(
+                    Environment.GetEnvironmentVariable("DCX_DEPENDENCY_TRANSFER_FIXTURE"),
+                    "1",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Dependency transfer fixture is disabled.");
+            }
+
+            var applicationDataRoot = ApplicationDataRoot.Resolve();
+            if (!IsWithinFixtureRoot(applicationDataRoot, "DCX_DEPENDENCY_TRANSFER_FIXTURE_ROOT"))
+            {
+                throw new InvalidOperationException("Dependency transfer fixture storage is outside its root.");
+            }
+            runtimeLease = ApplicationDataOperationLease.Acquire(
+                applicationDataRoot,
+                "starting the dependency transfer fixture");
+
+            var payload = "DCx synthetic dependency transfer payload"u8.ToArray();
+            var license = "DCx synthetic dependency transfer license"u8.ToArray();
+            var candidate = new PinnedLocalModelDependencyCandidate(
+                "synthetic-transfer-candidate",
+                LocalModelDependencyKind.WhisperModel,
+                "Synthetic dependency transfer candidate",
+                new Uri("https://github.com/dcx/fixture/dependency.bin"),
+                payload.LongLength,
+                Convert.ToHexStringLower(SHA256.HashData(payload)),
+                new LocalModelDependencyLicense(
+                    "Synthetic fixture license",
+                    new Uri("https://raw.githubusercontent.com/dcx/fixture/LICENSE"),
+                    license.LongLength,
+                    Convert.ToHexStringLower(SHA256.HashData(license)),
+                    false),
+                []);
+            var catalog = new LocalModelDependencyCatalogReview(
+                LocalModelDependencyCatalogLoader.CurrentSchemaVersion,
+                "dcx-p06-transfer-fixture",
+                Convert.ToHexStringLower(SHA256.HashData("dcx-p06-transfer-fixture"u8)),
+                Array.AsReadOnly([candidate]));
+            var anchorStore = new FixtureLocalModelApprovalStateAnchorStore();
+            var modelStore = LocalModelSelectionStore.OpenWithAnchorAsync(applicationDataRoot, anchorStore)
+                .GetAwaiter().GetResult();
+            var whisperStore = WhisperBackendSelectionStore.OpenWithAnchorAsync(applicationDataRoot, anchorStore)
+                .GetAwaiter().GetResult();
+            var ffmpegStore = FfmpegBackendSelectionStore.OpenWithAnchorAsync(applicationDataRoot, anchorStore)
+                .GetAwaiter().GetResult();
+            MainWindow = new LocalModelsWindow(
+                modelStore,
+                whisperStore,
+                ffmpegStore,
+                applicationDataRoot,
+                catalog,
+                timeProvider: null,
+                stageAnchorStore: new FixtureWhisperRuntimeStageAnchorStore(),
+                enableDependencyTransfer: true,
+                dependencyTransferCoordinator: new FixtureDependencyTransferSetCoordinator());
+            MainWindow.Show();
+        }
+        catch
+        {
+            runtimeLease?.Dispose();
+            runtimeLease = null;
+            Shutdown(2);
+        }
+    }
+
     private static bool IsWithinFixtureRoot(string path, string environmentVariable)
     {
         var configuredRoot = Environment.GetEnvironmentVariable(environmentVariable);
@@ -408,6 +484,121 @@ public partial class App : Application
                 PublisherId: "CN=DCx Synthetic Validation Fixture",
                 Version: "1.2.3.4",
                 SignerCertificateSha256: new string('a', 64)));
+        }
+    }
+
+    private sealed class FixtureDependencyTransferSetCoordinator
+        : ILocalModelDependencyTransferSetCoordinator
+    {
+        private LocalModelDependencyTransferSetReceipt? receipt;
+        private int transferAttempts;
+        private bool firstRecovery = true;
+
+        public async Task<LocalModelDependencyTransferSetReceipt> TransferAsync(
+            LocalModelDependencyTransferPlan plan,
+            LocalModelDependencyTransferSetApproval approval,
+            CancellationToken cancellationToken = default,
+            IProgress<LocalModelDependencyTransferSetProgress>? progress = null)
+        {
+            if (approval.SchemaVersion != LocalModelDependencyTransferSetApproval.CurrentSchemaVersion ||
+                !approval.Approved ||
+                !string.Equals(approval.PlanSha256, plan.PlanSha256, StringComparison.Ordinal))
+            {
+                throw new LocalModelDependencyTransferException("dependency_transfer_approval_invalid");
+            }
+
+            transferAttempts++;
+            progress?.Report(new LocalModelDependencyTransferSetProgress(
+                LocalModelDependencyTransferSetStage.Preparing,
+                0,
+                plan.Items.Count,
+                0,
+                0,
+                0,
+                plan.TransferBytes));
+            long completed = 0;
+            for (var index = 0; index < plan.Items.Count; index++)
+            {
+                var item = plan.Items[index];
+                var steps = transferAttempts == 1 ? 50 : 4;
+                for (var step = 1; step <= steps; step++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await Task.Delay(transferAttempts == 1 ? 25 : 10, cancellationToken);
+                    var itemBytes = item.ExpectedBytes * step / steps;
+                    progress?.Report(new LocalModelDependencyTransferSetProgress(
+                        LocalModelDependencyTransferSetStage.Transferring,
+                        index + 1,
+                        plan.Items.Count,
+                        itemBytes,
+                        item.ExpectedBytes,
+                        completed + itemBytes,
+                        plan.TransferBytes));
+                }
+                completed += item.ExpectedBytes;
+            }
+
+            progress?.Report(new LocalModelDependencyTransferSetProgress(
+                LocalModelDependencyTransferSetStage.ProtectingReceipt,
+                plan.Items.Count,
+                plan.Items.Count,
+                0,
+                0,
+                plan.TransferBytes,
+                plan.TransferBytes));
+            await Task.Delay(20, cancellationToken);
+            receipt = new LocalModelDependencyTransferSetReceipt(
+                LocalModelDependencyTransferSetCoordinator.CurrentReceiptSchemaVersion,
+                plan.CatalogId,
+                plan.CatalogSha256,
+                plan.PlanSha256,
+                plan.TransferBytes,
+                Array.AsReadOnly(plan.Items.Select((item, index) =>
+                    new LocalModelDependencyTransferredFile(
+                        index,
+                        $"{index:D2}-{item.Sha256}.payload",
+                        item.ExpectedBytes,
+                        item.Sha256)).ToArray()));
+            progress?.Report(new LocalModelDependencyTransferSetProgress(
+                LocalModelDependencyTransferSetStage.Published,
+                plan.Items.Count,
+                plan.Items.Count,
+                0,
+                0,
+                plan.TransferBytes,
+                plan.TransferBytes));
+            return receipt;
+        }
+
+        public async Task<LocalModelDependencyTransferSetReceipt> VerifyAsync(
+            LocalModelDependencyTransferPlan plan,
+            CancellationToken cancellationToken = default,
+            IProgress<LocalModelDependencyTransferSetProgress>? progress = null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var current = receipt ?? throw new InvalidOperationException("No synthetic completed set exists.");
+            progress?.Report(new LocalModelDependencyTransferSetProgress(
+                LocalModelDependencyTransferSetStage.Verifying,
+                current.Files.Count,
+                current.Files.Count,
+                0,
+                0,
+                current.TransferBytes,
+                current.TransferBytes));
+            await Task.Delay(20, cancellationToken);
+            return current;
+        }
+
+        public Task<int> CleanupAbandonedAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = firstRecovery ? 1 : 0;
+            firstRecovery = false;
+            return Task.FromResult(result);
+        }
+
+        public void Dispose()
+        {
         }
     }
 }

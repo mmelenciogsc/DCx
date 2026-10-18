@@ -21,6 +21,7 @@ public partial class LocalModelsWindow : Window
     private readonly LocalModelDependencyCatalogLoader dependencyCatalogLoader = new();
     private readonly LocalModelDependencyArtifactReviewer dependencyArtifactReviewer = new();
     private readonly WhisperRuntimeStager whisperRuntimeStager;
+    private readonly ILocalModelDependencyTransferSetCoordinator? dependencyTransferCoordinator;
     private readonly string applicationDataRoot;
     private readonly LocalModelDependencyCatalogReview? dependencyCatalogFixture;
     private readonly CancellationTokenSource lifetime = new();
@@ -31,6 +32,12 @@ public partial class LocalModelsWindow : Window
     private DependencyCandidateRow? selectedDependencyCandidate;
     private LocalModelDependencyArtifactReview? reviewedDependencyArtifact;
     private LocalHardwareProfile? hardwareProfile;
+    private LocalModelDependencyTransferPlan? dependencyTransferPlan;
+    private CancellationTokenSource? dependencyTransferCancellation;
+    private Task? dependencyTransferOperation;
+    private bool dependencyTransferRunning;
+    private LocalModelDependencyTransferSetStage? lastAnnouncedTransferStage;
+    private int lastAnnouncedTransferItem;
 
     public LocalModelsWindow(
         LocalModelSelectionStore store,
@@ -43,7 +50,9 @@ public partial class LocalModelsWindow : Window
             ApplicationDataRoot.Resolve(),
             dependencyCatalogFixture: null,
             timeProvider: null,
-            stageAnchorStore: null)
+            stageAnchorStore: null,
+            enableDependencyTransfer: true,
+            dependencyTransferCoordinator: null)
     {
     }
 
@@ -54,13 +63,19 @@ public partial class LocalModelsWindow : Window
         string applicationDataRoot,
         LocalModelDependencyCatalogReview? dependencyCatalogFixture,
         TimeProvider? timeProvider,
-        IWhisperRuntimeStageAnchorStore? stageAnchorStore)
+        IWhisperRuntimeStageAnchorStore? stageAnchorStore,
+        bool enableDependencyTransfer = false,
+        ILocalModelDependencyTransferSetCoordinator? dependencyTransferCoordinator = null)
     {
         this.store = store ?? throw new ArgumentNullException(nameof(store));
         this.whisperStore = whisperStore ?? throw new ArgumentNullException(nameof(whisperStore));
         this.ffmpegStore = ffmpegStore ?? throw new ArgumentNullException(nameof(ffmpegStore));
         this.applicationDataRoot = applicationDataRoot ?? throw new ArgumentNullException(nameof(applicationDataRoot));
         this.dependencyCatalogFixture = dependencyCatalogFixture;
+        this.dependencyTransferCoordinator = dependencyTransferCoordinator ??
+            (enableDependencyTransfer && dependencyCatalogFixture is null
+                ? new LocalModelDependencyTransferSetCoordinator(applicationDataRoot)
+                : null);
         whisperRuntimeStager = new WhisperRuntimeStager(timeProvider, stageAnchorStore);
         InitializeComponent();
         Loaded += async (_, _) =>
@@ -69,7 +84,24 @@ public partial class LocalModelsWindow : Window
             await LoadDependencyCatalogAsync();
             await RefreshAsync();
         };
-        Closed += (_, _) => lifetime.Cancel();
+        Closed += (_, _) =>
+        {
+            lifetime.Cancel();
+            dependencyTransferCancellation?.Cancel();
+            var operation = dependencyTransferOperation;
+            if (operation is null || operation.IsCompleted)
+            {
+                this.dependencyTransferCoordinator?.Dispose();
+            }
+            else
+            {
+                _ = operation.ContinueWith(
+                    _ => this.dependencyTransferCoordinator?.Dispose(),
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+            }
+        };
     }
 
     private async void OnRefreshClick(object sender, RoutedEventArgs e)
@@ -104,6 +136,8 @@ public partial class LocalModelsWindow : Window
 
     private async Task LoadDependencyCatalogAsync()
     {
+        dependencyTransferPlan = null;
+        DependencyTransferApprovalBox.IsChecked = false;
         SetDependencyControlsEnabled(false);
         SetDependencyCatalogSummary(dependencyCatalogFixture is null
             ? "Loading and authenticating the built-in dependency catalog."
@@ -119,13 +153,27 @@ public partial class LocalModelsWindow : Window
             var transferPlan = new LocalModelDependencyTransferPlanner().CreateForAll(
                 catalog,
                 LocalModelDependencyTransferPlanner.TryGetAvailableFreeBytes(applicationDataRoot));
+            dependencyTransferPlan = transferPlan;
             DependencyCandidatesList.ItemsSource = rows;
             SetDependencyCatalogSummary(dependencyCatalogFixture is null
-                ? $"Catalog {catalog.CatalogId}. SHA-256 {catalog.CatalogSha256}. " +
-                  $"{rows.Length} immutable candidates. Network, download, install, pull, execution, registration, and selection actions are absent; only a separately approved exact Whisper runtime can be staged inertly."
+                ? this.dependencyTransferCoordinator is null
+                    ? $"Catalog {catalog.CatalogId}. SHA-256 {catalog.CatalogSha256}. " +
+                      $"{rows.Length} immutable candidates. Provider transfer is unavailable; installation, pull, execution, registration, and selection actions are absent."
+                    : $"Catalog {catalog.CatalogId}. SHA-256 {catalog.CatalogSha256}. " +
+                      $"{rows.Length} immutable candidates. Provider contact is available only through the separate default-off exact-plan transfer approval. Transferred content remains inert; installation, extraction, pull, execution, registration, and selection are not authorized."
                 : $"Synthetic validation catalog {catalog.CatalogId}. SHA-256 {catalog.CatalogSha256}. " +
                   $"{rows.Length} generated candidate. Network, download, install, pull, execution, registration, and selection are unavailable.");
-            SetDependencyTransferPreflight(FormatDependencyTransferPlan(transferPlan));
+            SetDependencyTransferPreflight(FormatDependencyTransferPlan(
+                transferPlan,
+                this.dependencyTransferCoordinator is not null));
+            if (this.dependencyTransferCoordinator is not null)
+            {
+                var removed = await this.dependencyTransferCoordinator.CleanupAbandonedAsync(lifetime.Token);
+                SetDependencyTransferStatus(
+                    removed == 0
+                        ? "Recovery check complete under the exclusive DCx data lease. No removable abandoned partial transfer was found. Approval remains unchecked."
+                        : $"Recovery check complete under the exclusive DCx data lease. Removed {removed:N0} abandoned partial transfer {(removed == 1 ? "directory" : "directories")}. Approval remains unchecked.");
+            }
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
         {
@@ -133,16 +181,256 @@ public partial class LocalModelsWindow : Window
         catch
         {
             DependencyCandidatesList.ItemsSource = null;
+            dependencyTransferPlan = null;
+            DependencyTransferApprovalBox.IsChecked = false;
             SetDependencyCatalogSummary(
                 "The built-in dependency catalog failed authentication and no candidate is available. No external action occurred.");
             SetDependencyTransferPreflight(
                 "Transfer preflight is unavailable because the dependency catalog failed authentication. No external action occurred.");
+            SetDependencyTransferStatus(
+                "Dependency transfer is unavailable because exact catalog authentication or recovery failed. No provider was contacted.");
         }
         finally
         {
             SetDependencyControlsEnabled(true);
         }
     }
+
+    private void OnDependencyTransferApprovalChanged(object sender, RoutedEventArgs e) =>
+        SetDependencyTransferControlsEnabled(enabled: true);
+
+    private async void OnStartDependencyTransferClick(object sender, RoutedEventArgs e)
+    {
+        if (dependencyTransferCoordinator is null || dependencyTransferPlan is null ||
+            !dependencyTransferPlan.CapacitySufficient ||
+            DependencyTransferApprovalBox.IsChecked != true || dependencyTransferRunning)
+        {
+            SetDependencyTransferStatus(
+                "Transfer denied. Authenticate the catalog. Confirm sufficient storage. Review the exact plan. Then check the one-time approval box.");
+            DependencyTransferApprovalBox.Focus();
+            return;
+        }
+
+        dependencyTransferOperation = RunDependencyTransferAsync(dependencyTransferPlan);
+        await dependencyTransferOperation;
+    }
+
+    private async Task RunDependencyTransferAsync(LocalModelDependencyTransferPlan plan)
+    {
+        dependencyTransferRunning = true;
+        lastAnnouncedTransferStage = null;
+        lastAnnouncedTransferItem = 0;
+        dependencyTransferCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        DependencyTransferApprovalBox.IsChecked = false;
+        DependencyTransferProgress.Value = 0;
+        DependencyTransferProgress.IsIndeterminate = true;
+        SetDependencyTransferStatus(
+            "Preparing the explicitly approved exact-plan transfer. Capacity will be checked again before private storage is created.");
+        SetStatus(
+            "The approved dependency transfer is starting. Content remains inert. Nothing will be installed, registered, selected, or executed.");
+        SetDependencyControlsEnabled(false);
+        try
+        {
+            var progress = new Progress<LocalModelDependencyTransferSetProgress>(SetDependencyTransferProgress);
+            var receipt = await dependencyTransferCoordinator!.TransferAsync(
+                plan,
+                LocalModelDependencyTransferSetApproval.Create(plan, approved: true),
+                dependencyTransferCancellation.Token,
+                progress);
+            var verified = await dependencyTransferCoordinator.VerifyAsync(
+                plan,
+                dependencyTransferCancellation.Token,
+                progress);
+            if (!string.Equals(receipt.PlanSha256, verified.PlanSha256, StringComparison.Ordinal) ||
+                receipt.TransferBytes != verified.TransferBytes || receipt.Files.Count != verified.Files.Count)
+            {
+                throw new InvalidOperationException("The completed dependency transfer receipt changed.");
+            }
+
+            DependencyTransferProgress.IsIndeterminate = false;
+            DependencyTransferProgress.Value = 100;
+            SetDependencyTransferStatus(
+                $"Transfer complete and reverified. Plan {verified.PlanSha256}. {verified.Files.Count:N0} authenticated files. {verified.TransferBytes:N0} bytes. The protected set is inert. Nothing was extracted, installed, registered, selected, or executed.");
+            SetStatus(
+                "The approved dependency set is complete and protected. Separate exact review is still required before any staging, registration, selection, or execution.");
+            DependencyTransferStatus.Focus();
+        }
+        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
+        {
+            DependencyTransferProgress.IsIndeterminate = false;
+            SetDependencyTransferStatus(
+                "Transfer canceled. This operation's incomplete private state was removed. No completed set was published by the canceled operation.");
+            SetStatus("The dependency transfer was canceled. Nothing was installed, registered, selected, or executed.");
+            DependencyTransferStatus.Focus();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch (LocalModelDependencyTransferException exception)
+        {
+            DependencyTransferProgress.IsIndeterminate = false;
+            SetDependencyTransferStatus(TransferFailureMessage(exception.Code));
+            SetStatus("The dependency transfer failed closed. No content was installed, registered, selected, or executed.");
+            DependencyTransferStatus.Focus();
+        }
+        catch
+        {
+            DependencyTransferProgress.IsIndeterminate = false;
+            SetDependencyTransferStatus(
+                "Transfer or protected verification failed closed. No unverified set is usable. Review storage and the exact plan before retrying.");
+            SetStatus("The dependency transfer failed closed. No content was installed, registered, selected, or executed.");
+            DependencyTransferStatus.Focus();
+        }
+        finally
+        {
+            dependencyTransferCancellation.Dispose();
+            dependencyTransferCancellation = null;
+            dependencyTransferRunning = false;
+            DependencyTransferApprovalBox.IsChecked = false;
+            SetDependencyControlsEnabled(true);
+        }
+    }
+
+    private void OnCancelDependencyTransferClick(object sender, RoutedEventArgs e)
+    {
+        if (!dependencyTransferRunning || dependencyTransferCancellation is null) return;
+        CancelDependencyTransferButton.IsEnabled = false;
+        SetDependencyTransferStatus(
+            "Cancellation requested. DCx is stopping safely and removing only this operation's incomplete private state.");
+        dependencyTransferCancellation.Cancel();
+    }
+
+    private async void OnVerifyDependencyTransferClick(object sender, RoutedEventArgs e)
+    {
+        dependencyTransferOperation = VerifyDependencyTransferAsync();
+        await dependencyTransferOperation;
+    }
+
+    private async Task VerifyDependencyTransferAsync()
+    {
+        if (dependencyTransferCoordinator is null || dependencyTransferPlan is null || dependencyTransferRunning)
+        {
+            SetDependencyTransferStatus("Completed-set verification is unavailable until the exact plan is authenticated.");
+            return;
+        }
+
+        dependencyTransferRunning = true;
+        dependencyTransferCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        SetDependencyControlsEnabled(false);
+        SetDependencyTransferStatus("Rehashing the exact protected transfer set. No content will be executed.");
+        try
+        {
+            var progress = new Progress<LocalModelDependencyTransferSetProgress>(SetDependencyTransferProgress);
+            var receipt = await dependencyTransferCoordinator.VerifyAsync(
+                dependencyTransferPlan,
+                dependencyTransferCancellation.Token,
+                progress);
+            SetDependencyTransferStatus(
+                $"Completed set verified. Plan {receipt.PlanSha256}. {receipt.Files.Count:N0} authenticated files. {receipt.TransferBytes:N0} bytes. Nothing was executed.");
+            DependencyTransferStatus.Focus();
+        }
+        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
+        {
+            SetDependencyTransferStatus("Completed-set verification was canceled. No content was changed or executed.");
+            DependencyTransferStatus.Focus();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            SetDependencyTransferStatus(
+                "Completed-set verification failed closed. The set is unavailable until its protected receipt and every payload pass again.");
+            DependencyTransferStatus.Focus();
+        }
+        finally
+        {
+            dependencyTransferCancellation.Dispose();
+            dependencyTransferCancellation = null;
+            dependencyTransferRunning = false;
+            SetDependencyControlsEnabled(true);
+        }
+    }
+
+    private async void OnRecoverDependencyTransferClick(object sender, RoutedEventArgs e)
+    {
+        dependencyTransferOperation = RecoverDependencyTransferAsync();
+        await dependencyTransferOperation;
+    }
+
+    private async Task RecoverDependencyTransferAsync()
+    {
+        if (dependencyTransferCoordinator is null || dependencyTransferRunning) return;
+        dependencyTransferRunning = true;
+        dependencyTransferCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        SetDependencyControlsEnabled(false);
+        SetDependencyTransferStatus(
+            "Checking strict incoming transfer directories under the exclusive DCx data lease. Links will be refused and left inert.");
+        try
+        {
+            var removed = await dependencyTransferCoordinator.CleanupAbandonedAsync(
+                dependencyTransferCancellation.Token);
+            SetDependencyTransferStatus(
+                removed == 0
+                    ? "Recovery complete. No removable abandoned partial transfer was found. Unsafe linked content, if present, remains inert and untouched."
+                    : $"Recovery complete. Removed {removed:N0} abandoned partial transfer {(removed == 1 ? "directory" : "directories")}. Unsafe linked content, if present, remains inert and untouched.");
+            DependencyTransferStatus.Focus();
+        }
+        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
+        {
+            SetDependencyTransferStatus("Recovery was canceled. No completed set was changed.");
+            DependencyTransferStatus.Focus();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            SetDependencyTransferStatus(
+                "Recovery failed closed. No completed set was changed. Unsafe content was not followed.");
+            DependencyTransferStatus.Focus();
+        }
+        finally
+        {
+            dependencyTransferCancellation.Dispose();
+            dependencyTransferCancellation = null;
+            dependencyTransferRunning = false;
+            SetDependencyControlsEnabled(true);
+        }
+    }
+
+    private void SetDependencyTransferProgress(LocalModelDependencyTransferSetProgress value)
+    {
+        var percentage = value.TotalExpectedBytes <= 0
+            ? 0
+            : Math.Clamp(value.TotalBytesTransferred * 100d / value.TotalExpectedBytes, 0, 100);
+        DependencyTransferProgress.IsIndeterminate = value.Stage is
+            LocalModelDependencyTransferSetStage.Preparing or
+            LocalModelDependencyTransferSetStage.ProtectingReceipt;
+        DependencyTransferProgress.Value = percentage;
+        var item = value.ItemNumber > 0 ? $" Item {value.ItemNumber:N0} of {value.ItemCount:N0}." : string.Empty;
+        var name = $"Dependency transfer {value.Stage}.{item} {value.TotalBytesTransferred:N0} of {value.TotalExpectedBytes:N0} bytes.";
+        AutomationProperties.SetName(DependencyTransferProgress, name);
+        if (lastAnnouncedTransferStage == value.Stage && lastAnnouncedTransferItem == value.ItemNumber) return;
+        lastAnnouncedTransferStage = value.Stage;
+        lastAnnouncedTransferItem = value.ItemNumber;
+        SetDependencyTransferStatus(name);
+    }
+
+    private static string TransferFailureMessage(string code) => code switch
+    {
+        "dependency_transfer_destination_exists" =>
+            "Transfer stopped because this exact completed set already exists. Use Verify completed set. Existing content was not overwritten.",
+        "dependency_transfer_capacity_unapproved" =>
+            "Transfer stopped because the fresh storage-capacity check did not meet the exact plan requirement. No provider transfer began.",
+        "dependency_transfer_timeout" =>
+            "Transfer timed out and failed closed. Partial bytes from this operation were removed.",
+        "dependency_transfer_response_invalid" =>
+            "Transfer stopped because a provider response, redirect, encoding, range, or length did not match the reviewed policy. Partial bytes were removed.",
+        "dependency_transfer_catalog_invalid" or "dependency_transfer_approval_invalid" =>
+            "Transfer stopped because the authenticated catalog, exact plan, or one-time approval no longer matched. No unapproved transfer continued.",
+        _ => "Transfer failed closed. Partial bytes from this operation were removed. No completed unverified set was published.",
+    };
 
     private void OnDependencyCandidateSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -820,17 +1108,34 @@ public partial class LocalModelsWindow : Window
 
     private void SetDependencyControlsEnabled(bool enabled)
     {
-        DependencyCandidatesList.IsEnabled = enabled;
-        DependencyArtifactPath.IsEnabled = enabled && selectedDependencyCandidate is not null;
-        BrowseDependencyArtifactButton.IsEnabled = enabled && selectedDependencyCandidate is not null;
+        var reviewEnabled = enabled && !dependencyTransferRunning;
+        DependencyCandidatesList.IsEnabled = reviewEnabled;
+        DependencyArtifactPath.IsEnabled = reviewEnabled && selectedDependencyCandidate is not null;
+        BrowseDependencyArtifactButton.IsEnabled = reviewEnabled && selectedDependencyCandidate is not null;
         ReviewDependencyArtifactButton.IsEnabled =
-            enabled && selectedDependencyCandidate is not null &&
+            reviewEnabled && selectedDependencyCandidate is not null &&
             !string.IsNullOrWhiteSpace(DependencyArtifactPath.Text);
         DependencyStagingApprovalBox.IsEnabled =
-            enabled && reviewedDependencyArtifact?.RuntimeArchive is not null;
+            reviewEnabled && reviewedDependencyArtifact?.RuntimeArchive is not null;
         StageDependencyRuntimeButton.IsEnabled =
-            enabled && reviewedDependencyArtifact?.RuntimeArchive is not null &&
+            reviewEnabled && reviewedDependencyArtifact?.RuntimeArchive is not null &&
             DependencyStagingApprovalBox.IsChecked == true;
+        SetDependencyTransferControlsEnabled(enabled);
+    }
+
+    private void SetDependencyTransferControlsEnabled(bool enabled)
+    {
+        var planAvailable = enabled && !dependencyTransferRunning &&
+            dependencyTransferCoordinator is not null &&
+            dependencyTransferPlan is not null;
+        var transferAvailable = planAvailable && dependencyTransferPlan!.CapacitySufficient;
+        DependencyTransferApprovalBox.IsEnabled = transferAvailable;
+        StartDependencyTransferButton.IsEnabled =
+            transferAvailable && DependencyTransferApprovalBox.IsChecked == true;
+        CancelDependencyTransferButton.IsEnabled = dependencyTransferRunning;
+        VerifyDependencyTransferButton.IsEnabled = planAvailable;
+        RecoverDependencyTransferButton.IsEnabled =
+            enabled && !dependencyTransferRunning && dependencyTransferCoordinator is not null;
     }
 
     private void ResetDependencyArtifactReview(string message)
@@ -962,6 +1267,12 @@ public partial class LocalModelsWindow : Window
         AutomationProperties.SetName(DependencyTransferPreflight, value);
     }
 
+    private void SetDependencyTransferStatus(string value)
+    {
+        DependencyTransferStatus.Text = value;
+        AutomationProperties.SetName(DependencyTransferStatus, value);
+    }
+
     private void SetDependencyCandidateDetails(string value)
     {
         DependencyCandidateDetails.Text = value;
@@ -1018,7 +1329,9 @@ public partial class LocalModelsWindow : Window
             "This profile used native Windows kernel and read-only registry data. No external process or network request ran. Capacity is volatile and must be rechecked before resource-intensive work.";
     }
 
-    private static string FormatDependencyTransferPlan(LocalModelDependencyTransferPlan plan)
+    private static string FormatDependencyTransferPlan(
+        LocalModelDependencyTransferPlan plan,
+        bool transferActionAvailable)
     {
         static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
         var available = plan.ObservedAvailableFreeBytes is long availableBytes
@@ -1038,7 +1351,10 @@ public partial class LocalModelsWindow : Window
             "The minimum reserves one temporary transfer copy, one retained verified copy, and 536,870,912 workspace bytes. " +
             $"{available} Capacity must be rechecked immediately before any future transfer.\n" +
             $"{itemDetails}\n" +
-            "The inert core transport reloads the authenticated catalog, requires exact-item approval, disables redirects, proxy, cookies and decompression, and rolls back any partial stream unless final URI, status, length and SHA-256 all match. Its private set coordinator rechecks capacity, uses random incoming storage, protects a source-path-free receipt, atomically publishes only a complete plan, and can rehash the completed set. Neither boundary is connected to a transfer action in this window.\n" +
+            "The inert core transport reloads the authenticated catalog, requires exact-item approval, disables redirects, proxy, cookies and decompression, and rolls back any partial stream unless final URI, status, length and SHA-256 all match. Its private set coordinator serializes transfer, verification and cleanup; rechecks capacity; uses random incoming storage; protects a source-path-free receipt; atomically publishes only a complete plan; and can rehash the completed set. " +
+            (transferActionAvailable
+                ? "This window exposes one separately approved exact-plan transfer, cancellation, protected verification and abandoned-partial recovery. The current strict transport rejects provider redirects."
+                : "These boundaries are not connected to a transfer action in this validation window.") + "\n" +
             "No transfer approval exists. Nothing was downloaded, installed, extracted, pulled, registered, selected, or executed.";
     }
 

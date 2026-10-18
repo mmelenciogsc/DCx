@@ -56,13 +56,18 @@ public sealed record LocalModelDependencyTransferResult(
     long Bytes,
     string Sha256);
 
+public sealed record LocalModelDependencyItemTransferProgress(
+    long BytesTransferred,
+    long ExpectedBytes);
+
 public interface ILocalModelDependencyTransfer
 {
     Task<LocalModelDependencyTransferResult> TransferAsync(
         LocalModelDependencyTransferPlan plan,
         LocalModelDependencyTransferApproval approval,
         Stream destination,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IProgress<LocalModelDependencyItemTransferProgress>? progress = null);
 }
 
 public sealed class LocalModelDependencyTransferException : Exception
@@ -130,7 +135,8 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
         LocalModelDependencyTransferPlan plan,
         LocalModelDependencyTransferApproval approval,
         Stream destination,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<LocalModelDependencyItemTransferProgress>? progress = null)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
@@ -156,7 +162,8 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
                     input,
                     destination,
                     item.ExpectedBytes,
-                    deadline.Token)
+                    deadline.Token,
+                    progress)
                 .ConfigureAwait(false);
             LocalModelDependencyCatalogLoader.RequireDigest(
                 digest,
@@ -264,7 +271,8 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
         Stream input,
         Stream destination,
         long expectedBytes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IProgress<LocalModelDependencyItemTransferProgress>? progress)
     {
         using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = new byte[BufferBytes];
@@ -283,6 +291,7 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
                 digest.AppendData(buffer, 0, read);
                 await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
                     .ConfigureAwait(false);
+                progress?.Report(new LocalModelDependencyItemTransferProgress(total, expectedBytes));
             }
             if (total != expectedBytes)
             {

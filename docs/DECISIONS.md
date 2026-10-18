@@ -66,5 +66,6 @@
 | [0062](architecture/adr/0062-native-windows-hardware-profile.md) | Profile local-model resources through bounded native Windows evidence | Accepted for product inventory and selection prefilter; benchmark acceptance remains required | 2026-10-18 |
 | [0063](architecture/adr/0063-authenticated-rollback-local-dependency-transfer.md) | Authenticate and roll back every local-dependency transfer | Accepted for inert core transport; production acquisition and provider redirects remain blocked | 2026-10-18 |
 | [0064](architecture/adr/0064-protected-atomic-local-dependency-transfer-sets.md) | Publish only protected complete local-dependency transfer sets | Accepted for inert local coordination; product acquisition remains blocked | 2026-10-18 |
+| [0065](architecture/adr/0065-accessible-explicit-local-dependency-transfer.md) | Require accessible one-time exact-plan approval for local-dependency transfer | Accepted for the inert acquisition workflow; real acquisition remains blocked | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

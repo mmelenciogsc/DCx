@@ -32,9 +32,11 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
     public async Task Transfer_StreamsEveryItemProtectsReceiptAndAtomicallyPublishesVerifiableSet()
     {
         var fixture = Fixture("success");
+        var progress = new List<LocalModelDependencyTransferSetProgress>();
         var receipt = await fixture.Coordinator.TransferAsync(
             fixture.Plan,
-            LocalModelDependencyTransferSetApproval.Create(fixture.Plan, approved: true));
+            LocalModelDependencyTransferSetApproval.Create(fixture.Plan, approved: true),
+            progress: new InlineProgress<LocalModelDependencyTransferSetProgress>(progress.Add));
 
         Assert.Equal(fixture.Plan.Items.Count, fixture.Transfer.Calls);
         Assert.Equal(fixture.Plan.PlanSha256, receipt.PlanSha256);
@@ -62,6 +64,36 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
         Assert.Equal(receipt.PlanSha256, verified.PlanSha256);
         Assert.Equal(receipt.TransferBytes, verified.TransferBytes);
         Assert.Equal(receipt.Files, verified.Files);
+        Assert.Equal(LocalModelDependencyTransferSetStage.Preparing, progress[0].Stage);
+        Assert.Contains(progress, value => value.Stage == LocalModelDependencyTransferSetStage.Transferring);
+        Assert.Contains(progress, value => value.Stage == LocalModelDependencyTransferSetStage.ProtectingReceipt);
+        var completedProgress = progress[^1];
+        Assert.Equal(LocalModelDependencyTransferSetStage.Published, completedProgress.Stage);
+        Assert.Equal(fixture.Plan.TransferBytes, completedProgress.TotalBytesTransferred);
+        Assert.Equal(fixture.Plan.TransferBytes, completedProgress.TotalExpectedBytes);
+    }
+
+    [Fact]
+    public async Task ActiveTransfer_SerializesVerificationAndCleanupUntilItFinishes()
+    {
+        var fixture = Fixture("serialized-operations");
+        fixture.Transfer.PauseAtCall = 1;
+        var transfer = fixture.Coordinator.TransferAsync(
+            fixture.Plan,
+            LocalModelDependencyTransferSetApproval.Create(fixture.Plan, approved: true));
+        await fixture.Transfer.Paused.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var cleanup = fixture.Coordinator.CleanupAbandonedAsync();
+        var verify = fixture.Coordinator.VerifyAsync(fixture.Plan);
+        await Task.Delay(50);
+        Assert.False(cleanup.IsCompleted);
+        Assert.False(verify.IsCompleted);
+
+        fixture.Transfer.Continue.TrySetResult();
+        await transfer;
+        Assert.Equal(0, await cleanup);
+        var receipt = await verify;
+        Assert.Equal(fixture.Plan.PlanSha256, receipt.PlanSha256);
     }
 
     [Fact]
@@ -318,12 +350,16 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
         public int? ReturnWrongDigestAtCall { get; set; }
         public int? CancelAtCall { get; set; }
         public CancellationTokenSource? Cancellation { get; set; }
+        public int? PauseAtCall { get; set; }
+        public TaskCompletionSource Paused { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Continue { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public async Task<LocalModelDependencyTransferResult> TransferAsync(
             LocalModelDependencyTransferPlan plan,
             LocalModelDependencyTransferApproval approval,
             Stream destination,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            IProgress<LocalModelDependencyItemTransferProgress>? progress = null)
         {
             Calls++;
             if (FailAtCall == Calls) throw new IOException("synthetic private transfer failure");
@@ -332,14 +368,25 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
                 Cancellation?.Cancel();
                 cancellationToken.ThrowIfCancellationRequested();
             }
+            if (PauseAtCall == Calls)
+            {
+                Paused.TrySetResult();
+                await Continue.Task.WaitAsync(cancellationToken);
+            }
             var bytes = content[approval.SourceUri.AbsoluteUri];
             await destination.WriteAsync(bytes, cancellationToken);
             await destination.FlushAsync(cancellationToken);
+            progress?.Report(new LocalModelDependencyItemTransferProgress(bytes.LongLength, bytes.LongLength));
             return new LocalModelDependencyTransferResult(
                 plan.PlanSha256,
                 approval.SourceUri,
                 bytes.LongLength,
                 ReturnWrongDigestAtCall == Calls ? new string('0', 64) : Digest(bytes));
         }
+    }
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 }

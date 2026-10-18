@@ -2,7 +2,7 @@
 
 Status: NOT RUN. Automated UIA evidence does not satisfy this checklist.
 
-Run separately with the installed JAWS, NVDA and Narrator versions. Use only an already-installed nonprivate fixture model; do not download, install, retag or upload anything.
+Run separately with the installed JAWS, NVDA and Narrator versions. Use only an already-installed nonprivate fixture model and the gated synthetic transfer fixture; do not perform a real provider transfer, install, retag or upload anything.
 
 1. Keyboard to **Local models** and confirm the window title, heading, introductory no-download notice and current vision/embedding/transcription choices are announced once and in a useful order.
 2. Confirm **Refresh installed models**, the identity list, complete license field, approval checkbox, role actions, clear actions and **Close** are reachable with visible focus.
@@ -31,5 +31,10 @@ Run separately with the installed JAWS, NVDA and Narrator versions. Use only an 
 25. Cancel the long generated fixture. Confirm the cancellation status is announced, no partial result appears and the prior completed aggregate evidence remains. Do not treat this generated pass as real speech accuracy.
 26. With no approved embedding model, review an embedding manifest and confirm its exact digests and Recall@K/MRR/resource thresholds are readable while approval and Run remain unavailable. Confirm the missing-model guidance is concise.
 27. With a separately approved real embedding model, confirm review announces the exact backend digest and Ollama runtime version, approval begins unchecked, and Run becomes available only after approval. After a run, confirm the focused aggregate result labels Ollama values as loaded memory/GPU memory, announces unload confirmation, revokes approval and leaves the production selection unchanged.
+28. In **Approved dependency transfer — inert storage only**, read the exact plan first. Confirm approval begins unchecked, **Begin approved transfer** is disabled, and approval text clearly distinguishes provider contact and inert storage from installation, registration, selection and execution.
+29. Using only the gated synthetic fixture, confirm approval enables the transfer once. Verify item ordinal and byte progress are understandable without excessive repeated speech, **Cancel transfer** remains reachable, and other transfer/review actions are unavailable during work.
+30. Cancel the first synthetic attempt. Confirm the cleanup result receives focus, no partial completion is implied, and the one-time approval resets. Approve and complete a second attempt; confirm the protected/reverified result receives focus, progress reaches 100%, and approval resets again.
+31. Invoke **Verify completed set** and **Recover abandoned partials** by keyboard. Confirm each concise result receives focus. Confirm recovery explains that links are refused and no completed set was changed.
+32. Repeat the synthetic workflow at 200% scaling and High Contrast. Check the `Alt+B`, `Alt+C`, `Alt+V` and `Alt+R` access keys for conflicts with each screen reader. Record verbosity, delayed announcements, cancellation latency and any focus loss. Do not infer this human result from automated UIA.
 
 P06 remains blocked until this human gate and the separate real Whisper/embedding gates pass.

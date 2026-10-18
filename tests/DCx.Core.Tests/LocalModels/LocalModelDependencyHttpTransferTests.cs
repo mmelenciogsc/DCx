@@ -27,11 +27,13 @@ public sealed class LocalModelDependencyHttpTransferTests
         var handler = new FixtureHandler(request => Response(request, bytes));
         using var transfer = new LocalModelDependencyHttpTransfer(handler, catalog);
         using var destination = new MemoryStream();
+        var progress = new List<LocalModelDependencyItemTransferProgress>();
 
         var result = await transfer.TransferAsync(
             plan,
             LocalModelDependencyTransferApproval.Create(plan, item, approved: true),
-            destination);
+            destination,
+            progress: new InlineProgress<LocalModelDependencyItemTransferProgress>(progress.Add));
 
         Assert.Equal(bytes, destination.ToArray());
         Assert.Equal(plan.PlanSha256, result.PlanSha256);
@@ -41,6 +43,9 @@ public sealed class LocalModelDependencyHttpTransferTests
         Assert.Equal(1, handler.Requests);
         Assert.Equal("identity", Assert.Single(handler.AcceptEncodings));
         Assert.True(handler.NoStore);
+        var completed = Assert.Single(progress);
+        Assert.Equal(bytes.LongLength, completed.BytesTransferred);
+        Assert.Equal(bytes.LongLength, completed.ExpectedBytes);
     }
 
     [Fact]
@@ -391,5 +396,10 @@ public sealed class LocalModelDependencyHttpTransferTests
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             throw new InvalidOperationException("unreachable");
         }
+    }
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 }

@@ -25,11 +25,14 @@
 | Recovery archive | User-chosen local path | User-controlled | Never by default |
 | Minimized crash reports | Per-user local application data, default off | Maximum 20; purge on opt-out or explicit delete | No transport implemented |
 | Update staging | Caller-supplied local staging root (core is not wired) | Until a future updater removes it; policy pending | Inbound manifest/package download only from configured exact HTTPS origin |
+| Local dependency transfer set | Per-user local-model storage plus receipt digest/length in Windows Credential Manager | Until a future user-approved removal policy; abandoned strict partials are removed during recovery | Only after one-time exact-plan approval, to the reviewed dependency source; current real transfer remains blocked by redirect policy |
 | Pilot metric aggregates | Local SQLite, default off | Purged on local opt-out; final policy pending | No transport implemented |
 | Paused web-video frame question | Random per-operation Windows temp directory and approved loopback model request | Deleted immediately after the request; no intentional answer persistence | No provider upload; visible video rectangle and question go only to loopback Ollama |
 | Package installation review | In-memory review session and native window | Released on approval, cancellation, denial or close; no receipt persistence | No transfer; validation mode has no installer or executor |
 
 Retention periods, export/deletion behavior, telemetry consent, regional requirements, and a production privacy notice remain P10/P14 legal-review gates.
+
+The dependency preflight displays reviewed source URLs, lengths and hashes but does not persist browser state, credentials or user content. Transfer receipts omit source URLs and local source paths; they contain catalog/plan identity plus digest-derived payload names, lengths and hashes. Progress contains only stage, item ordinal/count and byte counts. Stable failure text excludes transport diagnostics. Current-user Credential Manager stores only the protected receipt digest and length binding. No real provider request occurred in the recorded UIA evidence.
 
 ## Current private-store realization
 

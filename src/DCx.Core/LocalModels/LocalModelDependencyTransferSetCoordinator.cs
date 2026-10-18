@@ -37,11 +37,46 @@ public sealed record LocalModelDependencyTransferSetReceipt(
     long TransferBytes,
     IReadOnlyList<LocalModelDependencyTransferredFile> Files);
 
+public enum LocalModelDependencyTransferSetStage
+{
+    Preparing,
+    Transferring,
+    ProtectingReceipt,
+    Published,
+    Verifying,
+    Completed,
+}
+
+public sealed record LocalModelDependencyTransferSetProgress(
+    LocalModelDependencyTransferSetStage Stage,
+    int ItemNumber,
+    int ItemCount,
+    long ItemBytesTransferred,
+    long ItemExpectedBytes,
+    long TotalBytesTransferred,
+    long TotalExpectedBytes);
+
+public interface ILocalModelDependencyTransferSetCoordinator : IDisposable
+{
+    Task<LocalModelDependencyTransferSetReceipt> TransferAsync(
+        LocalModelDependencyTransferPlan plan,
+        LocalModelDependencyTransferSetApproval approval,
+        CancellationToken cancellationToken = default,
+        IProgress<LocalModelDependencyTransferSetProgress>? progress = null);
+
+    Task<LocalModelDependencyTransferSetReceipt> VerifyAsync(
+        LocalModelDependencyTransferPlan plan,
+        CancellationToken cancellationToken = default,
+        IProgress<LocalModelDependencyTransferSetProgress>? progress = null);
+
+    Task<int> CleanupAbandonedAsync(CancellationToken cancellationToken = default);
+}
+
 /// <summary>
 /// Coordinates an explicitly approved plan into a private, inert and atomically published set.
 /// It does not extract, install, register, select or execute transferred content.
 /// </summary>
-public sealed class LocalModelDependencyTransferSetCoordinator : IDisposable
+public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDependencyTransferSetCoordinator
 {
     public const int CurrentReceiptSchemaVersion = 1;
     public const int MaximumReceiptBytes = 64 * 1024;
@@ -64,6 +99,7 @@ public sealed class LocalModelDependencyTransferSetCoordinator : IDisposable
     private readonly ILocalModelApprovalStateAnchorStore anchors;
     private readonly Func<string, long?> availableFreeBytes;
     private readonly bool ownsTransfer;
+    private readonly SemaphoreSlim operationGate = new(1, 1);
 
     public LocalModelDependencyTransferSetCoordinator(string applicationDataRoot)
         : this(
@@ -93,10 +129,29 @@ public sealed class LocalModelDependencyTransferSetCoordinator : IDisposable
     public async Task<LocalModelDependencyTransferSetReceipt> TransferAsync(
         LocalModelDependencyTransferPlan plan,
         LocalModelDependencyTransferSetApproval approval,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<LocalModelDependencyTransferSetProgress>? progress = null)
+    {
+        await operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await TransferCoreAsync(plan, approval, cancellationToken, progress).ConfigureAwait(false);
+        }
+        finally
+        {
+            operationGate.Release();
+        }
+    }
+
+    private async Task<LocalModelDependencyTransferSetReceipt> TransferCoreAsync(
+        LocalModelDependencyTransferPlan plan,
+        LocalModelDependencyTransferSetApproval approval,
+        CancellationToken cancellationToken,
+        IProgress<LocalModelDependencyTransferSetProgress>? progress)
     {
         ValidateApproval(plan, approval);
         cancellationToken.ThrowIfCancellationRequested();
+        Report(progress, LocalModelDependencyTransferSetStage.Preparing, plan, 0, 0, 0, 0);
         var appRoot = LocalModelStoragePathGuard.RequireDirectory(
             applicationDataRoot,
             "dependency transfer application root");
@@ -127,10 +182,19 @@ public sealed class LocalModelDependencyTransferSetCoordinator : IDisposable
         try
         {
             var files = new List<LocalModelDependencyTransferredFile>(currentPlan.Items.Count);
+            long completedBytes = 0;
             for (var index = 0; index < currentPlan.Items.Count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var item = currentPlan.Items[index];
+                Report(
+                    progress,
+                    LocalModelDependencyTransferSetStage.Transferring,
+                    currentPlan,
+                    index + 1,
+                    0,
+                    item.ExpectedBytes,
+                    completedBytes);
                 var fileName = FileName(index, item.Sha256);
                 var path = LocalModelStoragePathGuard.ValidateFile(
                     Path.Combine(incoming, fileName),
@@ -148,7 +212,15 @@ public sealed class LocalModelDependencyTransferSetCoordinator : IDisposable
                             currentPlan,
                             LocalModelDependencyTransferApproval.Create(currentPlan, item, approved: true),
                             output,
-                            cancellationToken)
+                            cancellationToken,
+                            new InlineProgress<LocalModelDependencyItemTransferProgress>(itemProgress => Report(
+                                progress,
+                                LocalModelDependencyTransferSetStage.Transferring,
+                                currentPlan,
+                                index + 1,
+                                itemProgress.BytesTransferred,
+                                itemProgress.ExpectedBytes,
+                                completedBytes + itemProgress.BytesTransferred)))
                         .ConfigureAwait(false);
                     if (result.Bytes != item.ExpectedBytes ||
                         !string.Equals(result.SourceUri.AbsoluteUri, item.SourceUri.AbsoluteUri, StringComparison.Ordinal) ||
@@ -164,8 +236,17 @@ public sealed class LocalModelDependencyTransferSetCoordinator : IDisposable
                     fileName,
                     item.ExpectedBytes,
                     item.Sha256));
+                completedBytes = checked(completedBytes + item.ExpectedBytes);
             }
 
+            Report(
+                progress,
+                LocalModelDependencyTransferSetStage.ProtectingReceipt,
+                currentPlan,
+                currentPlan.Items.Count,
+                0,
+                0,
+                currentPlan.TransferBytes);
             var receipt = new LocalModelDependencyTransferSetReceipt(
                 CurrentReceiptSchemaVersion,
                 currentPlan.CatalogId,
@@ -213,6 +294,14 @@ public sealed class LocalModelDependencyTransferSetCoordinator : IDisposable
                 }
                 Directory.Move(incoming, destination);
                 LocalModelStoragePathGuard.RequireDirectory(destination, "dependency transfer completed set");
+                Report(
+                    progress,
+                    LocalModelDependencyTransferSetStage.Published,
+                    currentPlan,
+                    currentPlan.Items.Count,
+                    0,
+                    0,
+                    currentPlan.TransferBytes);
                 return receipt;
             }
             finally
@@ -232,10 +321,28 @@ public sealed class LocalModelDependencyTransferSetCoordinator : IDisposable
 
     public async Task<LocalModelDependencyTransferSetReceipt> VerifyAsync(
         LocalModelDependencyTransferPlan plan,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<LocalModelDependencyTransferSetProgress>? progress = null)
+    {
+        await operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await VerifyCoreAsync(plan, cancellationToken, progress).ConfigureAwait(false);
+        }
+        finally
+        {
+            operationGate.Release();
+        }
+    }
+
+    private async Task<LocalModelDependencyTransferSetReceipt> VerifyCoreAsync(
+        LocalModelDependencyTransferPlan plan,
+        CancellationToken cancellationToken,
+        IProgress<LocalModelDependencyTransferSetProgress>? progress)
     {
         LocalModelDependencyTransferPlanner.ValidateForTransfer(plan);
         cancellationToken.ThrowIfCancellationRequested();
+        Report(progress, LocalModelDependencyTransferSetStage.Verifying, plan, 0, 0, 0, 0);
         var appRoot = LocalModelStoragePathGuard.RequireDirectory(
             applicationDataRoot,
             "dependency transfer application root");
@@ -317,7 +424,23 @@ public sealed class LocalModelDependencyTransferSetCoordinator : IDisposable
                 {
                     throw new InvalidOperationException("The dependency transfer completed payload digest does not match.");
                 }
+                Report(
+                    progress,
+                    LocalModelDependencyTransferSetStage.Verifying,
+                    plan,
+                    file.Index + 1,
+                    file.Bytes,
+                    file.Bytes,
+                    receipt.Files.Take(file.Index + 1).Sum(value => value.Bytes));
             }
+            Report(
+                progress,
+                LocalModelDependencyTransferSetStage.Completed,
+                plan,
+                receipt.Files.Count,
+                0,
+                0,
+                plan.TransferBytes);
             return receipt;
         }
         finally
@@ -326,26 +449,34 @@ public sealed class LocalModelDependencyTransferSetCoordinator : IDisposable
         }
     }
 
-    public Task<int> CleanupAbandonedAsync(CancellationToken cancellationToken = default)
+    public async Task<int> CleanupAbandonedAsync(CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        var appRoot = LocalModelStoragePathGuard.RequireDirectory(
-            applicationDataRoot,
-            "dependency transfer application root");
-        var transfersRoot = EnsureTransfersRoot(appRoot);
-        var removed = 0;
-        foreach (var entry in Directory.EnumerateDirectories(transfersRoot))
+        await operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var name = Path.GetFileName(entry);
-            if (!IsIncomingName(name)) continue;
-            LocalModelStoragePathGuard.TryDeleteTemporaryDirectory(
-                transfersRoot,
-                entry,
-                "dependency transfer abandoned incoming");
-            if (!Directory.Exists(entry)) removed++;
+            var appRoot = LocalModelStoragePathGuard.RequireDirectory(
+                applicationDataRoot,
+                "dependency transfer application root");
+            var transfersRoot = EnsureTransfersRoot(appRoot);
+            var removed = 0;
+            foreach (var entry in Directory.EnumerateDirectories(transfersRoot))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var name = Path.GetFileName(entry);
+                if (!IsIncomingName(name)) continue;
+                LocalModelStoragePathGuard.TryDeleteTemporaryDirectory(
+                    transfersRoot,
+                    entry,
+                    "dependency transfer abandoned incoming");
+                if (!Directory.Exists(entry)) removed++;
+            }
+            return removed;
         }
-        return Task.FromResult(removed);
+        finally
+        {
+            operationGate.Release();
+        }
     }
 
     public void Dispose()
@@ -422,6 +553,28 @@ public sealed class LocalModelDependencyTransferSetCoordinator : IDisposable
     }
 
     private static string FileName(int index, string sha256) => $"{index:D2}-{sha256}.payload";
+
+    private static void Report(
+        IProgress<LocalModelDependencyTransferSetProgress>? progress,
+        LocalModelDependencyTransferSetStage stage,
+        LocalModelDependencyTransferPlan plan,
+        int itemNumber,
+        long itemBytesTransferred,
+        long itemExpectedBytes,
+        long totalBytesTransferred) =>
+        progress?.Report(new LocalModelDependencyTransferSetProgress(
+            stage,
+            itemNumber,
+            plan.Items.Count,
+            itemBytesTransferred,
+            itemExpectedBytes,
+            totalBytesTransferred,
+            plan.TransferBytes));
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
 
     private static bool IsIncomingName(string name) =>
         name.Length == IncomingPrefix.Length + 32 &&
