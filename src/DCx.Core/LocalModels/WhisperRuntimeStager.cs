@@ -236,9 +236,9 @@ public sealed class WhisperRuntimeStager
                 }
                 if (entryReview.IsDirectory)
                 {
-                    _ = LocalModelStoragePathGuard.EnsureDirectory(
-                        CombineUnder(temporaryDirectory, entryReview.CanonicalPath),
-                        "staged Whisper runtime directory");
+                    // Empty archive directories carry no runtime content. Parent directories are
+                    // created from the exact file inventory so a later verifier can deny every
+                    // unexpected filesystem entry.
                     directoryCount++;
                     continue;
                 }

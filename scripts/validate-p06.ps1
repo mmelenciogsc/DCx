@@ -72,7 +72,12 @@ try {
         "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_DeniesReceiptCollisionAndLeavesNoPublishedOrPrivateState",
         "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_NeverOverwritesExistingDigestBoundDestination",
         "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_DeniesLinkedRuntimeRootWithoutWritingOutside",
-        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_HonorsPreCanceledOperationBeforeCreatingApplicationStorage"
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_HonorsPreCanceledOperationBeforeCreatingApplicationStorage",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Verify_RehashesExactStageWithoutRegisteringOrExecutingRuntime",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Verify_DeniesTamperedRuntimeFile",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Verify_DeniesUnexpectedFileAndDirectory",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Verify_DeniesLinkedContentWithoutReadingOutside",
+        "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Verify_DeniesUnknownDuplicateOrMismatchedReceiptIdentity"
     )
     $localModelResults = @($localModelsReport.TestRun.Results.UnitTestResult)
     foreach ($requiredStorageDenial in $requiredStorageDenials) {

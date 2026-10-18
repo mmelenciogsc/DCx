@@ -148,29 +148,15 @@ internal static class WhisperRuntimeArchiveInspector
     internal static EntryReview ValidateEntry(ZipArchiveEntry entry, HashSet<string> names)
     {
         var raw = entry.FullName;
-        if (string.IsNullOrEmpty(raw) || raw.Length > MaximumPathCharacters ||
-            raw != raw.Normalize(NormalizationForm.FormC) || raw.Contains('\\') || raw.Contains(':') ||
-            raw.StartsWith("/", StringComparison.Ordinal) || raw.Contains("//", StringComparison.Ordinal) ||
-            raw.Any(char.IsControl))
-        {
-            throw new InvalidOperationException("The Whisper runtime archive contains an unsafe path.");
-        }
-
         var isDirectory = raw.EndsWith("/", StringComparison.Ordinal);
-        var canonical = isDirectory ? raw[..^1] : raw;
-        if (canonical.Length == 0 || !names.Add(canonical))
+        var canonical = ValidateRelativePath(
+            isDirectory ? raw[..^1] : raw,
+            "The Whisper runtime archive contains an unsafe path.");
+        if (!names.Add(canonical))
         {
             throw new InvalidOperationException("The Whisper runtime archive contains a duplicate or empty path.");
         }
         var segments = canonical.Split('/');
-        foreach (var segment in segments)
-        {
-            if (segment.Length is < 1 or > MaximumSegmentCharacters || segment is "." or ".." ||
-                segment != segment.TrimEnd(' ', '.') || IsReservedDeviceName(segment))
-            {
-                throw new InvalidOperationException("The Whisper runtime archive contains an unsafe path segment.");
-            }
-        }
 
         var unixType = (entry.ExternalAttributes >> 16) & 0xF000;
         var windowsAttributes = (FileAttributes)(entry.ExternalAttributes & 0xFFFF);
@@ -196,6 +182,30 @@ internal static class WhisperRuntimeArchiveInspector
             throw new InvalidOperationException("The Whisper runtime archive entry compression or size is unsafe.");
         }
         return new EntryReview(canonical, segments[^1], false);
+    }
+
+    internal static string ValidateStagedFileRelativePath(string? path) =>
+        ValidateRelativePath(path, "The staged Whisper runtime contains an unsafe relative path.");
+
+    private static string ValidateRelativePath(string? path, string message)
+    {
+        if (string.IsNullOrEmpty(path) || path.Length > MaximumPathCharacters ||
+            path != path.Normalize(NormalizationForm.FormC) || path.Contains('\\') || path.Contains(':') ||
+            path.StartsWith("/", StringComparison.Ordinal) || path.EndsWith("/", StringComparison.Ordinal) ||
+            path.Contains("//", StringComparison.Ordinal) || path.Any(char.IsControl))
+        {
+            throw new InvalidOperationException(message);
+        }
+
+        foreach (var segment in path.Split('/'))
+        {
+            if (segment.Length is < 1 or > MaximumSegmentCharacters || segment is "." or ".." ||
+                segment != segment.TrimEnd(' ', '.') || IsReservedDeviceName(segment))
+            {
+                throw new InvalidOperationException(message);
+            }
+        }
+        return path;
     }
 
     private static bool IsReservedDeviceName(string segment)

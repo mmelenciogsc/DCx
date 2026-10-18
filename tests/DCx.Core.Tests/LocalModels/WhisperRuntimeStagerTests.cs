@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using DCx.Core.LocalModels;
 
 namespace DCx.Core.Tests.LocalModels;
@@ -190,6 +191,109 @@ public sealed class WhisperRuntimeStagerTests : IDisposable
         Assert.False(Directory.Exists(applicationRoot));
     }
 
+    [Fact]
+    public async Task Verify_RehashesExactStageWithoutRegisteringOrExecutingRuntime()
+    {
+        var (candidate, applicationRoot, staged) = await StageFixtureAsync();
+
+        var verified = await new WhisperRuntimeStageVerifier().VerifyAsync(
+            candidate,
+            applicationRoot);
+
+        Assert.Equal(staged.CandidateId, verified.CandidateId);
+        Assert.Equal(staged.ArchiveSha256, verified.ArchiveSha256);
+        Assert.Equal(staged.RuntimeDirectory, verified.RuntimeDirectory);
+        Assert.Equal(staged.WhisperCliPath, verified.WhisperCliPath);
+        Assert.Equal(staged.ReceiptPath, verified.ReceiptPath);
+        Assert.Equal(staged.StagedUtc, verified.StagedUtc);
+        Assert.Equal(staged.FileCount, verified.FileCount);
+        Assert.Equal(staged.DirectoryCount, verified.DirectoryCount);
+        Assert.Equal(staged.ExpandedBytes, verified.ExpandedBytes);
+        Assert.Equal(staged.LicenseNoticeEntries, verified.LicenseNoticeEntries);
+        Assert.Equal(staged.Files, verified.Files);
+        Assert.Equal([1, 2, 3, 4], await File.ReadAllBytesAsync(verified.WhisperCliPath));
+        Assert.False(File.Exists(Path.Combine(applicationRoot, "local-models", "whisper.json")));
+    }
+
+    [Fact]
+    public async Task Verify_DeniesTamperedRuntimeFile()
+    {
+        var (candidate, applicationRoot, staged) = await StageFixtureAsync();
+        await File.WriteAllBytesAsync(staged.WhisperCliPath, [4, 3, 2, 1]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new WhisperRuntimeStageVerifier().VerifyAsync(candidate, applicationRoot));
+    }
+
+    [Fact]
+    public async Task Verify_DeniesUnexpectedFileAndDirectory()
+    {
+        var (candidate, applicationRoot, staged) = await StageFixtureAsync();
+        var unexpectedFile = Path.Combine(staged.RuntimeDirectory, "unexpected.dll");
+        await File.WriteAllBytesAsync(unexpectedFile, [1]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new WhisperRuntimeStageVerifier().VerifyAsync(candidate, applicationRoot));
+
+        File.Delete(unexpectedFile);
+        Directory.CreateDirectory(Path.Combine(staged.RuntimeDirectory, "unexpected"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new WhisperRuntimeStageVerifier().VerifyAsync(candidate, applicationRoot));
+    }
+
+    [Fact]
+    public async Task Verify_DeniesLinkedContentWithoutReadingOutside()
+    {
+        var (candidate, applicationRoot, staged) = await StageFixtureAsync();
+        var outside = Path.Combine(root, "outside");
+        Directory.CreateDirectory(outside);
+        var sentinel = Path.Combine(outside, "sentinel.txt");
+        await File.WriteAllTextAsync(sentinel, "preserve me");
+        Directory.CreateSymbolicLink(
+            Path.Combine(staged.RuntimeDirectory, "Release", "unsafe"),
+            outside);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new WhisperRuntimeStageVerifier().VerifyAsync(candidate, applicationRoot));
+
+        Assert.Equal("preserve me", await File.ReadAllTextAsync(sentinel));
+    }
+
+    [Fact]
+    public async Task Verify_DeniesUnknownDuplicateOrMismatchedReceiptIdentity()
+    {
+        var (candidate, applicationRoot, staged) = await StageFixtureAsync();
+        var receipt = await File.ReadAllTextAsync(staged.ReceiptPath);
+        await File.WriteAllTextAsync(staged.ReceiptPath, receipt.Replace(
+            "{",
+            "{\"unexpected\":true,",
+            StringComparison.Ordinal));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new WhisperRuntimeStageVerifier().VerifyAsync(candidate, applicationRoot));
+
+        await File.WriteAllTextAsync(staged.ReceiptPath, receipt.Replace(
+            "{",
+            $"{{\"schemaVersion\":{WhisperRuntimeStager.CurrentReceiptSchemaVersion},",
+            StringComparison.Ordinal));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new WhisperRuntimeStageVerifier().VerifyAsync(candidate, applicationRoot));
+
+        await File.WriteAllTextAsync(staged.ReceiptPath, receipt.Replace(
+            "\"candidateId\": \"test-runtime\"",
+            "\"candidateId\": \"different-runtime\"",
+            StringComparison.Ordinal));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new WhisperRuntimeStageVerifier().VerifyAsync(candidate, applicationRoot));
+
+        var receiptNode = JsonNode.Parse(receipt)?.AsObject()
+            ?? throw new InvalidOperationException("The generated fixture receipt was unavailable.");
+        receiptNode["licenseNoticeEntries"] = new JsonArray();
+        await File.WriteAllTextAsync(staged.ReceiptPath, receiptNode.ToJsonString());
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new WhisperRuntimeStageVerifier().VerifyAsync(candidate, applicationRoot));
+    }
+
     public void Dispose() => TestDirectory.DeleteIfExists(root);
 
     private static PinnedLocalModelDependencyCandidate RuntimeCandidate(byte[] bytes) => new(
@@ -206,6 +310,26 @@ public sealed class WhisperRuntimeStagerTests : IDisposable
             new string('a', 64),
             true),
         []);
+
+    private async Task<(
+        PinnedLocalModelDependencyCandidate Candidate,
+        string ApplicationRoot,
+        WhisperRuntimeStagingResult Staged)> StageFixtureAsync()
+    {
+        Directory.CreateDirectory(root);
+        var bytes = RuntimeArchiveBytes();
+        var source = Path.Combine(root, "runtime.zip");
+        await File.WriteAllBytesAsync(source, bytes);
+        var candidate = RuntimeCandidate(bytes);
+        var applicationRoot = Path.Combine(root, "application");
+        var staged = await new WhisperRuntimeStager(
+            new FixedTimeProvider(StagedUtc)).StageAsync(
+                candidate,
+                source,
+                applicationRoot,
+                explicitlyApproved: true);
+        return (candidate, applicationRoot, staged);
+    }
 
     private static byte[] RuntimeArchiveBytes(params RuntimeEntry[] entries)
     {
