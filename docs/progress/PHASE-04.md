@@ -1,7 +1,7 @@
 # P04 — OpenAI identity and local Codex integration
 
 - Status: Complete (offline/native mock gate; external account invocation unverified)
-- Implementation commits: `8ba629c`, `e559975`
+- Implementation commits: `8ba629c`, `e559975`; current follow-up commit recorded by the commit containing this file
 
 Commercial ChatGPT sign-in for DCx distribution is a strict eligibility blocker. API-key mode remains independent.
 
@@ -29,6 +29,7 @@ See `docs/references/VERIFICATION_LOG.md` and ADR 0004 for source URLs and the r
 - Accessible OpenAI/Codex settings window with API-key save/delete, provider/runtime status, model picker, prompt, Run, Cancel and Disconnect controls.
 - Permanently disabled commercial ChatGPT button until eligibility evidence changes the compiled distribution capability.
 - Repository-owned Windows subprocess fixture that exercises the same JSONL transport without credentials, network access or billable inference.
+- Cancellation rejects before `turn/start` dispatch or, after dispatch, waits only for the bounded identity-bearing response and interrupts that exact thread/turn. The fixture can deterministically send active-turn notifications before the response to prove reordering does not orphan a turn.
 
 ## Reproduction
 
@@ -53,7 +54,7 @@ Native Windows 11 build/test after final hardening:
 - A deliberately leaked fixture bearer secret was redacted from bounded diagnostics.
 - P00 smoke and P01–P03 native UIA regressions passed.
 - P04 UIA E2E passed: blocked ChatGPT state/reason, isolated test runtime, JSONL connection, one selected model, streamed response and explicit disconnect.
-- Active-turn cancellation now waits for the exact in-flight turn before requesting interruption, then proves the turn is removed. This eliminates the test's load-sensitive timer race without weakening the production cancellation contract. The current committed-source P04 native validator passed again after this change.
+- Active-turn cancellation waits for the exact in-flight turn before requesting interruption, then proves the turn is removed. A later expanded-suite run exposed the remaining notification-before-response race; the fixture now forces that ordering, and the two P04 process tests passed six consecutive focused runs after identity retention was hardened. The current committed-source native validator is recorded with the encompassing milestone evidence.
 - Secret-pattern filename scan found no matches outside ignored build/test artifacts.
 
 ## Changed files
@@ -62,6 +63,7 @@ Native Windows 11 build/test after final hardening:
 - Native runtime discovery and accessible provider UI: `src/DCx.Desktop/OpenAI`, `src/DCx.Desktop/OpenAiControlWindow.xaml*`, shell entry controls.
 - Offline process fixture: `tests/DCx.FakeCodexAppServer`.
 - Unit/integration tests: `tests/DCx.Core.Tests/OpenAI`, `tests/DCx.Core.Tests/Security`.
+- Turn-identity cancellation ordering: `src/DCx.Core/OpenAI/CodexAppServerClient.cs`, the delayed-response fixture/test above, and `docs/architecture/adr/0070-retain-codex-turn-identity-through-cancellation.md`.
 - Native UIA test: `scripts/validate-p04.ps1`.
 - Human checklist: `docs/accessibility/P04_OPENAI_CHECKLIST.md`.
 

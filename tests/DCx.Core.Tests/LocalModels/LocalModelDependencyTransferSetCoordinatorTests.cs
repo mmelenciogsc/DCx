@@ -101,6 +101,49 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
     }
 
     [Fact]
+    public async Task PostCommitProgressFailureCannotMisreportPublishedOrVerifiedSet()
+    {
+        var fixture = Fixture("post-commit-progress-failure");
+        var publishedReports = 0;
+        var receipt = await fixture.Coordinator.TransferAsync(
+            fixture.Plan,
+            LocalModelDependencyTransferSetApproval.Create(fixture.Plan, approved: true),
+            progress: new InlineProgress<LocalModelDependencyTransferSetProgress>(value =>
+            {
+                if (value.Stage == LocalModelDependencyTransferSetStage.Published)
+                {
+                    publishedReports++;
+                    throw new ApplicationException("synthetic private published observer failure");
+                }
+            }));
+
+        Assert.Equal(1, publishedReports);
+        Assert.Equal(fixture.Plan.PlanSha256, receipt.PlanSha256);
+        Assert.True(Directory.Exists(CompletedRoot(fixture)));
+
+        var completedReports = 0;
+        var verified = await fixture.Coordinator.VerifyAsync(
+            fixture.Plan,
+            progress: new InlineProgress<LocalModelDependencyTransferSetProgress>(value =>
+            {
+                if (value.Stage == LocalModelDependencyTransferSetStage.Completed)
+                {
+                    completedReports++;
+                    throw new ApplicationException("synthetic private completed observer failure");
+                }
+            }));
+
+        Assert.Equal(1, completedReports);
+        Assert.Equal(receipt.SchemaVersion, verified.SchemaVersion);
+        Assert.Equal(receipt.CatalogId, verified.CatalogId);
+        Assert.Equal(receipt.CatalogSha256, verified.CatalogSha256);
+        Assert.Equal(receipt.PlanSha256, verified.PlanSha256);
+        Assert.Equal(receipt.RedirectPolicySha256, verified.RedirectPolicySha256);
+        Assert.Equal(receipt.TransferBytes, verified.TransferBytes);
+        Assert.Equal(receipt.Files, verified.Files);
+    }
+
+    [Fact]
     public async Task TransferFailureAndProtectedWriteFailureLeaveNoPublishedOrPartialSet()
     {
         var transferFailure = Fixture("transfer-failure");

@@ -107,7 +107,8 @@ try {
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Transfer_RejectsLinkedStorageRootWithoutWritingOutside",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Cleanup_RemovesOnlyStrictIncomingNamesAndLeavesOtherDirectories",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.ExistingCompletedSetIsNeverOverwritten",
-        "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.ActiveTransfer_SerializesVerificationAndCleanupUntilItFinishes"
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.ActiveTransfer_SerializesVerificationAndCleanupUntilItFinishes",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.PostCommitProgressFailureCannotMisreportPublishedOrVerifiedSet"
     )
     $requiredHardwareProfileContracts = @(
         "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.Capture_ValidatesDeduplicatesAndOrdersBoundedHardwareEvidence",

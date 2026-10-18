@@ -70,5 +70,7 @@
 | [0066](architecture/adr/0066-deny-by-default-bounded-local-dependency-redirects.md) | Follow local-dependency redirects only through an exact deny-by-default policy | Accepted for the transport framework; provider rules and real acquisition remain blocked | 2026-10-18 |
 | [0067](architecture/adr/0067-bind-dependency-redirect-policy-to-approval.md) | Bind dependency redirect policy to approval and protected receipt | Accepted for the inert acquisition workflow; provider rules and real acquisition remain blocked | 2026-10-18 |
 | [0068](architecture/adr/0068-total-local-dependency-transfer-rollback.md) | Roll back every admitted dependency-transfer failure | Accepted for the inert core transport; real acquisition remains blocked | 2026-10-18 |
+| [0069](architecture/adr/0069-nonauthoritative-progress-after-transfer-commit.md) | Keep progress observers non-authoritative after transfer commit | Accepted for the inert transfer-set coordinator; real acquisition remains blocked | 2026-10-18 |
+| [0070](architecture/adr/0070-retain-codex-turn-identity-through-cancellation.md) | Retain Codex turn identity through cancellation | Accepted for the local app-server boundary; real provider acceptance remains blocked | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

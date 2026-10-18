@@ -34,7 +34,7 @@ public sealed class CodexAppServerClientTests
     [Fact]
     public async Task Client_CancellationInterruptsOnlyActiveTurn()
     {
-        await using var client = CreateClient();
+        await using var client = CreateClient(delayTurnStartResponse: true);
         await client.StartAsync();
         using var cancellation = new CancellationTokenSource();
 
@@ -55,7 +55,7 @@ public sealed class CodexAppServerClientTests
         Assert.Equal(0, client.ActiveTurnCount);
     }
 
-    private static CodexAppServerClient CreateClient()
+    private static CodexAppServerClient CreateClient(bool delayTurnStartResponse = false)
     {
         var repositoryRoot = FindRepositoryRoot();
         var executable = Path.Combine(
@@ -70,7 +70,11 @@ public sealed class CodexAppServerClientTests
             executable,
             [],
             repositoryRoot,
-            new Dictionary<string, string?> { ["DCX_FAKE_SECRET"] = FixtureSecret },
+            new Dictionary<string, string?>
+            {
+                ["DCX_FAKE_SECRET"] = FixtureSecret,
+                ["DCX_FAKE_TURN_RESPONSE_DELAY_MS"] = delayTurnStartResponse ? "250" : null,
+            },
             ["DCX_FAKE_SECRET"],
             TimeSpan.FromSeconds(5)));
     }

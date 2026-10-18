@@ -4,6 +4,11 @@ using System.Text.Json;
 var outputGate = new SemaphoreSlim(1, 1);
 var activeTurns = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.Ordinal);
 var configuredSecret = Environment.GetEnvironmentVariable("DCX_FAKE_SECRET");
+var configuredTurnResponseDelay = Environment.GetEnvironmentVariable("DCX_FAKE_TURN_RESPONSE_DELAY_MS");
+var turnResponseDelayMilliseconds = int.TryParse(configuredTurnResponseDelay, out var parsedTurnResponseDelay) &&
+    parsedTurnResponseDelay is >= 1 and <= 1_000
+        ? parsedTurnResponseDelay
+        : 0;
 if (!string.IsNullOrEmpty(configuredSecret))
 {
     Console.Error.WriteLine($"diagnostic Authorization: Bearer {configuredSecret}");
@@ -98,6 +103,13 @@ while ((line = await Console.In.ReadLineAsync()) is not null)
             var turnId = $"turn-{Guid.NewGuid():N}";
             var cancellation = new CancellationTokenSource();
             activeTurns[turnId] = cancellation;
+            if (turnResponseDelayMilliseconds > 0)
+            {
+                _ = RunTurnAsync(threadId, turnId, cancellation);
+                await Task.Delay(turnResponseDelayMilliseconds);
+                await WriteAsync(new { id = id.GetInt64(), result = new { turn = new { id = turnId, status = "inProgress" } } });
+                break;
+            }
             await WriteAsync(new { id = id.GetInt64(), result = new { turn = new { id = turnId, status = "inProgress" } } });
             _ = RunTurnAsync(threadId, turnId, cancellation);
             break;

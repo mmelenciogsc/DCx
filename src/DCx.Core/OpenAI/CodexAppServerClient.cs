@@ -162,10 +162,14 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             cancellationToken);
         var threadId = ReadNestedRequiredString(threadResponse, "result", "thread", "id");
 
+        cancellationToken.ThrowIfCancellationRequested();
+        // Once turn/start is sent, its bounded response supplies the only turn identity that can
+        // be interrupted safely. A notification may arrive before that response, so user
+        // cancellation must not abandon the identity-bearing request after dispatch.
         var turnResponse = await SendRequestAsync(
             "turn/start",
             new { threadId, input = new[] { new { type = "text", text = prompt } } },
-            cancellationToken);
+            CancellationToken.None);
         var turnId = ReadNestedRequiredString(turnResponse, "result", "turn", "id");
         var state = _turns.GetOrAdd(turnId, _ => new TurnState(threadId, turnId));
 

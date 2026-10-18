@@ -321,7 +321,7 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
                 }
                 Directory.Move(incoming, destination);
                 LocalModelStoragePathGuard.RequireDirectory(destination, "dependency transfer completed set");
-                Report(
+                ReportAfterCommit(
                     progress,
                     LocalModelDependencyTransferSetStage.Published,
                     currentPlan,
@@ -460,7 +460,7 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
                     file.Bytes,
                     receipt.Files.Take(file.Index + 1).Sum(value => value.Bytes));
             }
-            Report(
+            ReportAfterCommit(
                 progress,
                 LocalModelDependencyTransferSetStage.Completed,
                 plan,
@@ -613,6 +613,33 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
             itemExpectedBytes,
             totalBytesTransferred,
             plan.TransferBytes));
+
+    private static void ReportAfterCommit(
+        IProgress<LocalModelDependencyTransferSetProgress>? progress,
+        LocalModelDependencyTransferSetStage stage,
+        LocalModelDependencyTransferPlan plan,
+        int itemNumber,
+        long itemBytesTransferred,
+        long itemExpectedBytes,
+        long totalBytesTransferred)
+    {
+        try
+        {
+            Report(
+                progress,
+                stage,
+                plan,
+                itemNumber,
+                itemBytesTransferred,
+                itemExpectedBytes,
+                totalBytesTransferred);
+        }
+        catch (Exception)
+        {
+            // A non-authoritative observer cannot convert a durable publication or completed
+            // verification into a reported operation failure after the commit boundary.
+        }
+    }
 
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
     {
