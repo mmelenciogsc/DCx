@@ -200,15 +200,12 @@ public sealed class FfmpegBackendSelectionStore
 
     public static async Task<FfmpegBackendSelectionStore> OpenAsync(string applicationDataRoot, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(applicationDataRoot);
-        var applicationRoot = Path.GetFullPath(applicationDataRoot);
-        if (Path.GetPathRoot(applicationRoot)?.TrimEnd(Path.DirectorySeparatorChar) == applicationRoot.TrimEnd(Path.DirectorySeparatorChar))
-            throw new ArgumentException("The application-data root cannot be a volume root.", nameof(applicationDataRoot));
-        Directory.CreateDirectory(applicationRoot);
-        RejectReparse(applicationRoot);
-        var root = Path.Combine(applicationRoot, "local-models");
-        Directory.CreateDirectory(root);
-        RejectReparse(root);
+        var applicationRoot = LocalModelStoragePathGuard.EnsureDirectory(
+            applicationDataRoot,
+            "FFmpeg application-data");
+        var root = LocalModelStoragePathGuard.EnsureDirectory(
+            Path.Combine(applicationRoot, "local-models"),
+            "FFmpeg settings");
         var store = new FfmpegBackendSelectionStore(root);
         _ = await store.ReadUnsafeAsync(cancellationToken).ConfigureAwait(false);
         return store;
@@ -270,6 +267,7 @@ public sealed class FfmpegBackendSelectionStore
     {
         ValidateStatePath();
         if (!File.Exists(statePath)) return new(CurrentSchemaVersion, null);
+        LocalModelStoragePathGuard.ValidateFile(statePath, mustExist: true, "FFmpeg selection");
         var file = new FileInfo(statePath);
         if (file.Length is <= 0 or > MaximumStateBytes) throw new InvalidOperationException("The FFmpeg selection file is outside its size limit.");
         try
@@ -289,6 +287,8 @@ public sealed class FfmpegBackendSelectionStore
         var content = JsonSerializer.SerializeToUtf8Bytes(state, JsonOptions);
         if (content.Length is <= 0 or > MaximumStateBytes)
             throw new InvalidOperationException("The FFmpeg selection exceeds its size limit.");
+        LocalModelStoragePathGuard.RequireDirectory(root, "FFmpeg settings");
+        ValidateStatePath();
         var temporary = Path.Combine(root, $"ffmpeg-{Guid.NewGuid():N}.tmp");
         try
         {
@@ -299,18 +299,35 @@ public sealed class FfmpegBackendSelectionStore
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                 stream.Flush(true);
             }
+            LocalModelStoragePathGuard.RequireDirectory(root, "FFmpeg settings");
+            LocalModelStoragePathGuard.ValidateFile(temporary, mustExist: true, "FFmpeg temporary selection");
+            ValidateStatePath();
             File.Move(temporary, statePath, true);
         }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(content);
+            LocalModelStoragePathGuard.TryDeleteTemporary(root, temporary, "FFmpeg temporary selection");
+        }
     }
 
     private void ValidateStatePath()
     {
-        var entries = Directory.GetFileSystemEntries(root, "ffmpeg.json");
+        LocalModelStoragePathGuard.RequireDirectory(root, "FFmpeg settings");
+        var entries = Directory.EnumerateFileSystemEntries(root)
+            .Where(path => string.Equals(
+                Path.GetFileName(path),
+                Path.GetFileName(statePath),
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
         if (entries.Length > 1 || entries.Length == 1 &&
-            (!string.Equals(entries[0], statePath, StringComparison.Ordinal) ||
+            (!string.Equals(Path.GetFileName(entries[0]), Path.GetFileName(statePath), StringComparison.Ordinal) ||
              (File.GetAttributes(entries[0]) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0))
             throw new InvalidOperationException("The FFmpeg selection path is unsafe.");
+        if (entries.Length == 1)
+        {
+            LocalModelStoragePathGuard.ValidateFile(statePath, mustExist: true, "FFmpeg selection");
+        }
     }
 
     private static void ValidatePath(string path, string? extension, string label)
@@ -326,10 +343,4 @@ public sealed class FfmpegBackendSelectionStore
 
     private static bool IsSubject(string? value) =>
         !string.IsNullOrWhiteSpace(value) && value.Length <= 512 && value == value.Trim() && !value.Any(char.IsControl);
-
-    private static void RejectReparse(string path)
-    {
-        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-            throw new InvalidOperationException("The FFmpeg settings path cannot be a reparse point.");
-    }
 }

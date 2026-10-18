@@ -426,21 +426,17 @@ public sealed class LocalModelBenchmarkEvidenceStore
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ArgumentException.ThrowIfNullOrWhiteSpace(applicationDataRoot);
-        var applicationRoot = Path.GetFullPath(applicationDataRoot);
-        if (Path.GetPathRoot(applicationRoot)?.TrimEnd(Path.DirectorySeparatorChar) ==
-            applicationRoot.TrimEnd(Path.DirectorySeparatorChar))
-        {
-            throw new ArgumentException("The application-data root cannot be a volume root.", nameof(applicationDataRoot));
-        }
-        Directory.CreateDirectory(applicationRoot);
-        RejectDirectoryReparse(applicationRoot);
-        var localModelsRoot = Path.Combine(applicationRoot, "local-models");
-        Directory.CreateDirectory(localModelsRoot);
-        RejectDirectoryReparse(localModelsRoot);
-        var root = Path.Combine(localModelsRoot, "benchmark-evidence");
-        Directory.CreateDirectory(root);
-        RejectDirectoryReparse(root);
+        var applicationRoot = LocalModelStoragePathGuard.EnsureDirectory(
+            applicationDataRoot,
+            "benchmark application-data");
+        var localModelsRoot = LocalModelStoragePathGuard.EnsureDirectory(
+            Path.Combine(applicationRoot, "local-models"),
+            "benchmark settings");
+        var root = LocalModelStoragePathGuard.EnsureDirectory(
+            Path.Combine(localModelsRoot, "benchmark-evidence"),
+            "benchmark evidence");
+        ValidateEvidenceTarget(Path.Combine(root, "transcription-latest.json"));
+        ValidateEvidenceTarget(Path.Combine(root, "embedding-latest.json"));
         return Task.FromResult(new LocalModelBenchmarkEvidenceStore(root));
     }
 
@@ -466,7 +462,7 @@ public sealed class LocalModelBenchmarkEvidenceStore
         var temporary = Path.Combine(root, $"benchmark-{Guid.NewGuid():N}.tmp");
         try
         {
-            RejectDirectoryReparse(root);
+            LocalModelStoragePathGuard.RequireDirectory(root, "benchmark evidence");
             ValidateEvidenceTarget(path);
             await using (var stream = new FileStream(
                 temporary,
@@ -480,37 +476,21 @@ public sealed class LocalModelBenchmarkEvidenceStore
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                 stream.Flush(flushToDisk: true);
             }
+            LocalModelStoragePathGuard.RequireDirectory(root, "benchmark evidence");
+            LocalModelStoragePathGuard.ValidateFile(temporary, mustExist: true, "benchmark temporary evidence");
+            ValidateEvidenceTarget(path);
             File.Move(temporary, path, overwrite: true);
         }
         finally
         {
             CryptographicOperations.ZeroMemory(bytes);
-            if (File.Exists(temporary)) File.Delete(temporary);
+            LocalModelStoragePathGuard.TryDeleteTemporary(root, temporary, "benchmark temporary evidence");
             mutationLock.Release();
-        }
-    }
-
-    private static void RejectDirectoryReparse(string path)
-    {
-        DirectoryInfo? current = new(path);
-        while (current is not null)
-        {
-            var attributes = current.Attributes;
-            if ((attributes & FileAttributes.Directory) == 0 || (attributes & FileAttributes.ReparsePoint) != 0)
-            {
-                throw new InvalidOperationException("The benchmark evidence directory is unsafe.");
-            }
-            current = current.Parent;
         }
     }
 
     private static void ValidateEvidenceTarget(string path)
     {
-        if (!File.Exists(path)) return;
-        var attributes = File.GetAttributes(path);
-        if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
-        {
-            throw new InvalidOperationException("The benchmark evidence target is unsafe.");
-        }
+        LocalModelStoragePathGuard.ValidateFile(path, mustExist: false, "benchmark evidence target");
     }
 }

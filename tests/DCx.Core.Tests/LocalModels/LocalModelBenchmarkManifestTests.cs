@@ -165,6 +165,39 @@ public sealed class LocalModelBenchmarkManifestTests : IDisposable
         Assert.Equal(0.2, document.RootElement.GetProperty("result").GetProperty("wordErrorRate").GetDouble());
     }
 
+    [Fact]
+    public async Task EvidenceStore_RejectsDirectorySwappedForLinkAfterOpen()
+    {
+        var dataRoot = Path.Combine(root, "data");
+        var store = await LocalModelBenchmarkEvidenceStore.OpenAsync(dataRoot);
+        var evidenceRoot = Path.GetDirectoryName(store.LatestTranscriptionEvidencePath)!;
+        Directory.Move(evidenceRoot, evidenceRoot + "-original");
+        var outside = Path.Combine(root, "outside");
+        Directory.CreateDirectory(outside);
+        Directory.CreateSymbolicLink(evidenceRoot, outside);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.SaveTranscriptionAsync(Evidence(0.1)));
+
+        Assert.Empty(Directory.EnumerateFileSystemEntries(outside));
+    }
+
+    [Fact]
+    public async Task EvidenceStore_RejectsLinkedTargetWithoutChangingOutsideFile()
+    {
+        var dataRoot = Path.Combine(root, "data");
+        var evidenceRoot = Path.Combine(dataRoot, "local-models", "benchmark-evidence");
+        Directory.CreateDirectory(evidenceRoot);
+        var outside = Path.Combine(root, "outside.json");
+        await File.WriteAllTextAsync(outside, "outside");
+        File.CreateSymbolicLink(Path.Combine(evidenceRoot, "transcription-latest.json"), outside);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            LocalModelBenchmarkEvidenceStore.OpenAsync(dataRoot));
+
+        Assert.Equal("outside", await File.ReadAllTextAsync(outside));
+    }
+
     public void Dispose() => TestDirectory.DeleteIfExists(root);
 
     private static TranscriptionBenchmarkEvidence Evidence(double wordErrorRate) =>

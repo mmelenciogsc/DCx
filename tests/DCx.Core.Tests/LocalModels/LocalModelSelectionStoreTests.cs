@@ -92,5 +92,54 @@ public sealed class LocalModelSelectionStoreTests : IDisposable
             LocalModelSelectionStore.OpenAsync(root));
     }
 
+    [Fact]
+    public async Task Store_RejectsLinkedApplicationRootWithoutWritingThroughIt()
+    {
+        Directory.CreateDirectory(root);
+        var outside = Path.Combine(root, "outside");
+        var linked = Path.Combine(root, "linked-data");
+        Directory.CreateDirectory(outside);
+        Directory.CreateSymbolicLink(linked, outside);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            LocalModelSelectionStore.OpenAsync(linked));
+
+        Assert.Empty(Directory.EnumerateFileSystemEntries(outside));
+    }
+
+    [Fact]
+    public async Task Store_RejectsSettingsDirectorySwappedForLinkAfterOpen()
+    {
+        var dataRoot = Path.Combine(root, "data");
+        var store = await LocalModelSelectionStore.OpenAsync(dataRoot);
+        var settings = Path.Combine(dataRoot, "local-models");
+        Directory.Move(settings, settings + "-original");
+        var outside = Path.Combine(root, "outside");
+        Directory.CreateDirectory(outside);
+        Directory.CreateSymbolicLink(settings, outside);
+        var descriptor = new LocalModelDescriptor(
+            "vision:" + VisionDigest, 1_000, true, false, Digest: VisionDigest);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.SetVisionAsync(descriptor, LicenseDigest, true, now));
+
+        Assert.Empty(Directory.EnumerateFileSystemEntries(outside));
+    }
+
+    [Fact]
+    public async Task Store_RejectsLinkedSelectionFile()
+    {
+        var settings = Path.Combine(root, "local-models");
+        Directory.CreateDirectory(settings);
+        var outside = Path.Combine(root, "outside.json");
+        await File.WriteAllTextAsync(outside, "{}");
+        File.CreateSymbolicLink(Path.Combine(settings, "selection.json"), outside);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            LocalModelSelectionStore.OpenAsync(root));
+
+        Assert.Equal("{}", await File.ReadAllTextAsync(outside));
+    }
+
     public void Dispose() => TestDirectory.DeleteIfExists(root);
 }

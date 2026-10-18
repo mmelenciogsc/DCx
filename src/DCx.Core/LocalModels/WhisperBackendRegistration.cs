@@ -286,19 +286,12 @@ public sealed class WhisperBackendSelectionStore
         string applicationDataRoot,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(applicationDataRoot);
-        var applicationRoot = Path.GetFullPath(applicationDataRoot);
-        if (Path.GetPathRoot(applicationRoot)?.TrimEnd(Path.DirectorySeparatorChar) ==
-            applicationRoot.TrimEnd(Path.DirectorySeparatorChar))
-        {
-            throw new ArgumentException("The application-data root cannot be a volume root.", nameof(applicationDataRoot));
-        }
-
-        Directory.CreateDirectory(applicationRoot);
-        RejectReparse(applicationRoot, "The application-data root cannot be a reparse point.");
-        var root = Path.Combine(applicationRoot, "local-models");
-        Directory.CreateDirectory(root);
-        RejectReparse(root, "The local-model settings directory cannot be a reparse point.");
+        var applicationRoot = LocalModelStoragePathGuard.EnsureDirectory(
+            applicationDataRoot,
+            "Whisper application-data");
+        var root = LocalModelStoragePathGuard.EnsureDirectory(
+            Path.Combine(applicationRoot, "local-models"),
+            "Whisper settings");
         var store = new WhisperBackendSelectionStore(root);
         store.ValidateStatePath();
         _ = await store.ReadUnsafeAsync(cancellationToken).ConfigureAwait(false);
@@ -379,6 +372,7 @@ public sealed class WhisperBackendSelectionStore
     {
         ValidateStatePath();
         if (!File.Exists(statePath)) return new WhisperBackendSelectionState(CurrentSchemaVersion, null);
+        LocalModelStoragePathGuard.ValidateFile(statePath, mustExist: true, "Whisper selection");
         var file = new FileInfo(statePath);
         if (file.Length is <= 0 or > MaximumStateBytes) throw new InvalidOperationException("The Whisper selection file is outside its size limit.");
         try
@@ -402,32 +396,54 @@ public sealed class WhisperBackendSelectionStore
 
     private async Task WriteUnsafeAsync(WhisperBackendSelectionState state, CancellationToken cancellationToken)
     {
+        var content = JsonSerializer.SerializeToUtf8Bytes(state, JsonOptions);
+        if (content.Length is <= 0 or > MaximumStateBytes)
+        {
+            throw new InvalidOperationException("The Whisper selection exceeds its size limit.");
+        }
+
+        LocalModelStoragePathGuard.RequireDirectory(root, "Whisper settings");
+        ValidateStatePath();
         var temporary = Path.Combine(root, $"transcription-{Guid.NewGuid():N}.tmp");
         try
         {
             await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096,
                 FileOptions.Asynchronous | FileOptions.WriteThrough))
             {
-                await JsonSerializer.SerializeAsync(stream, state, JsonOptions, cancellationToken).ConfigureAwait(false);
+                await stream.WriteAsync(content, cancellationToken).ConfigureAwait(false);
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                 stream.Flush(flushToDisk: true);
             }
+            LocalModelStoragePathGuard.RequireDirectory(root, "Whisper settings");
+            LocalModelStoragePathGuard.ValidateFile(temporary, mustExist: true, "Whisper temporary selection");
+            ValidateStatePath();
             File.Move(temporary, statePath, overwrite: true);
         }
         finally
         {
-            if (File.Exists(temporary)) File.Delete(temporary);
+            CryptographicOperations.ZeroMemory(content);
+            LocalModelStoragePathGuard.TryDeleteTemporary(root, temporary, "Whisper temporary selection");
         }
     }
 
     private void ValidateStatePath()
     {
-        var entries = Directory.GetFileSystemEntries(root, "transcription.json");
+        LocalModelStoragePathGuard.RequireDirectory(root, "Whisper settings");
+        var entries = Directory.EnumerateFileSystemEntries(root)
+            .Where(path => string.Equals(
+                Path.GetFileName(path),
+                Path.GetFileName(statePath),
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
         if (entries.Length > 1 || entries.Length == 1 &&
-            (!string.Equals(entries[0], statePath, StringComparison.Ordinal) ||
+            (!string.Equals(Path.GetFileName(entries[0]), Path.GetFileName(statePath), StringComparison.Ordinal) ||
              (File.GetAttributes(entries[0]) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0))
         {
             throw new InvalidOperationException("The Whisper selection path is unsafe.");
+        }
+        if (entries.Length == 1)
+        {
+            LocalModelStoragePathGuard.ValidateFile(statePath, mustExist: true, "Whisper selection");
         }
     }
 
@@ -462,10 +478,5 @@ public sealed class WhisperBackendSelectionStore
         {
             throw new InvalidOperationException("A stored Whisper digest is invalid.");
         }
-    }
-
-    private static void RejectReparse(string path, string message)
-    {
-        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw new InvalidOperationException(message);
     }
 }

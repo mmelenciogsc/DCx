@@ -90,6 +90,41 @@ public sealed class FfmpegBackendRegistrationTests : IDisposable
             FfmpegBackendSelectionStore.OpenAsync(Path.Combine(root, "data")));
     }
 
+    [Fact]
+    public async Task Store_RejectsSettingsDirectorySwappedForLinkAfterOpen()
+    {
+        var fixture = await CreateFixtureAsync();
+        var review = await new FfmpegBackendReviewer(new SignatureProbe("NotSigned", null, null))
+            .ReviewAsync(fixture.Executable, fixture.License, now);
+        var dataRoot = Path.Combine(root, "data");
+        var store = await FfmpegBackendSelectionStore.OpenAsync(dataRoot);
+        var settings = Path.Combine(dataRoot, "local-models");
+        Directory.Move(settings, settings + "-original");
+        var outside = Path.Combine(root, "outside");
+        Directory.CreateDirectory(outside);
+        Directory.CreateSymbolicLink(settings, outside);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.SetAsync(review.Binding, true));
+
+        Assert.Empty(Directory.EnumerateFileSystemEntries(outside));
+    }
+
+    [Fact]
+    public async Task Store_RejectsLinkedSelectionFile()
+    {
+        var dataRoot = Path.Combine(root, "data");
+        var settings = Path.Combine(dataRoot, "local-models");
+        Directory.CreateDirectory(settings);
+        var outside = Path.Combine(root, "outside.json");
+        await File.WriteAllTextAsync(outside, "{}");
+        File.CreateSymbolicLink(Path.Combine(settings, "ffmpeg.json"), outside);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            FfmpegBackendSelectionStore.OpenAsync(dataRoot));
+
+        Assert.Equal("{}", await File.ReadAllTextAsync(outside));
+    }
+
     public void Dispose() => TestDirectory.DeleteIfExists(root);
 
     private async Task<Fixture> CreateFixtureAsync()

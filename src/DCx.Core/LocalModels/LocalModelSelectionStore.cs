@@ -42,10 +42,12 @@ public sealed class LocalModelSelectionStore
         string applicationDataRoot,
         CancellationToken cancellationToken = default)
     {
-        var applicationRoot = ValidateRoot(applicationDataRoot);
-        var localModelsRoot = Path.Combine(applicationRoot, "local-models");
-        Directory.CreateDirectory(localModelsRoot);
-        RejectReparsePoint(localModelsRoot, "The local-model settings directory cannot be a reparse point.");
+        var applicationRoot = LocalModelStoragePathGuard.EnsureDirectory(
+            applicationDataRoot,
+            "local-model application-data");
+        var localModelsRoot = LocalModelStoragePathGuard.EnsureDirectory(
+            Path.Combine(applicationRoot, "local-models"),
+            "local-model settings");
         var store = new LocalModelSelectionStore(localModelsRoot);
         store.ValidateStatePathIfPresent();
 
@@ -158,7 +160,7 @@ public sealed class LocalModelSelectionStore
             return new LocalModelSelectionState(CurrentSchemaVersion, null, null);
         }
 
-        RejectReparsePoint(statePath, "The local-model selection file cannot be a reparse point.");
+        LocalModelStoragePathGuard.ValidateFile(statePath, mustExist: true, "local-model selection");
         var file = new FileInfo(statePath);
         if (file.Length is <= 0 or > MaximumStateBytes)
         {
@@ -204,7 +206,7 @@ public sealed class LocalModelSelectionStore
 
         var directory = Path.GetDirectoryName(statePath)
             ?? throw new InvalidOperationException("The local-model selection path has no parent directory.");
-        RejectReparsePoint(directory, "The local-model settings directory cannot be a reparse point.");
+        LocalModelStoragePathGuard.RequireDirectory(directory, "local-model settings");
         ValidateStatePathIfPresent();
         var temporary = Path.Combine(directory, $".selection.{Guid.NewGuid():N}.tmp");
         try
@@ -221,12 +223,17 @@ public sealed class LocalModelSelectionStore
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
 
+            LocalModelStoragePathGuard.RequireDirectory(directory, "local-model settings");
+            LocalModelStoragePathGuard.ValidateFile(temporary, mustExist: true, "local-model temporary selection");
             ValidateStatePathIfPresent();
             File.Move(temporary, statePath, overwrite: true);
         }
         finally
         {
-            if (File.Exists(temporary)) File.Delete(temporary);
+            LocalModelStoragePathGuard.TryDeleteTemporary(
+                directory,
+                temporary,
+                "local-model temporary selection");
         }
     }
 
@@ -260,26 +267,9 @@ public sealed class LocalModelSelectionStore
         !string.IsNullOrWhiteSpace(digest) && digest.Length == 64 &&
         digest.All(character => char.IsAsciiHexDigit(character));
 
-    private static string ValidateRoot(string root)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(root);
-        var canonical = Path.GetFullPath(root);
-        var pathRoot = Path.GetPathRoot(canonical);
-        if (pathRoot is not null && canonical.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                .Equals(pathRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                    StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("The local-model application-data root cannot be a filesystem root.");
-        }
-
-        Directory.CreateDirectory(canonical);
-        RejectReparsePoint(canonical, "The local-model application-data root cannot be a reparse point.");
-        return canonical;
-    }
-
     private void ValidateStatePathIfPresent()
     {
-        RejectReparsePoint(localModelsRoot, "The local-model settings directory cannot be a reparse point.");
+        LocalModelStoragePathGuard.RequireDirectory(localModelsRoot, "local-model settings");
         var entries = Directory.EnumerateFileSystemEntries(localModelsRoot)
             .Where(path => string.Equals(
                 Path.GetFileName(path),
@@ -293,13 +283,6 @@ public sealed class LocalModelSelectionStore
         {
             throw new InvalidOperationException("The local-model selection path is unsafe.");
         }
-    }
-
-    private static void RejectReparsePoint(string path, string message)
-    {
-        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-        {
-            throw new InvalidOperationException(message);
-        }
+        LocalModelStoragePathGuard.ValidateFile(statePath, mustExist: true, "local-model selection");
     }
 }

@@ -44,6 +44,24 @@ try {
         [int]$localModelsCounters.aborted -ne 0) {
         throw "P06 TRX counters did not prove that every selected local-model test passed."
     }
+    $requiredStorageDenials = @(
+        "DCx.Core.Tests.LocalModels.LocalModelSelectionStoreTests.Store_RejectsLinkedApplicationRootWithoutWritingThroughIt",
+        "DCx.Core.Tests.LocalModels.LocalModelSelectionStoreTests.Store_RejectsSettingsDirectorySwappedForLinkAfterOpen",
+        "DCx.Core.Tests.LocalModels.LocalModelSelectionStoreTests.Store_RejectsLinkedSelectionFile",
+        "DCx.Core.Tests.LocalModels.WhisperBackendRegistrationTests.Store_RejectsSettingsDirectorySwappedForLinkAfterOpen",
+        "DCx.Core.Tests.LocalModels.WhisperBackendRegistrationTests.Store_RejectsLinkedSelectionFile",
+        "DCx.Core.Tests.LocalModels.FfmpegBackendRegistrationTests.Store_RejectsSettingsDirectorySwappedForLinkAfterOpen",
+        "DCx.Core.Tests.LocalModels.FfmpegBackendRegistrationTests.Store_RejectsLinkedSelectionFile",
+        "DCx.Core.Tests.LocalModels.LocalModelBenchmarkManifestTests.EvidenceStore_RejectsDirectorySwappedForLinkAfterOpen",
+        "DCx.Core.Tests.LocalModels.LocalModelBenchmarkManifestTests.EvidenceStore_RejectsLinkedTargetWithoutChangingOutsideFile"
+    )
+    $localModelResults = @($localModelsReport.TestRun.Results.UnitTestResult)
+    foreach ($requiredStorageDenial in $requiredStorageDenials) {
+        $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredStorageDenial })
+        if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
+            throw "P06 did not prove required local-model storage denial: $requiredStorageDenial"
+        }
+    }
     & (Join-Path $repoRoot "scripts\validate-p06-whisper-registration.ps1") -RunRoot $whisperRegistrationRoot
     if (-not (Test-Path -LiteralPath $whisperRegistrationEvidencePath -PathType Leaf)) {
         throw "The native Whisper registration evidence was not retained."
@@ -392,6 +410,8 @@ $manifest = [ordered]@{
     cleared_ffmpeg_consumer_denied = $true
     whisper_registration_evidence = $whisperRegistrationEvidencePath
     local_model_contract_tests = $localModelTestsPassed
+    local_model_storage_link_denials = $requiredStorageDenials.Count
+    local_model_storage_external_writes = 0
     model_unload_verified = $unloaded
 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding utf8
@@ -422,6 +442,7 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Bounded Ollama embedding adapter fixture=PASS"
 "Ollama redirect/cookie/proxy denial and response-origin validation=PASS"
 "Low-resource and local-first fallback tests=PASS"
+"Local-model linked-root, linked-file and swapped-directory denials=PASS ($($manifest.local_model_storage_link_denials)/$($manifest.local_model_storage_link_denials)); external writes=$($manifest.local_model_storage_external_writes)"
 "Model unload verified=PASS"
 "P06 local-model tests=PASS ($localModelTestsPassed/$localModelTestsPassed)"
 "Hardware manifest=$manifestPath"
