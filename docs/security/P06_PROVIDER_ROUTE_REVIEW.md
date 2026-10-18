@@ -26,6 +26,8 @@ That check creates only the expiring in-memory policy review and sanitized evide
 
 Evidence: `artifacts/test-results/p06-route-audit-89f5876ba34549cba66bf32d8941dcc5/provider-route-audit.json` (intentionally uncommitted; generated from clean exact source `b82c270636aedd521b5e2c7a44e6ce4207df9484`).
 
+Product reviewer evidence: `artifacts/test-results/p06-route-session-fcb9b9f221dd4b80940655cf4402261e/product-route-session.json` (intentionally uncommitted; generated from clean exact source `5cb8003bb611615eb7edb622899c839cd278be2c`). The actual product reviewer independently reproduced 9 items, 12 HEAD requests, 3 redirects and 8 exact lengths with zero response-body reads, payload GETs, payload bytes, transfer approvals and coordinators. Its non-persisted two-hour schema-v2 session bound three exact query-free routes at policy SHA-256 `cc63d0b55c52fb78a7d0bf0034f21a8ce5583c46318661e9c7547c999759f102`.
+
 - Plan items: 9.
 - HEAD requests: 12.
 - Manual redirects: 3; automatic redirects: 0.
@@ -48,4 +50,4 @@ The other six plan items were direct: two pinned license objects, the Ollama man
 
 DCx still starts deny-all. GitHub and Hugging Face use signed query URLs; the Hugging Face host is region-specific and is not established as a stable distribution contract for every DCx user. ADR 0072 therefore does not compile this one observation into a global allowlist. The product can create a separate two-hour, in-memory policy only after the user explicitly invokes its HEAD-only review. That schema-v2 policy binds the exact item source/length/digest and exact query-free previous/target paths, not a host or directory prefix. It expires back to deny-all and still requires a separate unchecked transfer approval.
 
-The product-side review action has not been invoked against real providers in validation. No GET, payload byte, digest verification, archive inspection, contained-license review, install, model pull, registration, selection or execution occurred. A first ad-hoc WSL HEAD attempt was discarded because its local AWK formatter failed; it followed no redirect and yielded no accepted evidence. Only the native Windows audit above is accepted as current external route evidence.
+The actual product reviewer has been invoked once through the explicit clean-tree validator; the native UI control itself has not been manually invoked. No GET, payload byte, digest verification, archive inspection, contained-license review, install, model pull, registration, selection or execution occurred. A first ad-hoc WSL HEAD attempt was discarded because its local AWK formatter failed; it followed no redirect and yielded no accepted evidence. Only the two native Windows evidence records above are accepted as current external route evidence.

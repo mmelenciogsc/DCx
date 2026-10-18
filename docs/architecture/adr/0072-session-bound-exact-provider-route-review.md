@@ -21,6 +21,8 @@ A successful observation creates a non-persisted two-hour session tied to the ex
 
 The independent command-line route audit remains evidence-only and cannot create a product session. Synthetic core and native UIA gates invoke no provider. No automatic acquisition, extraction, staging, installation, registration, selection or execution is added.
 
+The clean-tree product validator subsequently exercised the actual reviewer against the current nine-item plan. It observed 12 HEAD requests, three redirects and eight exact lengths, produced three exact query-free schema-v2 transitions, read no bodies, issued no payload GET, created no transfer approval or coordinator, and persisted no session. This validation does not broaden the decision or grant payload authority.
+
 ## Consequences
 
 - DCx no longer needs a broad, globally compiled CDN prefix to cope with dynamic regional routing.
