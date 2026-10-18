@@ -16,6 +16,7 @@
     <ProjectReference Include="..\..\src\DCx.Core\DCx.Core.csproj" />
     <ProjectReference Include="..\..\server\DCx.GlobalService\DCx.GlobalService.csproj" />
     <ProjectReference Include="..\DCx.FakeCodexAppServer\DCx.FakeCodexAppServer.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\DCx.FakeOllamaServer\DCx.FakeOllamaServer.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\DCx.FakeWhisperCli\DCx.FakeWhisperCli.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>

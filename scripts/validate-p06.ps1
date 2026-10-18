@@ -17,6 +17,8 @@ $whisperRegistrationRoot = Join-Path $runRoot "whisper-registration"
 $whisperRegistrationEvidencePath = Join-Path $whisperRegistrationRoot "whisper-registration-evidence.json"
 $dependencyTransferUiRoot = Join-Path $runRoot "dependency-transfer-ui"
 $dependencyTransferUiEvidencePath = Join-Path $dependencyTransferUiRoot "dependency-transfer-ui-evidence.json"
+$ownedOllamaRoot = Join-Path $runRoot "owned-ollama"
+$ownedOllamaEvidencePath = Join-Path $ownedOllamaRoot "owned-ollama-evidence.json"
 $ollama = "D:\Programs\Ollama\ollama.exe"
 $modelDigest = "ef33995bb2ac37689e49c1a15cd627354d05a3c21d1f4bdcd6a5c83825349c1f"
 $model = "llamacpp:$modelDigest"
@@ -143,6 +145,18 @@ try {
         "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.NormalInference_FailsClosedWhenExactUnloadIsNotConfirmed",
         "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.InspectionAndEmbedding_ValidateCapabilitiesAndBoundedVectors"
     )
+    $requiredOwnedOllamaRuntimeContracts = @(
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.Review_BindsExactCompleteRuntimeTreeAndSignerEvidence",
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.Review_NvidiaProfileBindsOnlyForcedCudaV13DependencyScope",
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.Review_RejectsLinkedContentAndInconsistentSignerEvidence",
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.Binding_RejectsChangedTreeDigestDuplicatePathAndEscapingExecutable",
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.StartInfo_ScrubsAmbientStateAndPinsNoCloudSingleWorkloadPolicy",
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.Runtime_RequiresApprovalStartsOwnedListenerAndStopsWithoutTouchingModelFiles",
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.Runtime_DeniesChangedOrExpandedTreeBeforeStartingChild",
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.Runtime_DeniesListenerWhoseOwnerCannotBeProvenAndKillsChild",
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.Runtime_DeniesChildExitBeforeReadiness",
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.JobObject_CloseKillsAssignedRuntimeProcess"
+    )
     $requiredApprovalStateContracts = @(
         "DCx.Core.Tests.LocalModels.LocalModelApprovalStateAnchorStoreTests.WindowsVaultAnchor_RoundTripsOverwritesIsolatesAndRejectsMalformedState",
         "DCx.Core.Tests.LocalModels.LocalModelApprovalStateAnchorStoreTests.WindowsVaultAnchor_HonorsPreCanceledOperationsWithoutCreatingCredential",
@@ -231,6 +245,14 @@ try {
             throw "P06 did not prove required runtime resource/unload contract: $requiredOllamaRuntimeResourceContract"
         }
     }
+    foreach ($requiredOwnedOllamaRuntimeContract in $requiredOwnedOllamaRuntimeContracts) {
+        $matchingResults = @($localModelResults | Where-Object {
+            $_.testName -ceq $requiredOwnedOllamaRuntimeContract
+        })
+        if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
+            throw "P06 did not prove required owned Ollama runtime contract: $requiredOwnedOllamaRuntimeContract"
+        }
+    }
     foreach ($requiredApprovalStateContract in $requiredApprovalStateContracts) {
         $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredApprovalStateContract })
         if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
@@ -249,6 +271,27 @@ try {
     if ($runtimeArchiveDenials.Count -ne 8 -or
         @($runtimeArchiveDenials | Where-Object { $_.outcome -cne "Passed" }).Count -ne 0) {
         throw "P06 did not prove all eight hostile Whisper runtime archive denials."
+    }
+    & (Join-Path $repoRoot "scripts\validate-p06-owned-ollama.ps1") -RunRoot $ownedOllamaRoot
+    if (-not (Test-Path -LiteralPath $ownedOllamaEvidencePath -PathType Leaf)) {
+        throw "The real owned Ollama runtime evidence was not retained."
+    }
+    $ownedOllamaEvidence = Get-Content -LiteralPath $ownedOllamaEvidencePath -Raw | ConvertFrom-Json
+    if ($ownedOllamaEvidence.result -cne "PASS" -or
+        $ownedOllamaEvidence.runtime_profile -cne "nvidia-cuda-v13" -or
+        $ownedOllamaEvidence.authenticode_status -cne "Valid" -or
+        $ownedOllamaEvidence.signer_subject -notlike "*Ollama Inc.*" -or
+        $ownedOllamaEvidence.independent_loopback_origin -ne $true -or
+        $ownedOllamaEvidence.listener_owner_pid_verified -ne $true -or
+        $ownedOllamaEvidence.kill_on_job_close -ne $true -or
+        $ownedOllamaEvidence.no_cloud -ne $true -or
+        $ownedOllamaEvidence.no_prune -ne $true -or
+        $ownedOllamaEvidence.inference_performed -ne $false -or
+        $ownedOllamaEvidence.model_transfer_performed -ne $false -or
+        $ownedOllamaEvidence.existing_service_survived -ne $true -or
+        $ownedOllamaEvidence.owned_process_stopped -ne $true -or
+        $ownedOllamaEvidence.owned_listener_stopped -ne $true) {
+        throw "The real owned Ollama runtime evidence is incomplete or unsafe."
     }
     & (Join-Path $repoRoot "scripts\validate-p06-whisper-registration.ps1") -RunRoot $whisperRegistrationRoot
     if (-not (Test-Path -LiteralPath $whisperRegistrationEvidencePath -PathType Leaf)) {
@@ -752,6 +795,19 @@ $manifest = [ordered]@{
     ollama_inference_lease_cross_process = $true
     ollama_inference_lease_file_contains_data = $false
     ollama_runtime_resource_unload_contract_tests = $requiredOllamaRuntimeResourceContracts.Count
+    owned_ollama_runtime_contract_tests = $requiredOwnedOllamaRuntimeContracts.Count
+    owned_ollama_runtime_evidence = $ownedOllamaEvidencePath
+    owned_ollama_runtime_version = [string]$ownedOllamaEvidence.runtime_version
+    owned_ollama_runtime_profile = [string]$ownedOllamaEvidence.runtime_profile
+    owned_ollama_runtime_files = [int]$ownedOllamaEvidence.runtime_file_count
+    owned_ollama_runtime_bytes = [long]$ownedOllamaEvidence.runtime_total_bytes
+    owned_ollama_runtime_tree_sha256 = [string]$ownedOllamaEvidence.runtime_tree_sha256
+    owned_ollama_runtime_signed = $true
+    owned_ollama_runtime_listener_pid_verified = $true
+    owned_ollama_runtime_job_kill_on_close = $true
+    owned_ollama_existing_service_preserved = $true
+    owned_ollama_inference_performed = $false
+    owned_ollama_transfer_performed = $false
     native_hardware_profile_passed = $true
     native_hardware_operating_system = [string]$nativeHardwareProfile.OperatingSystem
     native_hardware_process_architecture = [string]$nativeHardwareProfile.ProcessArchitecture
@@ -841,6 +897,7 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Native product hardware profile contracts=PASS ($($manifest.native_hardware_profile_contract_tests)/$($manifest.native_hardware_profile_contract_tests)); CPU=$($manifest.native_hardware_cpu); logical processors=$($manifest.native_hardware_logical_processors); physical memory bytes=$($manifest.native_hardware_physical_memory_bytes); available system memory bytes=$($manifest.native_hardware_available_memory_bytes); application-data storage available bytes=$($manifest.native_hardware_storage_available_bytes); NVIDIA registry driver=$($manifest.native_hardware_nvidia_registry_driver); registry graphics memory bytes=$($manifest.native_hardware_nvidia_registry_memory_bytes); live available graphics memory bytes=$($manifest.native_hardware_nvidia_available_memory_bytes) from $($manifest.native_hardware_nvidia_available_memory_source); DXGI inventory-only adapters=$(@($manifest.native_hardware_dxgi_inventory_adapters).Count)"
 "Per-user cross-process Ollama inference sequencing contracts=PASS ($($manifest.ollama_inference_lease_contract_tests)/$($manifest.ollama_inference_lease_contract_tests)); lock data retained=False"
 "Runtime resource-admission and verified-unload contracts=PASS ($($manifest.ollama_runtime_resource_unload_contract_tests)/$($manifest.ollama_runtime_resource_unload_contract_tests))"
+"Owned Ollama runtime contracts=PASS ($($manifest.owned_ollama_runtime_contract_tests)/$($manifest.owned_ollama_runtime_contract_tests)); version=$($manifest.owned_ollama_runtime_version); profile=$($manifest.owned_ollama_runtime_profile); signed=$($manifest.owned_ollama_runtime_signed); files=$($manifest.owned_ollama_runtime_files); bytes=$($manifest.owned_ollama_runtime_bytes); listener PID verified=True; kill-on-job-close=True; existing service preserved=True; inference=False; transfer=False"
 "Native hardware-bound model selection=PASS; available graphics bytes=$($manifest.native_resource_available_graphics_memory_bytes); available system bytes=$($manifest.native_resource_available_system_memory_bytes); vision=$($manifest.native_resource_selected_vision_model); embedding available=$($manifest.native_resource_selected_embedding_available)"
 "Local-model linked-root, linked-file and swapped-directory denials=PASS ($($manifest.local_model_storage_link_denials)/$($manifest.local_model_storage_link_denials)); external writes=$($manifest.local_model_storage_external_writes)"
 "Pinned dependency catalog=$($manifest.dependency_catalog_id); SHA-256=$($manifest.dependency_catalog_sha256)"

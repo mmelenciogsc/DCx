@@ -10,6 +10,7 @@
     <Project Path="tests/DCx.BossBenchmark/DCx.BossBenchmark.csproj" />
     <Project Path="tests/DCx.Core.Tests/DCx.Core.Tests.csproj" />
     <Project Path="tests/DCx.FakeCodexAppServer/DCx.FakeCodexAppServer.csproj" />
+    <Project Path="tests/DCx.FakeOllamaServer/DCx.FakeOllamaServer.csproj" />
     <Project Path="tests/DCx.FakeWhisperCli/DCx.FakeWhisperCli.csproj" />
     <Project Path="tests/DCx.GlobalSyncBenchmark/DCx.GlobalSyncBenchmark.csproj" />
     <Project Path="tests/DCx.NativeFixture/DCx.NativeFixture.csproj" />
