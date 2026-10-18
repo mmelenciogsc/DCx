@@ -28,7 +28,18 @@ var careOperationsRateLimiter = careOperationsApiOptions is null
     ? null
     : new SimulationContributionRequestLimiter(
         new SimulationContributionRateLimitOptions(120, 4));
+var careContributorDashboardApiOptions =
+    SimulationCareContributorDashboardApiOptions.Load();
+var careContributorDashboardRateLimiter = careContributorDashboardApiOptions is null
+    ? null
+    : new SimulationContributionRequestLimiter(
+        new SimulationContributionRateLimitOptions(120, 4));
 var inContainer = string.Equals(Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"), "true", StringComparison.OrdinalIgnoreCase);
+if (inContainer && careContributorDashboardApiOptions is not null)
+{
+    throw new InvalidOperationException(
+        "The CARE contributor dashboard simulation API is restricted to a local loopback process.");
+}
 var simulationUrl = Environment.GetEnvironmentVariable("DCX_GLOBAL_SIMULATION_URL") ?? "http://127.0.0.1:5087";
 if (!inContainer &&
     (!Uri.TryCreate(simulationUrl, UriKind.Absolute, out var parsedSimulationUrl) ||
@@ -103,15 +114,20 @@ if (contributionApiOptions is not null)
     }
 }
 
-DurableCareOperationsSource? careOperationsSource = null;
-if (careOperationsApiOptions is not null)
+DurableCareRepository? careRepository = null;
+if (careOperationsApiOptions is not null || careContributorDashboardApiOptions is not null)
 {
-    var careRepository = await DurableCareRepository.OpenAsync(Path.Combine(dataRoot, "care"));
+    careRepository = await DurableCareRepository.OpenAsync(Path.Combine(dataRoot, "care"));
+    builder.Services.AddSingleton(careRepository);
+}
+
+DurableCareOperationsSource? careOperationsSource = null;
+if (careOperationsApiOptions is not null && careRepository is not null)
+{
     careOperationsSource = new DurableCareOperationsSource(
         careRepository,
         careOperationsApiOptions.ProcessingEnabled,
         operatorPseudonymSha256: careOperationsApiOptions.OperatorPseudonymSha256);
-    builder.Services.AddSingleton(careRepository);
     builder.Services.AddSingleton(careOperationsSource);
     if (careOperationsMonitorOptions is not null)
     {
@@ -122,6 +138,15 @@ if (careOperationsApiOptions is not null)
         builder.Services.AddSingleton<CareOperationsMonitor>();
         builder.Services.AddHostedService<CareOperationsMonitoringWorker>();
     }
+}
+
+DurableCareContributorDashboardSource? careContributorDashboardSource = null;
+if (careContributorDashboardApiOptions is not null && careRepository is not null)
+{
+    careContributorDashboardSource = new DurableCareContributorDashboardSource(
+        careRepository,
+        careContributorDashboardApiOptions.ContributorPseudonym);
+    builder.Services.AddSingleton(careContributorDashboardSource);
 }
 
 var app = builder.Build();
@@ -136,6 +161,8 @@ app.MapGet("/health", () => Results.Ok(new
     careOperationsProcessing = careOperationsApiOptions?.ProcessingEnabled ?? false,
     careOperationsRateLimit = careOperationsRateLimiter is not null,
     careOperationsMonitor = careOperationsMonitorOptions is not null,
+    careContributorDashboardApi = careContributorDashboardApiOptions is not null,
+    careContributorDashboardRateLimit = careContributorDashboardRateLimiter is not null,
 }));
 app.MapGet("/api/trust-policy/latest", async (GlobalRegistryRepository registry, CancellationToken cancellationToken) =>
 {
@@ -196,6 +223,17 @@ if (careOperationsApiOptions is not null && careOperationsRateLimiter is not nul
         careOperationsSource,
         careOperationsApiOptions,
         careOperationsRateLimiter);
+}
+
+if (careContributorDashboardApiOptions is not null &&
+    careContributorDashboardRateLimiter is not null &&
+    careContributorDashboardSource is not null)
+{
+    SimulationCareContributorDashboardApi.Map(
+        app,
+        careContributorDashboardSource,
+        careContributorDashboardApiOptions,
+        careContributorDashboardRateLimiter);
 }
 
 await app.RunAsync();

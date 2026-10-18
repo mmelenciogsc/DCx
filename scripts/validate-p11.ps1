@@ -43,7 +43,12 @@ try {
         "DCx.Core.Tests.Finance.CareContributorDashboardTests.Policy_AcceptsOrderedHeldEligiblePendingPartialAndPaidHistory",
         "DCx.Core.Tests.Finance.CareContributorDashboardTests.UnavailableSource_DoesNotInventContributorOrPeriodState",
         "DCx.Core.Tests.Finance.DurableCareRepositoryTests.ContributorDashboard_DerivesWithheldEligiblePendingPartialAndPaidState",
-        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.ContributorDashboard_PreservesThresholdHoldAndDeniesAllocationTamper"
+        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.ContributorDashboard_PreservesThresholdHoldAndDeniesAllocationTamper",
+        "DCx.Core.Tests.Finance.LoopbackCareContributorDashboardSourceTests.Load_BindsAuthorizationOriginSubjectAndNoStoreRequest",
+        "DCx.Core.Tests.Finance.LoopbackCareContributorDashboardSourceTests.Load_RejectsResponseOriginSubstitution",
+        "DCx.Core.Tests.Finance.SimulationCareContributorDashboardApiOptionsTests.Parse_IsAbsentOnlyWhenEverySettingIsAbsent",
+        "DCx.Core.Tests.Finance.SimulationCareContributorDashboardApiOptionsTests.Parse_StoresOnlyTokenDigestAndOneValidatedSubject",
+        "DCx.Core.Tests.Finance.CareOperationsApiE2eTests.LoopbackApi_AuthenticatesBindsExactReviewAndNeverCallsProviderDuringReplay"
     )
     foreach ($requiredContract in $requiredLiabilityContracts) {
         $matchingResults = @($financeResults | Where-Object {
@@ -90,6 +95,7 @@ try {
     "Accessible fixture-only bounded CARE operations review and approval=PASS"
     "Durable CARE operations exact-review immediate-transaction rollback and cross-repository concurrency gates=PASS"
     "Authenticated default-off loopback CARE operations API strict transport and replay gates=PASS"
+    "Authenticated default-off loopback contributor dashboard subject origin and privacy gates=PASS"
     "Chained privacy-minimized append-only CARE operator decision audit=PASS"
     "Default-off read-only aggregate CARE transition monitor=PASS"
     "Durable chained aggregate alert outbox and at-least-once delivery receipts=PASS"

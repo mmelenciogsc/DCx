@@ -25,6 +25,8 @@ public sealed class CareOperationsApiE2eTests : IDisposable
         await File.WriteAllBytesAsync(keyPath, signingKey.ExportPkcs8PrivateKey());
         var operatorToken = $"care-operator-{Guid.NewGuid():N}";
         var wrongToken = $"wrong-operator-{Guid.NewGuid():N}";
+        var contributorToken = $"care-contributor-{Guid.NewGuid():N}";
+        const string contributorPseudonym = "contributor:care-api-fixture";
         var operatorPseudonymSha256 = Digest("care-operator-fixture");
         var dataRoot = Path.Combine(root, "server");
         var careRoot = Path.Combine(dataRoot, "care");
@@ -65,6 +67,11 @@ public sealed class CareOperationsApiE2eTests : IDisposable
         startInfo.Environment["DCX_GLOBAL_CARE_OPERATOR_TOKEN_SHA256"] = Digest(operatorToken);
         startInfo.Environment["DCX_GLOBAL_CARE_OPERATOR_PSEUDONYM_SHA256"] =
             operatorPseudonymSha256;
+        startInfo.Environment["DCX_GLOBAL_CARE_CONTRIBUTOR_DASHBOARD_API"] = "1";
+        startInfo.Environment["DCX_GLOBAL_CARE_CONTRIBUTOR_TOKEN_SHA256"] =
+            Digest(contributorToken);
+        startInfo.Environment["DCX_GLOBAL_CARE_CONTRIBUTOR_PSEUDONYM"] =
+            contributorPseudonym;
         startInfo.Environment["DCX_GLOBAL_CARE_MONITOR"] = "1";
         startInfo.Environment["DCX_GLOBAL_CARE_MONITOR_INTERVAL_MS"] = "100";
         startInfo.Environment["Logging__LogLevel__Default"] = "Warning";
@@ -83,6 +90,8 @@ public sealed class CareOperationsApiE2eTests : IDisposable
                 Assert.True(healthDocument.RootElement.GetProperty("careOperationsProcessing").GetBoolean());
                 Assert.True(healthDocument.RootElement.GetProperty("careOperationsRateLimit").GetBoolean());
                 Assert.True(healthDocument.RootElement.GetProperty("careOperationsMonitor").GetBoolean());
+                Assert.True(healthDocument.RootElement.GetProperty("careContributorDashboardApi").GetBoolean());
+                Assert.True(healthDocument.RootElement.GetProperty("careContributorDashboardRateLimit").GetBoolean());
             }
             await Task.Delay(250);
 
@@ -97,6 +106,56 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             {
                 await AssertErrorAsync(
                     invalidAuth, HttpStatusCode.Unauthorized, "authentication_invalid");
+            }
+            using (var contributorCannotOperate = await SendAuthorizedAsync(
+                       client, HttpMethod.Get, healthUri, contributorToken))
+            {
+                await AssertErrorAsync(
+                    contributorCannotOperate,
+                    HttpStatusCode.Unauthorized,
+                    "authentication_invalid");
+            }
+
+            var contributorUri = new Uri(endpoint, "api/care/contributor-dashboard");
+            using (var missingContributorAuth = await client.GetAsync(contributorUri))
+            {
+                await AssertErrorAsync(
+                    missingContributorAuth,
+                    HttpStatusCode.Unauthorized,
+                    "authentication_required");
+                Assert.True(missingContributorAuth.Headers.CacheControl?.NoStore);
+            }
+            using (var operatorCannotReadContributor = await SendAuthorizedAsync(
+                       client, HttpMethod.Get, contributorUri, operatorToken))
+            {
+                await AssertErrorAsync(
+                    operatorCannotReadContributor,
+                    HttpStatusCode.Unauthorized,
+                    "authentication_invalid");
+            }
+            using (var contributorSource = new LoopbackCareContributorDashboardSource(
+                       endpoint,
+                       contributorToken,
+                       contributorPseudonym,
+                       TimeSpan.FromSeconds(5)))
+            {
+                var contributorSnapshot = await contributorSource.LoadAsync();
+                Assert.Equal(
+                    CareContributorDashboardPolicy.Available,
+                    contributorSnapshot.StatusCode);
+                Assert.Equal(contributorPseudonym, contributorSnapshot.ContributorPseudonym);
+                Assert.Empty(contributorSnapshot.Periods);
+            }
+            using (var substitutedSubjectSource = new LoopbackCareContributorDashboardSource(
+                       endpoint,
+                       contributorToken,
+                       "contributor:wrong-client-subject",
+                       TimeSpan.FromSeconds(5)))
+            {
+                var subjectError = await Assert.ThrowsAsync<
+                    CareContributorDashboardTransportException>(
+                    () => substitutedSubjectSource.LoadAsync());
+                Assert.Equal("care_contributor_response_invalid", subjectError.Code);
             }
             using (var malformed = await SendRawProcessAsync(
                        client,
@@ -232,6 +291,7 @@ public sealed class CareOperationsApiE2eTests : IDisposable
                 StringComparison.Ordinal);
             Assert.DoesNotContain(operatorToken, diagnostics, StringComparison.Ordinal);
             Assert.DoesNotContain(wrongToken, diagnostics, StringComparison.Ordinal);
+            Assert.DoesNotContain(contributorToken, diagnostics, StringComparison.Ordinal);
             Assert.DoesNotContain("WH-CARE-API", diagnostics, StringComparison.Ordinal);
         }
     }
