@@ -9,6 +9,7 @@ public sealed class WindowsCredentialVault
     private const int GenericCredential = 1;
     private const int PersistLocalMachine = 2;
     private const int ErrorNotFound = 1168;
+    private static readonly object NativeCredentialLock = new();
 
     public void Save(string targetName, string secret)
     {
@@ -34,9 +35,12 @@ public sealed class WindowsCredentialVault
                 Persist = PersistLocalMachine,
                 UserName = Environment.UserName,
             };
-            if (!CredWrite(ref credential, 0))
+            lock (NativeCredentialLock)
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows Credential Manager rejected the credential.");
+                if (!CredWrite(ref credential, 0))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows Credential Manager rejected the credential.");
+                }
             }
         }
         finally
@@ -55,39 +59,42 @@ public sealed class WindowsCredentialVault
     {
         EnsureWindows();
         ArgumentException.ThrowIfNullOrWhiteSpace(targetName);
-        if (!CredRead(targetName, GenericCredential, 0, out var credentialPointer))
+        lock (NativeCredentialLock)
         {
-            var error = Marshal.GetLastWin32Error();
-            if (error == ErrorNotFound)
+            if (!CredRead(targetName, GenericCredential, 0, out var credentialPointer))
             {
-                return null;
+                var error = Marshal.GetLastWin32Error();
+                if (error == ErrorNotFound)
+                {
+                    return null;
+                }
+
+                throw new Win32Exception(error, "Windows Credential Manager could not read the credential.");
             }
 
-            throw new Win32Exception(error, "Windows Credential Manager could not read the credential.");
-        }
-
-        try
-        {
-            var credential = Marshal.PtrToStructure<NativeCredential>(credentialPointer);
-            if (credential.CredentialBlob == IntPtr.Zero || credential.CredentialBlobSize == 0)
-            {
-                return string.Empty;
-            }
-
-            var bytes = new byte[credential.CredentialBlobSize];
-            Marshal.Copy(credential.CredentialBlob, bytes, 0, bytes.Length);
             try
             {
-                return Encoding.Unicode.GetString(bytes);
+                var credential = Marshal.PtrToStructure<NativeCredential>(credentialPointer);
+                if (credential.CredentialBlob == IntPtr.Zero || credential.CredentialBlobSize == 0)
+                {
+                    return string.Empty;
+                }
+
+                var bytes = new byte[credential.CredentialBlobSize];
+                Marshal.Copy(credential.CredentialBlob, bytes, 0, bytes.Length);
+                try
+                {
+                    return Encoding.Unicode.GetString(bytes);
+                }
+                finally
+                {
+                    Array.Clear(bytes);
+                }
             }
             finally
             {
-                Array.Clear(bytes);
+                CredFree(credentialPointer);
             }
-        }
-        finally
-        {
-            CredFree(credentialPointer);
         }
     }
 
@@ -95,18 +102,21 @@ public sealed class WindowsCredentialVault
     {
         EnsureWindows();
         ArgumentException.ThrowIfNullOrWhiteSpace(targetName);
-        if (CredDelete(targetName, GenericCredential, 0))
+        lock (NativeCredentialLock)
         {
-            return true;
-        }
+            if (CredDelete(targetName, GenericCredential, 0))
+            {
+                return true;
+            }
 
-        var error = Marshal.GetLastWin32Error();
-        if (error == ErrorNotFound)
-        {
-            return false;
-        }
+            var error = Marshal.GetLastWin32Error();
+            if (error == ErrorNotFound)
+            {
+                return false;
+            }
 
-        throw new Win32Exception(error, "Windows Credential Manager could not delete the credential.");
+            throw new Win32Exception(error, "Windows Credential Manager could not delete the credential.");
+        }
     }
 
     private static void EnsureWindows()
