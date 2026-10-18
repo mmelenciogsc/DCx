@@ -21,21 +21,66 @@ public sealed class OllamaLocalClient : IDisposable
     private static readonly byte[] JpegSignature = [0xFF, 0xD8, 0xFF];
     private readonly HttpClient _httpClient;
     private readonly Uri _baseAddress;
+    private readonly IOllamaInferenceLeaseCoordinator inferenceLeaseCoordinator;
 
     public OllamaLocalClient(Uri baseAddress, TimeSpan? timeout = null)
-        : this(new HttpClient(CreateHardenedHandler(), disposeHandler: true), baseAddress, timeout)
+        : this(
+            OllamaInferenceLeaseCoordinator.CreateForCurrentUser(),
+            new HttpClient(CreateHardenedHandler(), disposeHandler: true),
+            baseAddress,
+            timeout)
+    {
+    }
+
+    private OllamaLocalClient(
+        IOllamaInferenceLeaseCoordinator inferenceLeaseCoordinator,
+        HttpClient httpClient,
+        Uri baseAddress,
+        TimeSpan? timeout)
+        : this(httpClient, baseAddress, timeout, inferenceLeaseCoordinator)
     {
     }
 
     internal OllamaLocalClient(HttpMessageHandler handler, Uri baseAddress, TimeSpan? timeout = null)
-        : this(new HttpClient(handler, disposeHandler: true), baseAddress, timeout)
+        : this(
+            new HttpClient(handler, disposeHandler: true),
+            baseAddress,
+            timeout,
+            UncoordinatedOllamaInferenceLease.Instance)
     {
     }
 
-    private OllamaLocalClient(HttpClient httpClient, Uri baseAddress, TimeSpan? timeout)
+    internal OllamaLocalClient(
+        HttpMessageHandler handler,
+        Uri baseAddress,
+        TimeSpan? timeout,
+        IOllamaInferenceLeaseCoordinator inferenceLeaseCoordinator)
+        : this(
+            new HttpClient(handler, disposeHandler: true),
+            baseAddress,
+            timeout,
+            inferenceLeaseCoordinator)
+    {
+    }
+
+    private OllamaLocalClient(
+        HttpClient httpClient,
+        Uri baseAddress,
+        TimeSpan? timeout,
+        IOllamaInferenceLeaseCoordinator inferenceLeaseCoordinator)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        ArgumentNullException.ThrowIfNull(baseAddress);
+        if (inferenceLeaseCoordinator is null)
+        {
+            _httpClient.Dispose();
+            throw new ArgumentNullException(nameof(inferenceLeaseCoordinator));
+        }
+        this.inferenceLeaseCoordinator = inferenceLeaseCoordinator;
+        if (baseAddress is null)
+        {
+            _httpClient.Dispose();
+            throw new ArgumentNullException(nameof(baseAddress));
+        }
         if (!baseAddress.IsAbsoluteUri || baseAddress.Scheme != Uri.UriSchemeHttp || !baseAddress.IsLoopback ||
             baseAddress.AbsolutePath != "/" || !string.IsNullOrEmpty(baseAddress.Query) ||
             !string.IsNullOrEmpty(baseAddress.Fragment) || !string.IsNullOrEmpty(baseAddress.UserInfo))
@@ -236,6 +281,9 @@ public sealed class OllamaLocalClient : IDisposable
         IReadOnlyList<string> inputs,
         CancellationToken cancellationToken = default)
     {
+        ValidateEmbeddingRequest(model, expectedDigest, expectedLicenseSha256, inputs, keepAlive: 0);
+        using var inferenceLease = await inferenceLeaseCoordinator.AcquireAsync(cancellationToken)
+            .ConfigureAwait(false);
         return await EmbedPinnedCoreAsync(
             model, expectedDigest, expectedLicenseSha256, inputs, keepAlive: 0, cancellationToken)
             .ConfigureAwait(false);
@@ -263,6 +311,9 @@ public sealed class OllamaLocalClient : IDisposable
         CancellationToken cancellationToken = default)
     {
         ValidateRuntimeVersion(expectedRuntimeVersion);
+        ValidateEmbeddingRequest(model, expectedDigest, expectedLicenseSha256, inputs, keepAlive: "1m");
+        using var inferenceLease = await inferenceLeaseCoordinator.AcquireAsync(cancellationToken)
+            .ConfigureAwait(false);
         if (!string.Equals(
                 await GetVersionAsync(cancellationToken).ConfigureAwait(false),
                 expectedRuntimeVersion,
@@ -340,6 +391,8 @@ public sealed class OllamaLocalClient : IDisposable
             throw new ArgumentException("The image must exist and be between 1 byte and 20 MiB.", nameof(imagePath));
         }
 
+        using var inferenceLease = await inferenceLeaseCoordinator.AcquireAsync(cancellationToken)
+            .ConfigureAwait(false);
         var imageBytes = new byte[checked((int)file.Length)];
         await using (var stream = new FileStream(
                          file.FullName,
@@ -418,16 +471,7 @@ public sealed class OllamaLocalClient : IDisposable
         object keepAlive,
         CancellationToken cancellationToken)
     {
-        ValidateModelName(model);
-        ValidateDigest(expectedDigest, nameof(expectedDigest));
-        ValidateDigest(expectedLicenseSha256, nameof(expectedLicenseSha256));
-        ArgumentNullException.ThrowIfNull(inputs);
-        if (inputs.Count is 0 or > MaximumEmbeddingInputs || inputs.Any(input =>
-                string.IsNullOrWhiteSpace(input) || input.Length > MaximumEmbeddingInputCharacters || input.Contains('\0')) ||
-            keepAlive is not 0 && !string.Equals(keepAlive as string, "1m", StringComparison.Ordinal))
-        {
-            throw new ArgumentException("Embedding input or keep-alive policy is outside its safety bounds.", nameof(inputs));
-        }
+        ValidateEmbeddingRequest(model, expectedDigest, expectedLicenseSha256, inputs, keepAlive);
 
         await RequireBoundModelAsync(
             model, expectedDigest, expectedLicenseSha256,
@@ -555,6 +599,25 @@ public sealed class OllamaLocalClient : IDisposable
             version.Any(character => character > 0x7f || char.IsControl(character) || char.IsWhiteSpace(character)))
         {
             throw new ArgumentException("The Ollama runtime version is invalid.", nameof(version));
+        }
+    }
+
+    private static void ValidateEmbeddingRequest(
+        string model,
+        string expectedDigest,
+        string expectedLicenseSha256,
+        IReadOnlyList<string> inputs,
+        object keepAlive)
+    {
+        ValidateModelName(model);
+        ValidateDigest(expectedDigest, nameof(expectedDigest));
+        ValidateDigest(expectedLicenseSha256, nameof(expectedLicenseSha256));
+        ArgumentNullException.ThrowIfNull(inputs);
+        if (inputs.Count is 0 or > MaximumEmbeddingInputs || inputs.Any(input =>
+                string.IsNullOrWhiteSpace(input) || input.Length > MaximumEmbeddingInputCharacters || input.Contains('\0')) ||
+            keepAlive is not 0 && !string.Equals(keepAlive as string, "1m", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Embedding input or keep-alive policy is outside its safety bounds.", nameof(inputs));
         }
     }
 

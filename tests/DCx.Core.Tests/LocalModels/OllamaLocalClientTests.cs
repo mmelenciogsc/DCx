@@ -88,12 +88,67 @@ public sealed class OllamaLocalClientTests
     }
 
     [Fact]
+    public async Task VisionInference_IsSerializedAcrossClientsForTheEntirePinnedOperation()
+    {
+        var coordinationRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"dcx-ollama-client-lease-{Guid.NewGuid():N}");
+        var image = Path.GetTempFileName();
+        await File.WriteAllBytesAsync(
+            image,
+            [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+        var probe = new ConcurrencyProbe();
+        try
+        {
+            var coordinator = new OllamaInferenceLeaseCoordinator(
+                coordinationRoot,
+                TimeSpan.FromSeconds(2),
+                TimeSpan.FromMilliseconds(10));
+            using var first = new OllamaLocalClient(
+                new FixtureHandler { VisionProbe = probe },
+                new Uri("http://localhost:11434/"),
+                TimeSpan.FromSeconds(2),
+                coordinator);
+            using var second = new OllamaLocalClient(
+                new FixtureHandler { VisionProbe = probe },
+                new Uri("http://localhost:11434/"),
+                TimeSpan.FromSeconds(2),
+                coordinator);
+
+            await Task.WhenAll(
+                first.DescribeImagePinnedAsync(
+                    VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."),
+                second.DescribeImagePinnedAsync(
+                    VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."));
+
+            Assert.Equal(1, probe.MaximumConcurrent);
+            Assert.Equal(2, probe.Completed);
+            Assert.Equal(
+                0,
+                new FileInfo(Path.Combine(
+                    coordinationRoot,
+                    OllamaInferenceLeaseCoordinator.LockFileName)).Length);
+        }
+        finally
+        {
+            File.Delete(image);
+            if (Directory.Exists(coordinationRoot)) Directory.Delete(coordinationRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task InspectionAndEmbedding_ValidateCapabilitiesAndBoundedVectors()
     {
-        var handler = new FixtureHandler();
-        using var client = new OllamaLocalClient(handler, new Uri("http://127.0.0.1:11434/"));
+        var coordinator = new TrackingLeaseCoordinator();
+        var handler = new FixtureHandler { LeaseIsActive = () => coordinator.IsActive };
+        using var client = new OllamaLocalClient(
+            handler,
+            new Uri("http://127.0.0.1:11434/"),
+            timeout: null,
+            inferenceLeaseCoordinator: coordinator);
 
         var inspection = await client.InspectModelAsync(EmbeddingModel);
+        handler.RequireInferenceLease = true;
         var result = await client.EmbedPinnedAsync(
             EmbeddingModel, EmbeddingDigest, LicenseDigest, ["first", "second"]);
 
@@ -104,6 +159,9 @@ public sealed class OllamaLocalClientTests
         Assert.Equal(7, result.PromptTokens);
         Assert.Contains("\"truncate\":false", handler.EmbeddingRequest, StringComparison.Ordinal);
         Assert.Contains("\"keep_alive\":0", handler.EmbeddingRequest, StringComparison.Ordinal);
+        Assert.Equal(1, coordinator.Acquisitions);
+        Assert.False(coordinator.IsActive);
+        Assert.False(handler.InferenceLeaseViolation);
     }
 
     [Fact]
@@ -199,8 +257,13 @@ public sealed class OllamaLocalClientTests
     [Fact]
     public async Task EmbeddingBenchmark_BindsRuntimeMeasuresLoadedModelAndConfirmsUnload()
     {
-        var handler = new FixtureHandler();
-        using var client = new OllamaLocalClient(handler, new Uri("http://localhost:11434/"));
+        var coordinator = new TrackingLeaseCoordinator();
+        var handler = new FixtureHandler { LeaseIsActive = () => coordinator.IsActive };
+        using var client = new OllamaLocalClient(
+            handler,
+            new Uri("http://localhost:11434/"),
+            timeout: null,
+            inferenceLeaseCoordinator: coordinator);
         var binding = new ApprovedLocalModelBinding(
             EmbeddingModel,
             EmbeddingDigest,
@@ -208,6 +271,7 @@ public sealed class OllamaLocalClientTests
             new DateTimeOffset(2026, 10, 18, 3, 0, 0, TimeSpan.Zero));
         using var backend = await OllamaEmbeddingBenchmarkBackend.CreateAsync(binding, client);
 
+        handler.RequireInferenceLease = true;
         var result = await backend.EmbedAsync(["first", "second"], CancellationToken.None);
 
         Assert.Equal("0.40.0", backend.RuntimeVersion);
@@ -222,6 +286,9 @@ public sealed class OllamaLocalClientTests
         Assert.True(handler.UnloadRequested);
         Assert.False(handler.Loaded);
         Assert.True(handler.RunningModelRequests >= 5);
+        Assert.Equal(1, coordinator.Acquisitions);
+        Assert.False(coordinator.IsActive);
+        Assert.False(handler.InferenceLeaseViolation);
     }
 
     [Fact]
@@ -366,6 +433,10 @@ public sealed class OllamaLocalClientTests
         public bool ChangeRuntimeAfterEmbedding { get; init; }
         public bool RefuseUnload { get; init; }
         public bool DelayEmbedding { get; init; }
+        public ConcurrencyProbe? VisionProbe { get; init; }
+        public Func<bool>? LeaseIsActive { get; init; }
+        public bool RequireInferenceLease { get; set; }
+        public bool InferenceLeaseViolation { get; private set; }
         public bool ReturnInvalidRuntimeVersion { get; init; }
         public bool ReturnInvalidRunningResources { get; init; }
         public Uri? ResponseUri { get; init; }
@@ -379,6 +450,11 @@ public sealed class OllamaLocalClientTests
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (RequireInferenceLease && (LeaseIsActive is null || !LeaseIsActive()))
+            {
+                InferenceLeaseViolation = true;
+            }
+
             if (request.RequestUri?.AbsolutePath == "/api/version")
             {
                 var version = ReturnInvalidRuntimeVersion
@@ -450,6 +526,10 @@ public sealed class OllamaLocalClientTests
             }
 
             ChatRequest = await request.Content!.ReadAsStringAsync(cancellationToken);
+            if (VisionProbe is not null)
+            {
+                await VisionProbe.ObserveAsync(cancellationToken);
+            }
             return Json(ReturnIncompleteVision
                 ? "{\"model\":\"wrong-model\",\"done\":false,\"message\":{\"content\":\"Partial\"}}"
                 : $"{{\"model\":\"{VisionModel}\",\"done\":true,\"message\":{{\"content\":\"A blue square. A red circle.\"}},\"prompt_eval_count\":12,\"eval_count\":8,\"total_duration\":1000}}", request);
@@ -460,5 +540,71 @@ public sealed class OllamaLocalClientTests
             Content = new StringContent(value, Encoding.UTF8, "application/json"),
             RequestMessage = ResponseUri is null ? request : new HttpRequestMessage(request.Method, ResponseUri),
         };
+    }
+
+    private sealed class ConcurrencyProbe
+    {
+        private int active;
+        private int maximumConcurrent;
+        private int completed;
+
+        public int MaximumConcurrent => Volatile.Read(ref maximumConcurrent);
+        public int Completed => Volatile.Read(ref completed);
+
+        public async Task ObserveAsync(CancellationToken cancellationToken)
+        {
+            var current = Interlocked.Increment(ref active);
+            while (true)
+            {
+                var maximum = Volatile.Read(ref maximumConcurrent);
+                if (current <= maximum ||
+                    Interlocked.CompareExchange(ref maximumConcurrent, current, maximum) == maximum)
+                {
+                    break;
+                }
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
+                Interlocked.Increment(ref completed);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref active);
+            }
+        }
+    }
+
+    private sealed class TrackingLeaseCoordinator : IOllamaInferenceLeaseCoordinator
+    {
+        private int active;
+        private int acquisitions;
+
+        public bool IsActive => Volatile.Read(ref active) == 1;
+        public int Acquisitions => Volatile.Read(ref acquisitions);
+
+        public Task<IDisposable> AcquireAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Interlocked.CompareExchange(ref active, 1, 0) != 0)
+            {
+                throw new InvalidOperationException("The test lease was acquired concurrently.");
+            }
+            Interlocked.Increment(ref acquisitions);
+            return Task.FromResult<IDisposable>(new Release(this));
+        }
+
+        private sealed class Release(TrackingLeaseCoordinator owner) : IDisposable
+        {
+            private bool disposed;
+
+            public void Dispose()
+            {
+                if (disposed) return;
+                disposed = true;
+                Assert.Equal(1, Interlocked.Exchange(ref owner.active, 0));
+            }
+        }
     }
 }

@@ -125,6 +125,13 @@ try {
         "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.WindowsSource_CapturesCurrentHostWithoutAChildProcess",
         "DCx.Core.Tests.LocalModels.LocalModelSelectorTests.SelectForHardware_BindsNativeGraphicsAndPhysicalMemoryBudgets"
     )
+    $requiredOllamaInferenceLeaseContracts = @(
+        "DCx.Core.Tests.LocalModels.OllamaInferenceLeaseCoordinatorTests.SameUserLease_SerializesCancellationAndRecovery",
+        "DCx.Core.Tests.LocalModels.OllamaInferenceLeaseCoordinatorTests.ExternalContention_TimesOutWithStableMessageThenRecovers",
+        "DCx.Core.Tests.LocalModels.OllamaInferenceLeaseCoordinatorTests.UnsafeLockPath_IsDeniedWithoutFollowingIt",
+        "DCx.Core.Tests.LocalModels.OllamaInferenceLeaseCoordinatorTests.PreCanceledLease_CreatesNoStorageAndTimingBoundsFailClosed",
+        "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.VisionInference_IsSerializedAcrossClientsForTheEntirePinnedOperation"
+    )
     $requiredApprovalStateContracts = @(
         "DCx.Core.Tests.LocalModels.LocalModelApprovalStateAnchorStoreTests.WindowsVaultAnchor_RoundTripsOverwritesIsolatesAndRejectsMalformedState",
         "DCx.Core.Tests.LocalModels.LocalModelApprovalStateAnchorStoreTests.WindowsVaultAnchor_HonorsPreCanceledOperationsWithoutCreatingCredential",
@@ -195,6 +202,14 @@ try {
         $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredHardwareProfileContract })
         if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
             throw "P06 did not prove required native hardware-profile contract: $requiredHardwareProfileContract"
+        }
+    }
+    foreach ($requiredOllamaInferenceLeaseContract in $requiredOllamaInferenceLeaseContracts) {
+        $matchingResults = @($localModelResults | Where-Object {
+            $_.testName -ceq $requiredOllamaInferenceLeaseContract
+        })
+        if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
+            throw "P06 did not prove required Ollama inference-sequencing contract: $requiredOllamaInferenceLeaseContract"
         }
     }
     foreach ($requiredApprovalStateContract in $requiredApprovalStateContracts) {
@@ -682,6 +697,9 @@ $manifest = [ordered]@{
     local_model_storage_external_writes = 0
     local_model_approval_anchor_contract_tests = $requiredApprovalStateContracts.Count
     native_hardware_profile_contract_tests = $requiredHardwareProfileContracts.Count
+    ollama_inference_lease_contract_tests = $requiredOllamaInferenceLeaseContracts.Count
+    ollama_inference_lease_cross_process = $true
+    ollama_inference_lease_file_contains_data = $false
     native_hardware_profile_passed = $true
     native_hardware_operating_system = [string]$nativeHardwareProfile.OperatingSystem
     native_hardware_process_architecture = [string]$nativeHardwareProfile.ProcessArchitecture
@@ -754,6 +772,7 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Ollama redirect/cookie/proxy denial and response-origin validation=PASS"
 "Low-resource and local-first fallback tests=PASS"
 "Native product hardware profile contracts=PASS ($($manifest.native_hardware_profile_contract_tests)/$($manifest.native_hardware_profile_contract_tests)); CPU=$($manifest.native_hardware_cpu); logical processors=$($manifest.native_hardware_logical_processors); physical memory bytes=$($manifest.native_hardware_physical_memory_bytes); application-data storage available bytes=$($manifest.native_hardware_storage_available_bytes); NVIDIA registry driver=$($manifest.native_hardware_nvidia_registry_driver); registry graphics memory bytes=$($manifest.native_hardware_nvidia_registry_memory_bytes)"
+"Per-user cross-process Ollama inference sequencing contracts=PASS ($($manifest.ollama_inference_lease_contract_tests)/$($manifest.ollama_inference_lease_contract_tests)); lock data retained=False"
 "Native hardware-bound model selection=PASS; vision=$($manifest.native_resource_selected_vision_model); embedding available=$($manifest.native_resource_selected_embedding_available)"
 "Local-model linked-root, linked-file and swapped-directory denials=PASS ($($manifest.local_model_storage_link_denials)/$($manifest.local_model_storage_link_denials)); external writes=$($manifest.local_model_storage_external_writes)"
 "Pinned dependency catalog=$($manifest.dependency_catalog_id); SHA-256=$($manifest.dependency_catalog_sha256)"
