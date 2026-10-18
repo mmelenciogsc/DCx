@@ -19,7 +19,7 @@ The owner's Ubuntu server is not a development scratch host. Deployment requires
 - **Windows broker:** strict typed requests for process, PowerShell, UI Automation, foreground transfer, and approved file access.
 - **BOSS:** checkpointed task graph, deterministic-first capability lookup, evidence gates, specialist role configurations, budgets, and recovery.
 - **Inference router:** current provider capabilities discovered from official APIs/docs plus benchmarked local inference.
-- **Storage:** SQLite metadata, content-addressed artifacts, private vector index, separate signed global replica, append-only local event journal.
+- **Storage:** SQLite metadata, content-addressed artifacts, private vector index, separate signed global replica with replica-scoped cross-process operation serialization, append-only local event journal.
 - **Media/document services:** safe parsers, OCR, export validators, FFmpeg, PDF rendering, local transcription, image/video-frame analysis.
 
 ## Dependency direction

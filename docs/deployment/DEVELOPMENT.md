@@ -77,3 +77,5 @@ pwsh.exe -NoProfile -File .\scripts\audit-ubuntu-server.ps1
 ```
 
 The recorded audit found Ubuntu 24.04, .NET/ASP.NET 10, Docker/Compose and Bubblewrap, but denied Docker daemon access, found no writable cgroup delegation and failed the exact Bubblewrap network-isolation smoke. P09 still needs explicit authority for any access change or Compose deployment. P10 still needs an approved remediation that preserves network denial and measured resource isolation.
+
+The P09 client serializes every operation on one trust-root replica with a canonical-root in-process gate and persistent empty no-share lock file. This protects cooperating client instances/processes from checkpoint, policy, anchor-reconciliation and activation races. A queued operation can be cancelled; 30-second contention returns a stable retry message. Do not delete the lock file as routine cleanup. It is not a substitute for the dedicated service identity, ACL/mount policy, hardware-grade monotonic trust or container isolation still required for production.
