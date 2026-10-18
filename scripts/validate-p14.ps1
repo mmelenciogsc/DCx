@@ -10,6 +10,7 @@ $desktop = Join-Path $repoRoot "src\DCx.Desktop\bin\Release\net10.0-windows10.0.
 $runRoot = Join-Path $repoRoot "artifacts\test-results\p14-$([Guid]::NewGuid().ToString('N'))"
 $report = Join-Path $runRoot "go-no-go.json"
 $readinessTrx = Join-Path $runRoot "p14-readiness.trx"
+$uiaEvidencePath = Join-Path $runRoot "native-readiness-uia.json"
 $previousDataRoot = $env:DCX_DATA_ROOT
 $process = $null
 
@@ -184,6 +185,30 @@ try {
         throw "The read-only readiness dashboard exposed a production activation action."
     }
 
+    [ordered]@{
+        schema_version = 1
+        captured_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
+        fixture = "disposable local readiness data root"
+        decision = "no_go"
+        blockers = $assessment.blocking_critical_and_major_issues
+        metric_definitions = $assessment.pilot_metrics.Count
+        default_consent_status = $defaultConsentName
+        enabled_consent_status = $enabledConsentName
+        disabled_after_purge_status = $disabledConsentName
+        opt_in_approval_initially_unchecked = $true
+        opt_in_approval_reset = $true
+        opt_out_approval_initially_unchecked = $true
+        opt_out_approval_reset = $true
+        enable_result_focused = $true
+        purge_result_focused = $true
+        distinct_access_keys = $privacyAccessKeys
+        retained_aggregate_buckets_after_purge = 0
+        product_event_sources = 0
+        network_transfers = 0
+        production_activation_control_exposed = $false
+        production_actions = 0
+    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $uiaEvidencePath -Encoding utf8NoBOM
+
     "P14 readiness tests=PASS ($readinessTestsPassed/$readinessTestsPassed)"
     "Critical and major issues triaged=$($assessment.critical_and_major_issues_triaged)/$($assessment.critical_and_major_issues)"
     "Blocking critical and major issues=$($assessment.blocking_critical_and_major_issues)"
@@ -205,6 +230,7 @@ try {
     "Production activation approved=$($assessment.production_activation_approved)"
     "P14 decision=NO_GO"
     "P14 evidence=$report"
+    "P14 native consent UIA evidence=$uiaEvidencePath"
 }
 finally {
     if ($null -ne $process -and -not $process.HasExited) {
