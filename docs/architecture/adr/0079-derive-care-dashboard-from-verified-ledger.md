@@ -1,6 +1,6 @@
 # ADR 0079: Derive CARE contributor status from the verified authoritative ledger
 
-- Status: Accepted for server-side local validation; authenticated contributor transport remains blocked
+- Status: Accepted for server-side local validation; production contributor transport remains blocked
 - Date: 2026-10-18
 
 ## Context

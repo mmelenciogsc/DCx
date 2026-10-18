@@ -1,6 +1,6 @@
 # ADR 0078: Expose CARE contributor status through a provider-neutral read-only contract
 
-- Status: Accepted for generated local validation; authenticated contributor service remains blocked
+- Status: Accepted for generated local validation; production contributor service remains blocked
 - Date: 2026-10-18
 
 ## Context
@@ -16,7 +16,7 @@ The policy rejects malformed identities, duplicates, ordering/date substitution,
 ## Consequences
 
 - Contributors gain an accessibility-tested product surface without giving the desktop finance mutation or payout authority.
-- Future authenticated transport must implement this exact minimized contract and separately prove identity, TLS, authorization, freshness, retention and subject-rights behavior.
+- Any production authenticated transport must implement this exact minimized contract and separately prove identity, TLS, authorization, freshness, retention and subject-rights behavior. ADR 0080 covers only a local process-boundary simulation.
 - The dashboard cannot approve recipients, process events, release holds, create payouts or contact PayPal.
 - Generated fixture state is not production contributor data, provider acceptance or evidence that a payout occurred.
 
