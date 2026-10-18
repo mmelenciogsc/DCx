@@ -5,29 +5,54 @@ using DCx.Core.Finance;
 
 namespace DCx.Desktop;
 
+internal enum CareContributorDashboardSourceKind
+{
+    Unavailable,
+    GeneratedFixture,
+    AuthenticatedLoopbackFixture,
+}
+
 public partial class CareContributorDashboardWindow : Window
 {
     private readonly ICareContributorDashboardSource source;
-    private readonly bool isFixture;
+    private readonly CareContributorDashboardSourceKind sourceKind;
     private readonly CancellationTokenSource lifetime = new();
     private bool closed;
 
     public CareContributorDashboardWindow(
         ICareContributorDashboardSource source,
         bool isFixture)
+        : this(
+            source,
+            isFixture
+                ? CareContributorDashboardSourceKind.GeneratedFixture
+                : CareContributorDashboardSourceKind.Unavailable)
+    {
+    }
+
+    internal CareContributorDashboardWindow(
+        ICareContributorDashboardSource source,
+        CareContributorDashboardSourceKind sourceKind)
     {
         this.source = source ?? throw new ArgumentNullException(nameof(source));
-        this.isFixture = isFixture;
+        this.sourceKind = sourceKind;
         InitializeComponent();
-        BoundaryText.Text = isFixture
-            ? "Deterministic local validation fixture. Generated contributor data only. Provider credentials, recipient destinations, network requests, payments, payouts and production actions are unavailable."
-            : "Contributor status is not configured. No allocation, hold, eligibility or payment state is inferred.";
+        BoundaryText.Text = sourceKind switch
+        {
+            CareContributorDashboardSourceKind.GeneratedFixture =>
+                "Deterministic local validation fixture. Generated contributor data only. Provider credentials, recipient destinations, network requests, payments, payouts and production actions are unavailable.",
+            CareContributorDashboardSourceKind.AuthenticatedLoopbackFixture =>
+                "Default-off authenticated local validation transport. Contributor state comes from the integrity-verified local CARE ledger. Static fixture credentials, loopback HTTP and generated identities are not production authentication. This window is read-only. PayPal requests, payments, payouts and production actions are unavailable.",
+            _ =>
+                "Contributor status is not configured. No allocation, hold, eligibility or payment state is inferred.",
+        };
         AutomationProperties.SetName(BoundaryText, BoundaryText.Text);
         Loaded += OnLoaded;
         Closed += (_, _) =>
         {
             closed = true;
             lifetime.Cancel();
+            if (source is IDisposable disposable) disposable.Dispose();
             lifetime.Dispose();
         };
     }
@@ -36,6 +61,7 @@ public partial class CareContributorDashboardWindow : Window
     {
         Heading.Focus();
         await RefreshAsync();
+        if (!closed) Heading.Focus();
     }
 
     private async void OnRefreshClick(object sender, RoutedEventArgs e) =>
@@ -58,8 +84,9 @@ public partial class CareContributorDashboardWindow : Window
             else
             {
                 SetSnapshot(snapshot);
-                SetStatus(
-                    $"Loaded {snapshot.Periods.Count} generated CARE periods. This dashboard is read-only. Network requests 0. Payout attempts 0.");
+                SetStatus(sourceKind == CareContributorDashboardSourceKind.GeneratedFixture
+                    ? $"Loaded {snapshot.Periods.Count} generated CARE periods. This dashboard is read-only. Network requests 0. Payout attempts 0."
+                    : $"Loaded {snapshot.Periods.Count} CARE periods from the authenticated local ledger fixture. This dashboard is read-only. Provider requests 0. Payout attempts 0.");
             }
 
             if (moveFocus) SummaryText.Focus();
@@ -95,7 +122,7 @@ public partial class CareContributorDashboardWindow : Window
             $"Allocated: {FormatCents(allocated)}.{Environment.NewLine}" +
             $"Paid: {FormatCents(paid)}.{Environment.NewLine}" +
             $"Outstanding or held: {FormatCents(outstanding)}.{Environment.NewLine}" +
-            $"Data source: {(isFixture ? "deterministic local fixture" : "configured contributor source")}.";
+            $"Data source: {GetDataSourceLabel()}.";
         AutomationProperties.SetName(SummaryText, SummaryText.Text);
         PeriodsList.ItemsSource = snapshot.Periods
             .Select(item => new ContributorPeriodListItem(item))
@@ -118,6 +145,15 @@ public partial class CareContributorDashboardWindow : Window
 
     private static string FormatCents(decimal cents) =>
         string.Create(CultureInfo.InvariantCulture, $"USD {cents / 100:0.00}");
+
+    private string GetDataSourceLabel() => sourceKind switch
+    {
+        CareContributorDashboardSourceKind.GeneratedFixture =>
+            "deterministic local fixture",
+        CareContributorDashboardSourceKind.AuthenticatedLoopbackFixture =>
+            "authenticated local CARE ledger fixture",
+        _ => "configured contributor source",
+    };
 
     private sealed class ContributorPeriodListItem(CareContributorPeriodStatus status)
     {

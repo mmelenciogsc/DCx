@@ -140,6 +140,18 @@ public sealed class LoopbackCareContributorDashboardSourceTests
         Assert.DoesNotContain(Token, error.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Dispose_PreventsCredentialReuse()
+    {
+        var handler = new StaticHandler(request => Json(request, Snapshot()));
+        var source = new LoopbackCareContributorDashboardSource(
+            handler, Origin, Token, Contributor);
+
+        source.Dispose();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => source.LoadAsync());
+    }
+
     private static CareContributorDashboardSnapshot Snapshot() => new(
         CareContributorDashboardPolicy.Available,
         Contributor,

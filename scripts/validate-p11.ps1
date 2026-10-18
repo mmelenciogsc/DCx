@@ -46,6 +46,7 @@ try {
         "DCx.Core.Tests.Finance.DurableCareRepositoryTests.ContributorDashboard_PreservesThresholdHoldAndDeniesAllocationTamper",
         "DCx.Core.Tests.Finance.LoopbackCareContributorDashboardSourceTests.Load_BindsAuthorizationOriginSubjectAndNoStoreRequest",
         "DCx.Core.Tests.Finance.LoopbackCareContributorDashboardSourceTests.Load_RejectsResponseOriginSubstitution",
+        "DCx.Core.Tests.Finance.LoopbackCareContributorDashboardSourceTests.Dispose_PreventsCredentialReuse",
         "DCx.Core.Tests.Finance.SimulationCareContributorDashboardApiOptionsTests.Parse_IsAbsentOnlyWhenEverySettingIsAbsent",
         "DCx.Core.Tests.Finance.SimulationCareContributorDashboardApiOptionsTests.Parse_StoresOnlyTokenDigestAndOneValidatedSubject",
         "DCx.Core.Tests.Finance.CareOperationsApiE2eTests.LoopbackApi_AuthenticatesBindsExactReviewAndNeverCallsProviderDuringReplay"
@@ -60,6 +61,7 @@ try {
     }
 
     & (Join-Path $repoRoot "scripts\validate-p11-recipient-ui.ps1") -RunRoot $runRoot
+    & (Join-Path $repoRoot "scripts\validate-p11-contributor-loopback-ui.ps1") -RunRoot $runRoot
 
     "P11 finance tests=PASS ($financeTestsPassed/$financeTestsPassed)"
     "US`$3 monthly subscription fixture=PASS"

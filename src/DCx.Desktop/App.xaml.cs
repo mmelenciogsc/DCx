@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Threading;
 using DCx.Core.Deployment;
+using DCx.Core.Finance;
 using DCx.Core.LocalModels;
 using DCx.Core.Reliability;
 using DCx.Core.Storage;
@@ -38,6 +39,16 @@ public partial class App : Application
             string.Equals(e.Args[0], "--dependency-transfer-fixture", StringComparison.Ordinal))
         {
             StartDependencyTransferFixture();
+            return;
+        }
+
+        if (e.Args.Length == 1 &&
+            string.Equals(
+                e.Args[0],
+                "--care-contributor-loopback-fixture",
+                StringComparison.Ordinal))
+        {
+            StartCareContributorLoopbackFixture();
             return;
         }
 
@@ -362,6 +373,58 @@ public partial class App : Application
             runtimeLease?.Dispose();
             runtimeLease = null;
             Shutdown(2);
+        }
+    }
+
+    private void StartCareContributorLoopbackFixture()
+    {
+        const string tokenEnvironmentVariable =
+            "DCX_CARE_CONTRIBUTOR_LOOPBACK_FIXTURE_TOKEN";
+        LoopbackCareContributorDashboardSource? source = null;
+        try
+        {
+            if (!string.Equals(
+                    Environment.GetEnvironmentVariable(
+                        "DCX_CARE_CONTRIBUTOR_LOOPBACK_FIXTURE"),
+                    "1",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The CARE contributor loopback fixture is disabled.");
+            }
+
+            var originText = Environment.GetEnvironmentVariable(
+                "DCX_CARE_CONTRIBUTOR_LOOPBACK_FIXTURE_ORIGIN");
+            var token = Environment.GetEnvironmentVariable(tokenEnvironmentVariable);
+            var contributorPseudonym = Environment.GetEnvironmentVariable(
+                "DCX_CARE_CONTRIBUTOR_LOOPBACK_FIXTURE_PSEUDONYM");
+            if (!Uri.TryCreate(originText, UriKind.Absolute, out var origin) ||
+                token is null || contributorPseudonym is null)
+            {
+                throw new InvalidOperationException(
+                    "The CARE contributor loopback fixture configuration is incomplete.");
+            }
+
+            source = new LoopbackCareContributorDashboardSource(
+                origin,
+                token,
+                contributorPseudonym,
+                TimeSpan.FromSeconds(10));
+            Environment.SetEnvironmentVariable(tokenEnvironmentVariable, null);
+            MainWindow = new CareContributorDashboardWindow(
+                source,
+                CareContributorDashboardSourceKind.AuthenticatedLoopbackFixture);
+            MainWindow.Show();
+            source = null;
+        }
+        catch
+        {
+            source?.Dispose();
+            Shutdown(2);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(tokenEnvironmentVariable, null);
         }
     }
 
