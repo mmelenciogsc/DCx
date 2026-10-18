@@ -98,6 +98,12 @@ public sealed class CareContributorDashboardTests
         Assert.Empty(snapshot.Periods);
     }
 
+    [Fact]
+    public void AvailableAuthenticatedContributorMayHaveNoQualifiedHistory()
+    {
+        CareContributorDashboardPolicy.RequireSnapshot(Snapshot());
+    }
+
     private static CareContributorDashboardSnapshot Snapshot(
         params CareContributorPeriodStatus[] periods) => new(
         CareContributorDashboardPolicy.Available,

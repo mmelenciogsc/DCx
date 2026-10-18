@@ -17,6 +17,8 @@ public sealed record CarePeriodCloseReview(
 public sealed partial class DurableCareRepository
 {
     private const int MaximumCareContributorsPerPeriod = 100_000;
+    private const int MaximumContributorPayoutBatchesPerPeriod = 1_000;
+    private const int MaximumStoredPayoutPreviewCharacters = 256 * 1024;
     private static readonly TimeSpan CarePeriodCloseReviewLifetime = TimeSpan.FromMinutes(10);
 
     public static CarePeriodCloseReview ReviewCarePeriodClose(
@@ -242,6 +244,375 @@ public sealed partial class DurableCareRepository
         {
             mutationLock.Release();
         }
+    }
+
+    public async Task<CareContributorDashboardSnapshot> GetContributorDashboardAsync(
+        string contributorPseudonym,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        PayPalSandboxValidation.RequireContributorPseudonym(contributorPseudonym);
+        if (now.Offset != TimeSpan.Zero)
+        {
+            throw new InvalidOperationException(
+                "The CARE contributor dashboard requires a UTC observation time.");
+        }
+
+        await mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            await using var transaction = connection.BeginTransaction(deferred: false);
+            var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                SELECT allocation.period_id, period.period_close, period.eligibility_date,
+                       allocation.allocation_cents, allocation.held_below_threshold
+                FROM care_contributor_allocations AS allocation
+                INNER JOIN care_periods AS period ON period.period_id = allocation.period_id
+                WHERE allocation.contributor_pseudonym = $contributor
+                  AND allocation.allocation_cents > 0
+                ORDER BY period.period_close DESC
+                LIMIT $limit;
+                """;
+            command.Parameters.AddWithValue("$contributor", contributorPseudonym);
+            command.Parameters.AddWithValue(
+                "$limit", CareContributorDashboardPolicy.MaximumPeriods + 1);
+            var storedPeriods = new List<StoredContributorPeriod>();
+            await using (var reader = await command.ExecuteReaderAsync(cancellationToken)
+                             .ConfigureAwait(false))
+            {
+                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    storedPeriods.Add(new StoredContributorPeriod(
+                        reader.GetString(0),
+                        reader.GetString(1),
+                        reader.GetString(2),
+                        reader.GetInt64(3),
+                        reader.GetInt32(4) == 1));
+                }
+            }
+
+            if (storedPeriods.Count > CareContributorDashboardPolicy.MaximumPeriods)
+            {
+                throw new InvalidOperationException(
+                    "The CARE contributor history exceeds the dashboard retention bound.");
+            }
+
+            var periods = new List<CareContributorPeriodStatus>(storedPeriods.Count);
+            foreach (var stored in storedPeriods)
+            {
+                var registered = await ValidateRegisteredCarePeriodIntegrityAsync(
+                        connection, transaction, stored.PeriodId, cancellationToken)
+                    .ConfigureAwait(false);
+                var allocation = registered.Allocations.SingleOrDefault(item =>
+                    string.Equals(
+                        item.ContributorPseudonym,
+                        contributorPseudonym,
+                        StringComparison.Ordinal));
+                if (allocation is null ||
+                    allocation.AmountCents != stored.AllocationCents ||
+                    allocation.HeldBelowThreshold != stored.HeldBelowThreshold ||
+                    !DateOnly.TryParseExact(
+                        stored.PeriodClose,
+                        "yyyy-MM-dd",
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.None,
+                        out var periodClose) ||
+                    !DateOnly.TryParseExact(
+                        stored.EligibilityDate,
+                        "yyyy-MM-dd",
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.None,
+                        out var eligibilityDate) ||
+                    periodClose != registered.EarningPeriodClose ||
+                    eligibilityDate != registered.Net60EligibilityDate)
+                {
+                    throw new InvalidOperationException(
+                        "The CARE contributor dashboard allocation failed period integrity validation.");
+                }
+
+                command.Parameters.Clear();
+                command.CommandText = """
+                    SELECT DISTINCT batch_id
+                    FROM payout_allocation_bindings
+                    WHERE period_id = $period AND contributor_pseudonym = $contributor
+                    ORDER BY batch_id
+                    LIMIT $limit;
+                    """;
+                command.Parameters.AddWithValue("$period", stored.PeriodId);
+                command.Parameters.AddWithValue("$contributor", contributorPseudonym);
+                command.Parameters.AddWithValue(
+                    "$limit", MaximumContributorPayoutBatchesPerPeriod + 1);
+                var batchIds = new List<string>();
+                await using (var reader = await command.ExecuteReaderAsync(cancellationToken)
+                                 .ConfigureAwait(false))
+                {
+                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        batchIds.Add(reader.GetString(0));
+                    }
+                }
+
+                if (batchIds.Count > MaximumContributorPayoutBatchesPerPeriod)
+                {
+                    throw new InvalidOperationException(
+                        "The CARE contributor payout history exceeds its dashboard bound.");
+                }
+
+                long paidCents = 0;
+                var hasPending = false;
+                foreach (var batchId in batchIds)
+                {
+                    var payout = await ReadValidatedContributorPayoutAsync(
+                            connection,
+                            transaction,
+                            batchId,
+                            contributorPseudonym,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    hasPending |= payout.Pending;
+                    paidCents = checked(paidCents + payout.PaidCents);
+                }
+
+                if (paidCents > stored.AllocationCents ||
+                    stored.HeldBelowThreshold && (paidCents != 0 || hasPending))
+                {
+                    throw new InvalidOperationException(
+                        "The CARE contributor dashboard payout state conflicts with its allocation.");
+                }
+
+                var outstandingCents = stored.AllocationCents - paidCents;
+                var status = stored.HeldBelowThreshold
+                    ? CareContributorDashboardPolicy.HeldBelowThreshold
+                    : paidCents == stored.AllocationCents
+                        ? CareContributorDashboardPolicy.Paid
+                        : hasPending
+                            ? CareContributorDashboardPolicy.Pending
+                            : paidCents > 0
+                                ? CareContributorDashboardPolicy.PartiallyPaid
+                                : DateOnly.FromDateTime(now.UtcDateTime) < eligibilityDate
+                                    ? CareContributorDashboardPolicy.Withheld
+                                    : CareContributorDashboardPolicy.Eligible;
+                periods.Add(new CareContributorPeriodStatus(
+                    stored.PeriodId,
+                    periodClose,
+                    eligibilityDate,
+                    stored.AllocationCents,
+                    paidCents,
+                    outstandingCents,
+                    status));
+            }
+
+            var snapshot = new CareContributorDashboardSnapshot(
+                CareContributorDashboardPolicy.Available,
+                contributorPseudonym,
+                "USD",
+                now,
+                periods);
+            CareContributorDashboardPolicy.RequireSnapshot(snapshot);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return snapshot;
+        }
+        finally
+        {
+            mutationLock.Release();
+        }
+    }
+
+    private static async Task<ContributorPayoutProjection> ReadValidatedContributorPayoutAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string batchId,
+        string contributorPseudonym,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT preview_sha256, preview_json, preview_total_cents, care_period_id,
+                   status, provider_status, result_sha256, paid_cents
+            FROM payout_batches WHERE batch_id = $batch;
+            """;
+        command.Parameters.AddWithValue("$batch", batchId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException(
+                "The CARE contributor dashboard payout binding is incomplete.");
+        }
+
+        var previewSha = reader.GetString(0);
+        var previewJson = reader.GetString(1);
+        var previewTotal = reader.GetInt64(2);
+        var periodId = reader.IsDBNull(3) ? null : reader.GetString(3);
+        var status = reader.GetString(4);
+        var providerStatus = reader.IsDBNull(5) ? null : reader.GetString(5);
+        var resultSha = reader.IsDBNull(6) ? null : reader.GetString(6);
+        var paidTotal = reader.GetInt64(7);
+        await reader.DisposeAsync().ConfigureAwait(false);
+
+        if (previewJson.Length > MaximumStoredPayoutPreviewCharacters)
+        {
+            throw new InvalidOperationException(
+                "The CARE contributor dashboard payout preview exceeds its bound.");
+        }
+
+        PayoutBatchPreview preview;
+        try
+        {
+            preview = JsonSerializer.Deserialize<PayoutBatchPreview>(previewJson)
+                ?? throw new InvalidOperationException(
+                    "The CARE contributor dashboard payout preview is empty.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidOperationException(
+                "The CARE contributor dashboard payout preview is unreadable.", exception);
+        }
+
+        PayoutContractValidation.RequireAllocationBoundPreview(preview);
+        if (!string.Equals(preview.BatchId, batchId, StringComparison.Ordinal) ||
+            !string.Equals(previewSha, PayoutPreviewSha(preview), StringComparison.Ordinal) ||
+            previewTotal != preview.TotalCents ||
+            !string.Equals(periodId, preview.CarePeriodId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The CARE contributor dashboard payout preview failed its durable binding.");
+        }
+        await ValidateRemediationTargetLineageAsync(
+                connection, transaction, preview, cancellationToken)
+            .ConfigureAwait(false);
+        await ValidatePayoutAllocationBindingsAsync(
+                connection, transaction, preview, cancellationToken)
+            .ConfigureAwait(false);
+
+        var previewItem = preview.Items.SingleOrDefault(item => string.Equals(
+            item.ContributorPseudonym, contributorPseudonym, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException(
+                "The CARE contributor dashboard payout lacks its contributor item.");
+        if (status == "reserved")
+        {
+            if (resultSha is not null || paidTotal != 0)
+            {
+                throw new InvalidOperationException(
+                    "The CARE contributor dashboard pending payout has terminal state.");
+            }
+
+            return new ContributorPayoutProjection(Pending: true, PaidCents: 0);
+        }
+
+        if (status is not ("failed" or "succeeded" or "partially_succeeded") ||
+            string.IsNullOrWhiteSpace(providerStatus) ||
+            !PayoutContractValidation.IsLowerSha256(resultSha))
+        {
+            throw new InvalidOperationException(
+                "The CARE contributor dashboard payout has an unsupported durable state.");
+        }
+
+        command.Parameters.Clear();
+        command.CommandText = """
+            SELECT ordinal, contributor_pseudonym, amount_cents, recipient_snapshot_id,
+                   destination_sha256, succeeded, provider_status
+            FROM payout_item_results
+            WHERE batch_id = $batch
+            ORDER BY ordinal;
+            """;
+        command.Parameters.AddWithValue("$batch", batchId);
+        var items = new List<DurablePayoutItemState>();
+        await using (var itemReader = await command.ExecuteReaderAsync(cancellationToken)
+                         .ConfigureAwait(false))
+        {
+            while (await itemReader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var ordinal = itemReader.GetInt32(0);
+                if (ordinal != items.Count)
+                {
+                    throw new InvalidOperationException(
+                        "The CARE contributor dashboard payout item order is invalid.");
+                }
+                items.Add(new DurablePayoutItemState(
+                    batchId,
+                    itemReader.GetString(1),
+                    itemReader.GetInt64(2),
+                    itemReader.GetString(3),
+                    itemReader.GetString(4),
+                    itemReader.GetInt32(5) == 1,
+                    itemReader.GetString(6)));
+                if (items.Count > 100)
+                {
+                    throw new InvalidOperationException(
+                        "The CARE contributor dashboard payout result exceeds its bound.");
+                }
+            }
+        }
+
+        if (items.Count != preview.Items.Count)
+        {
+            throw new InvalidOperationException(
+                "The CARE contributor dashboard payout result is incomplete.");
+        }
+
+        for (var index = 0; index < items.Count; index++)
+        {
+            var stored = items[index];
+            var approved = preview.Items[index];
+            if (!string.Equals(
+                    stored.ContributorPseudonym, approved.ContributorPseudonym, StringComparison.Ordinal) ||
+                stored.AmountCents != approved.AmountCents ||
+                !string.Equals(
+                    stored.RecipientSnapshotId, approved.RecipientApproval.SnapshotId, StringComparison.Ordinal) ||
+                !string.Equals(
+                    stored.DestinationSha256, approved.RecipientApproval.DestinationSha256, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The CARE contributor dashboard payout result conflicts with its preview.");
+            }
+        }
+
+        var succeeded = items.Count(item => item.Succeeded);
+        var outcome = succeeded switch
+        {
+            0 => PayoutBatchOutcome.Failed,
+            var count when count == items.Count => PayoutBatchOutcome.Succeeded,
+            _ => PayoutBatchOutcome.PartiallySucceeded,
+        };
+        var expectedStatus = outcome switch
+        {
+            PayoutBatchOutcome.Failed => "failed",
+            PayoutBatchOutcome.Succeeded => "succeeded",
+            _ => "partially_succeeded",
+        };
+        var storedResult = new PayoutBatchResult(
+            batchId,
+            outcome,
+            providerStatus,
+            items.Select(item => new PayoutItemResult(
+                item.ContributorPseudonym,
+                item.AmountCents,
+                item.Succeeded,
+                item.ProviderStatus)).ToArray());
+        var normalized = PayoutContractValidation.NormalizeTerminalResult(preview, storedResult);
+        var calculatedPaid = items.Where(item => item.Succeeded).Sum(item => item.AmountCents);
+        if (!string.Equals(status, expectedStatus, StringComparison.Ordinal) ||
+            !string.Equals(resultSha, PayoutResultSha(storedResult, normalized), StringComparison.Ordinal) ||
+            paidTotal != calculatedPaid)
+        {
+            throw new InvalidOperationException(
+                "The CARE contributor dashboard payout result failed integrity validation.");
+        }
+
+        var contributorItem = items.Single(item => string.Equals(
+            item.ContributorPseudonym, contributorPseudonym, StringComparison.Ordinal));
+        if (contributorItem.AmountCents != previewItem.AmountCents)
+        {
+            throw new InvalidOperationException(
+                "The CARE contributor dashboard payout amount conflicts with its preview.");
+        }
+        return new ContributorPayoutProjection(
+            Pending: false,
+            PaidCents: contributorItem.Succeeded ? contributorItem.AmountCents : 0);
     }
 
     private static async Task ValidatePayoutAllocationAvailabilityAsync(
@@ -834,4 +1205,13 @@ public sealed partial class DurableCareRepository
         string? ReviewedUtc,
         string? ReviewExpiresUtc,
         string? ApprovedUtc);
+
+    private sealed record StoredContributorPeriod(
+        string PeriodId,
+        string PeriodClose,
+        string EligibilityDate,
+        long AllocationCents,
+        bool HeldBelowThreshold);
+
+    private sealed record ContributorPayoutProjection(bool Pending, long PaidCents);
 }

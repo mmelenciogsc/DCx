@@ -57,10 +57,10 @@ public static class CareContributorDashboardPolicy
             return;
         }
 
-        if (snapshot.ContributorPseudonym is null || snapshot.Periods.Count == 0)
+        if (snapshot.ContributorPseudonym is null)
         {
             throw new InvalidOperationException(
-                "An available CARE contributor dashboard requires one bounded contributor history.");
+                "An available CARE contributor dashboard requires an authenticated contributor identity.");
         }
         PayPalSandboxValidation.RequireContributorPseudonym(snapshot.ContributorPseudonym);
 
@@ -111,12 +111,19 @@ public static class CareContributorDashboardPolicy
     {
         HeldBelowThreshold or Withheld =>
             period.PaidCents == 0 && period.OutstandingCents == period.AllocationCents,
-        Eligible or Pending =>
+        Eligible =>
             period.PaidCents == 0 &&
             period.OutstandingCents == period.AllocationCents &&
             DateOnly.FromDateTime(generatedUtc.UtcDateTime) >= period.Net60EligibilityDate,
-        PartiallyPaid => period.PaidCents > 0 && period.OutstandingCents > 0,
-        Paid => period.PaidCents == period.AllocationCents && period.OutstandingCents == 0,
+        Pending =>
+            period.OutstandingCents > 0 &&
+            DateOnly.FromDateTime(generatedUtc.UtcDateTime) >= period.Net60EligibilityDate,
+        PartiallyPaid =>
+            period.PaidCents > 0 && period.OutstandingCents > 0 &&
+            DateOnly.FromDateTime(generatedUtc.UtcDateTime) >= period.Net60EligibilityDate,
+        Paid =>
+            period.PaidCents == period.AllocationCents && period.OutstandingCents == 0 &&
+            DateOnly.FromDateTime(generatedUtc.UtcDateTime) >= period.Net60EligibilityDate,
         _ => false,
     };
 }

@@ -41,7 +41,9 @@ try {
         "DCx.Core.Tests.Finance.DurableCareRepositoryTests.SchemaThirteen_UnreviewedCarePeriodRequiresFreshExactCloseApproval",
         "DCx.Core.Tests.Finance.CareContributorDashboardTests.Contract_IsBoundedAndExcludesProviderRecipientAndAccountFields",
         "DCx.Core.Tests.Finance.CareContributorDashboardTests.Policy_AcceptsOrderedHeldEligiblePendingPartialAndPaidHistory",
-        "DCx.Core.Tests.Finance.CareContributorDashboardTests.UnavailableSource_DoesNotInventContributorOrPeriodState"
+        "DCx.Core.Tests.Finance.CareContributorDashboardTests.UnavailableSource_DoesNotInventContributorOrPeriodState",
+        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.ContributorDashboard_DerivesWithheldEligiblePendingPartialAndPaidState",
+        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.ContributorDashboard_PreservesThresholdHoldAndDeniesAllocationTamper"
     )
     foreach ($requiredContract in $requiredLiabilityContracts) {
         $matchingResults = @($financeResults | Where-Object {
@@ -104,6 +106,7 @@ try {
     "Separately approved failed-item remediation lineage expiry denial and restart recovery=PASS"
     "Protected recipient snapshot owner-approval UI and restart binding=PASS"
     "Privacy-minimized read-only contributor dashboard and unavailable default=PASS"
+    "Authoritative ledger-derived contributor dashboard status and tamper denial=PASS"
     "Real PayPal network calls=0"
     "P11 evidence=$runRoot"
     "P11 local CARE and PayPal mock validation=PASS"

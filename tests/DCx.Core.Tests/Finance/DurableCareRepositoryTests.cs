@@ -506,6 +506,166 @@ public sealed class DurableCareRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task ContributorDashboard_DerivesWithheldEligiblePendingPartialAndPaidState()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var input = new CarePeriodInput(
+            2026, 1, 1_250, 0, 0, 0, 0,
+            ContributorPoolBasisPoints: 4000,
+            MinimumPayoutCents: 0);
+        var result = await RegisterAsync(
+            repository,
+            input,
+            [new ContributorUsageWeight("contributor:one", 1m)],
+            now);
+
+        var unknown = await repository.GetContributorDashboardAsync(
+            "contributor:unknown", now);
+        CareContributorDashboardPolicy.RequireSnapshot(unknown);
+        Assert.Equal(CareContributorDashboardPolicy.Available, unknown.StatusCode);
+        Assert.Empty(unknown.Periods);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.GetContributorDashboardAsync(
+                "contributor:one", now.ToOffset(TimeSpan.FromHours(8))));
+
+        var withheld = Assert.Single((await repository.GetContributorDashboardAsync(
+            "contributor:one", now)).Periods);
+        Assert.Equal(CareContributorDashboardPolicy.Withheld, withheld.StatusCode);
+        Assert.Equal(500, withheld.AllocationCents);
+        Assert.Equal(0, withheld.PaidCents);
+        Assert.Equal(500, withheld.OutstandingCents);
+
+        var eligibleTime = new DateTimeOffset(
+            result.Net60EligibilityDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var eligible = Assert.Single((await repository.GetContributorDashboardAsync(
+            "contributor:one", eligibleTime)).Periods);
+        Assert.Equal(CareContributorDashboardPolicy.Eligible, eligible.StatusCode);
+
+        var first = DashboardPreview(
+            "batch:dashboard-first", result, 200, "snapshot:dashboard-first");
+        Assert.True(await repository.ReservePayoutAsync(
+            first, true, true, first.EligibilityDate, eligibleTime));
+        var pending = Assert.Single((await repository.GetContributorDashboardAsync(
+            "contributor:one", eligibleTime)).Periods);
+        Assert.Equal(CareContributorDashboardPolicy.Pending, pending.StatusCode);
+        Assert.Equal(0, pending.PaidCents);
+        Assert.Equal(500, pending.OutstandingCents);
+
+        Assert.True(await repository.CompletePayoutAsync(
+            first,
+            new PayoutBatchResult(
+                first.BatchId,
+                PayoutBatchOutcome.Succeeded,
+                "SUCCESS",
+                [new PayoutItemResult("contributor:one", 200, true, "SUCCESS")]),
+            eligibleTime.AddMinutes(1)));
+        var partial = Assert.Single((await repository.GetContributorDashboardAsync(
+            "contributor:one", eligibleTime.AddMinutes(1))).Periods);
+        Assert.Equal(CareContributorDashboardPolicy.PartiallyPaid, partial.StatusCode);
+        Assert.Equal(200, partial.PaidCents);
+        Assert.Equal(300, partial.OutstandingCents);
+
+        var second = DashboardPreview(
+            "batch:dashboard-second", result, 300, "snapshot:dashboard-second");
+        Assert.True(await repository.ReservePayoutAsync(
+            second, true, true, second.EligibilityDate, eligibleTime.AddMinutes(2)));
+        var partiallyPaidPending = Assert.Single((await repository.GetContributorDashboardAsync(
+            "contributor:one", eligibleTime.AddMinutes(2))).Periods);
+        Assert.Equal(CareContributorDashboardPolicy.Pending, partiallyPaidPending.StatusCode);
+        Assert.Equal(200, partiallyPaidPending.PaidCents);
+        Assert.Equal(300, partiallyPaidPending.OutstandingCents);
+
+        Assert.True(await repository.CompletePayoutAsync(
+            second,
+            new PayoutBatchResult(
+                second.BatchId,
+                PayoutBatchOutcome.Succeeded,
+                "SUCCESS",
+                [new PayoutItemResult("contributor:one", 300, true, "SUCCESS")]),
+            eligibleTime.AddMinutes(3)));
+        var reopened = await DurableCareRepository.OpenAsync(root);
+        var source = new DurableCareContributorDashboardSource(
+            reopened,
+            "contributor:one",
+            () => eligibleTime.AddMinutes(4));
+        var paid = Assert.Single((await source.LoadAsync()).Periods);
+        Assert.Equal(CareContributorDashboardPolicy.Paid, paid.StatusCode);
+        Assert.Equal(500, paid.PaidCents);
+        Assert.Equal(0, paid.OutstandingCents);
+
+        Assert.True(await reopened.ReconcileTerminalPayoutAsync(
+            second,
+            new PayoutBatchResult(
+                second.BatchId,
+                PayoutBatchOutcome.Failed,
+                "SUCCESS",
+                [new PayoutItemResult("contributor:one", 300, false, "RETURNED")]),
+            eligibleTime.AddMinutes(5)));
+        var returned = Assert.Single((await reopened.GetContributorDashboardAsync(
+            "contributor:one", eligibleTime.AddMinutes(6))).Periods);
+        Assert.Equal(CareContributorDashboardPolicy.PartiallyPaid, returned.StatusCode);
+        Assert.Equal(200, returned.PaidCents);
+        Assert.Equal(300, returned.OutstandingCents);
+
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(root, "care-ledger.sqlite3"),
+            Pooling = false,
+        }.ToString();
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE payout_batches SET paid_cents = 199 WHERE batch_id = $batch;
+                """;
+            command.Parameters.AddWithValue("$batch", first.BatchId);
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+        await Assert.ThrowsAsync<InvalidOperationException>(() => source.LoadAsync());
+    }
+
+    [Fact]
+    public async Task ContributorDashboard_PreservesThresholdHoldAndDeniesAllocationTamper()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var result = await RegisterAsync(
+            repository,
+            new CarePeriodInput(
+                2026, 2, 1_250, 0, 0, 0, 0,
+                ContributorPoolBasisPoints: 4000,
+                MinimumPayoutCents: 600),
+            [new ContributorUsageWeight("contributor:held", 1m)],
+            now);
+        var observed = new DateTimeOffset(
+            result.Net60EligibilityDate.AddDays(1).ToDateTime(TimeOnly.MinValue),
+            TimeSpan.Zero);
+        var held = Assert.Single((await repository.GetContributorDashboardAsync(
+            "contributor:held", observed)).Periods);
+        Assert.Equal(CareContributorDashboardPolicy.HeldBelowThreshold, held.StatusCode);
+        Assert.Equal(500, held.OutstandingCents);
+
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(root, "care-ledger.sqlite3"),
+            Pooling = false,
+        }.ToString()))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE care_contributor_allocations
+                SET allocation_cents = 499
+                WHERE period_id = $period AND contributor_pseudonym = 'contributor:held';
+                """;
+            command.Parameters.AddWithValue("$period", PayoutBatchPreviewFactory.CarePeriodId(result));
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.GetContributorDashboardAsync("contributor:held", observed));
+    }
+
+    [Fact]
     public async Task PayoutReservation_RejectsPeriodContributorAmountSubstitutionAndHeldAllocation()
     {
         var repository = await DurableCareRepository.OpenAsync(root);
@@ -1512,6 +1672,24 @@ public sealed class DurableCareRepositoryTests : IDisposable
         PayoutRecipientApproval.Create(
             $"snapshot:{contributor.Replace(':', '-')}",
             $"{contributor.Replace(':', '-')}@personal.example.com");
+
+    private static PayoutBatchPreview DashboardPreview(
+        string batchId,
+        CarePeriodResult result,
+        long amountCents,
+        string snapshotId) => new(
+        batchId,
+        PayoutExecutionMode.Sandbox,
+        result.Net60EligibilityDate,
+        [
+            new PayoutItem(
+                "contributor:one",
+                amountCents,
+                PayoutRecipientApproval.Create(
+                    snapshotId,
+                    $"{snapshotId.Replace(':', '-')}@personal.example.com")),
+        ],
+        PayoutBatchPreviewFactory.CarePeriodId(result));
 
     private async Task AccrueAsync(DurableCareRepository repository, PayoutBatchPreview preview)
     {
