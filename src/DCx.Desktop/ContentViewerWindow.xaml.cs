@@ -16,7 +16,7 @@ public partial class ContentViewerWindow : Window
     private readonly LocalContentAdmissionPolicy _contentPolicy = new();
     private readonly YouTubeUrlPolicy _youTubePolicy = new();
     private readonly OfficeTextExtractor _officeTextExtractor = new();
-    private readonly MediaFrameDescriptionService _frameDescriptionService = new();
+    private readonly MediaFrameDescriptionService _frameDescriptionService;
     private readonly LocalModelSelectionStore _localModelSelectionStore;
     private readonly WhisperBackendSelectionStore _whisperBackendSelectionStore;
     private readonly FfmpegBackendSelectionStore _ffmpegBackendSelectionStore;
@@ -27,11 +27,15 @@ public partial class ContentViewerWindow : Window
 
     public ContentViewerWindow(
         LocalModelSelectionStore localModelSelectionStore,
+        OllamaApprovedRuntimeHost ollamaRuntimeHost,
         WhisperBackendSelectionStore whisperBackendSelectionStore,
         FfmpegBackendSelectionStore ffmpegBackendSelectionStore)
     {
         _localModelSelectionStore = localModelSelectionStore
             ?? throw new ArgumentNullException(nameof(localModelSelectionStore));
+        _frameDescriptionService = new MediaFrameDescriptionService(
+            ollamaRuntimeHost ??
+            throw new ArgumentNullException(nameof(ollamaRuntimeHost)));
         _whisperBackendSelectionStore = whisperBackendSelectionStore
             ?? throw new ArgumentNullException(nameof(whisperBackendSelectionStore));
         _ffmpegBackendSelectionStore = ffmpegBackendSelectionStore

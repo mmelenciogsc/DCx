@@ -182,6 +182,106 @@ public sealed class OllamaOwnedRuntimeTests : IDisposable
     }
 
     [Fact]
+    public async Task ProtectedSelection_StartsOnlyTheApprovedRuntimeAndStopsItOnDisposal()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var fixture = CopyFixtureRuntime("protected-selection");
+        var modelRoot = Path.Combine(root, "protected-models");
+        var dataRoot = Path.Combine(root, "protected-data");
+        Directory.CreateDirectory(modelRoot);
+        var review = await Reviewer().ReviewAsync(fixture.Executable, now);
+        var anchors = new MemoryLocalModelApprovalStateAnchorStore();
+        var store = await OllamaRuntimeSelectionStore.OpenWithAnchorAsync(dataRoot, anchors);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.StartApprovedAsync(TimeSpan.FromSeconds(2)));
+        await store.SetAsync(
+            review,
+            modelRoot,
+            explicitlyApproved: true,
+            now.AddMinutes(1));
+
+        Uri address;
+        int processId;
+        await using (var runtime = await store.StartApprovedAsync(TimeSpan.FromSeconds(10)))
+        {
+            address = runtime.BaseAddress;
+            processId = runtime.ProcessId;
+            Assert.Equal("fixture-secure", runtime.Version);
+            using var client = runtime.CreateClient(TimeSpan.FromSeconds(5));
+            Assert.Empty(await client.ListModelsAsync());
+        }
+
+        Assert.False(IsProcessAlive(processId));
+        await AssertPortClosedAsync(address.Port);
+    }
+
+    [Fact]
+    public async Task ApprovedHost_ReusesOneProcessAndRevocationStopsItBeforeFailingClosed()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var fixture = CopyFixtureRuntime("approved-host");
+        var modelRoot = Path.Combine(root, "approved-host-models");
+        var dataRoot = Path.Combine(root, "approved-host-data");
+        Directory.CreateDirectory(modelRoot);
+        var review = await Reviewer().ReviewAsync(fixture.Executable, now);
+        var store = await OllamaRuntimeSelectionStore.OpenWithAnchorAsync(
+            dataRoot,
+            new MemoryLocalModelApprovalStateAnchorStore());
+        await store.SetAsync(review, modelRoot, explicitlyApproved: true, now.AddMinutes(1));
+
+        await using var host = new OllamaApprovedRuntimeHost(store);
+        Assert.Equal(
+            "fixture-secure",
+            await host.RunInventoryAsync(
+                TimeSpan.FromSeconds(5),
+                (client, token) => client.GetVersionAsync(token)));
+        var firstProcess = Assert.IsType<int>(host.ActiveProcessId);
+        var firstAddress = Assert.IsType<Uri>(host.ActiveBaseAddress);
+
+        Assert.Empty(await host.RunInventoryAsync(
+            TimeSpan.FromSeconds(5),
+            (client, token) => client.ListModelsAsync(token)));
+        Assert.Equal(firstProcess, host.ActiveProcessId);
+
+        await store.ClearAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => host.RunInventoryAsync(
+            TimeSpan.FromSeconds(5),
+            (client, token) => client.GetVersionAsync(token)));
+        Assert.Null(host.ActiveProcessId);
+        Assert.False(IsProcessAlive(firstProcess));
+        await AssertPortClosedAsync(firstAddress.Port);
+    }
+
+    [Fact]
+    public async Task ApprovedHost_OperationFailureKillsItsEntireOwnedProcess()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var fixture = CopyFixtureRuntime("approved-host-failure");
+        var modelRoot = Path.Combine(root, "approved-host-failure-models");
+        var dataRoot = Path.Combine(root, "approved-host-failure-data");
+        Directory.CreateDirectory(modelRoot);
+        var review = await Reviewer().ReviewAsync(fixture.Executable, now);
+        var store = await OllamaRuntimeSelectionStore.OpenWithAnchorAsync(
+            dataRoot,
+            new MemoryLocalModelApprovalStateAnchorStore());
+        await store.SetAsync(review, modelRoot, explicitlyApproved: true, now.AddMinutes(1));
+
+        await using var host = new OllamaApprovedRuntimeHost(store);
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            host.RunInventoryAsync<string>(
+                TimeSpan.FromSeconds(5),
+                async (client, token) =>
+                {
+                    _ = await client.GetVersionAsync(token);
+                    throw new InvalidOperationException("synthetic operation failure");
+                }));
+
+        Assert.Equal("synthetic operation failure", failure.Message);
+        Assert.Null(host.ActiveProcessId);
+    }
+
+    [Fact]
     public async Task Runtime_DeniesChangedOrExpandedTreeBeforeStartingChild()
     {
         if (!OperatingSystem.IsWindows()) return;

@@ -195,6 +195,7 @@ try {
         $status = Find-ById $localModelsWindow "LocalModelsStatus"
         if ($null -ne $status -and
             ($status.Current.Name -like "Found * installed model records.*" -or
+             $status.Current.Name -like "No DCx-owned Ollama runtime is approved.*" -or
              $status.Current.Name -like "Installed local models could not be read safely.*")) { $status }
     } "The bounded Ollama inventory refresh did not finish." 160
 

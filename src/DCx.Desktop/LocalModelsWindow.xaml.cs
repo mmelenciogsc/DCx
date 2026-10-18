@@ -12,8 +12,10 @@ namespace DCx.Desktop;
 
 public partial class LocalModelsWindow : Window
 {
-    private static readonly Uri OllamaOrigin = new("http://localhost:11434/");
     private readonly LocalModelSelectionStore store;
+    private readonly OllamaRuntimeSelectionStore ollamaRuntimeStore;
+    private readonly OllamaApprovedRuntimeHost? ollamaRuntimeHost;
+    private readonly OllamaRuntimeReviewer ollamaRuntimeReviewer = new();
     private readonly WhisperBackendSelectionStore whisperStore;
     private readonly WhisperBackendReviewer whisperReviewer = new();
     private readonly FfmpegBackendSelectionStore ffmpegStore;
@@ -28,6 +30,7 @@ public partial class LocalModelsWindow : Window
     private readonly CancellationTokenSource lifetime = new();
     private CandidateRow? reviewedCandidate;
     private string? reviewedLicenseSha256;
+    private OllamaRuntimeReview? reviewedOllamaRuntime;
     private WhisperBackendReview? reviewedWhisperBackend;
     private FfmpegBackendReview? reviewedFfmpegBackend;
     private DependencyCandidateRow? selectedDependencyCandidate;
@@ -47,10 +50,22 @@ public partial class LocalModelsWindow : Window
 
     public LocalModelsWindow(
         LocalModelSelectionStore store,
+        OllamaRuntimeSelectionStore ollamaRuntimeStore,
         WhisperBackendSelectionStore whisperStore,
         FfmpegBackendSelectionStore ffmpegStore)
+        : this(store, ollamaRuntimeStore, whisperStore, ffmpegStore, ollamaRuntimeHost: null)
+    {
+    }
+
+    public LocalModelsWindow(
+        LocalModelSelectionStore store,
+        OllamaRuntimeSelectionStore ollamaRuntimeStore,
+        WhisperBackendSelectionStore whisperStore,
+        FfmpegBackendSelectionStore ffmpegStore,
+        OllamaApprovedRuntimeHost? ollamaRuntimeHost)
         : this(
             store,
+            ollamaRuntimeStore,
             whisperStore,
             ffmpegStore,
             ApplicationDataRoot.Resolve(),
@@ -58,12 +73,14 @@ public partial class LocalModelsWindow : Window
             timeProvider: null,
             stageAnchorStore: null,
             enableDependencyTransfer: true,
-            dependencyTransferCoordinator: null)
+            dependencyTransferCoordinator: null,
+            ollamaRuntimeHost: ollamaRuntimeHost)
     {
     }
 
     internal LocalModelsWindow(
         LocalModelSelectionStore store,
+        OllamaRuntimeSelectionStore ollamaRuntimeStore,
         WhisperBackendSelectionStore whisperStore,
         FfmpegBackendSelectionStore ffmpegStore,
         string applicationDataRoot,
@@ -72,9 +89,13 @@ public partial class LocalModelsWindow : Window
         IWhisperRuntimeStageAnchorStore? stageAnchorStore,
         bool enableDependencyTransfer = false,
         ILocalModelDependencyTransferSetCoordinator? dependencyTransferCoordinator = null,
-        ILocalModelDependencyRedirectReviewer? dependencyRedirectReviewer = null)
+        ILocalModelDependencyRedirectReviewer? dependencyRedirectReviewer = null,
+        OllamaApprovedRuntimeHost? ollamaRuntimeHost = null)
     {
         this.store = store ?? throw new ArgumentNullException(nameof(store));
+        this.ollamaRuntimeStore = ollamaRuntimeStore ??
+            throw new ArgumentNullException(nameof(ollamaRuntimeStore));
+        this.ollamaRuntimeHost = ollamaRuntimeHost;
         this.whisperStore = whisperStore ?? throw new ArgumentNullException(nameof(whisperStore));
         this.ffmpegStore = ffmpegStore ?? throw new ArgumentNullException(nameof(ffmpegStore));
         this.applicationDataRoot = applicationDataRoot ?? throw new ArgumentNullException(nameof(applicationDataRoot));
@@ -89,6 +110,16 @@ public partial class LocalModelsWindow : Window
                 : null);
         whisperRuntimeStager = new WhisperRuntimeStager(timeProvider, stageAnchorStore);
         InitializeComponent();
+        OllamaRuntimeProfileBox.ItemsSource = new[]
+        {
+            new RuntimeProfileRow(
+                OllamaRuntimeReviewer.NvidiaCudaV13Profile,
+                "NVIDIA CUDA v13 — exact executable, base files, and complete CUDA v13 runner"),
+            new RuntimeProfileRow(
+                OllamaRuntimeReviewer.CompleteTreeProfile,
+                "Complete installed runtime tree — every backend file"),
+        };
+        OllamaRuntimeProfileBox.SelectedIndex = 1;
         Loaded += async (_, _) =>
         {
             LoadHardwareProfile();
@@ -136,6 +167,14 @@ public partial class LocalModelsWindow : Window
         {
             hardwareProfile = new LocalHardwareProfiler().Capture(applicationDataRoot);
             SetHardwareProfile(FormatHardwareProfile(hardwareProfile));
+            if (reviewedOllamaRuntime is null &&
+                hardwareProfile.Gpus.Any(gpu =>
+                    gpu.LocalModelGpuAdmissionEligible &&
+                    (gpu.Provider?.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) == true ||
+                     gpu.Name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase))))
+            {
+                OllamaRuntimeProfileBox.SelectedIndex = 0;
+            }
         }
         catch
         {
@@ -145,9 +184,180 @@ public partial class LocalModelsWindow : Window
         }
     }
 
+    private void OnBrowseOllamaRuntimeExecutableClick(object sender, RoutedEventArgs e) =>
+        BrowseInto(
+            OllamaRuntimeExecutablePath,
+            "Ollama executable (*.exe)|*.exe",
+            "Select an already-installed Ollama executable");
+
+    private void OnBrowseOllamaModelRootClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Multiselect = false,
+            Title = "Select the existing Ollama model folder",
+        };
+        if (dialog.ShowDialog(this) == true) OllamaModelRootPath.Text = dialog.FolderName;
+    }
+
+    private void OnOllamaRuntimeInputChanged(object sender, TextChangedEventArgs e) =>
+        ResetOllamaRuntimeReview(
+            "A runtime path changed. Review the exact signed runtime tree and model folder again.");
+
+    private void OnOllamaRuntimeProfileChanged(object sender, SelectionChangedEventArgs e) =>
+        ResetOllamaRuntimeReview(
+            "The runtime dependency profile changed. Review the exact signed runtime tree again.");
+
+    private async void OnReviewOllamaRuntimeClick(object sender, RoutedEventArgs e)
+    {
+        ResetOllamaRuntimeReview("Reviewing and hashing the exact Ollama runtime tree.");
+        SetOllamaRuntimeControlsEnabled(false);
+        SetStatus(
+            "Reviewing the existing Ollama runtime tree, Windows publisher signature, model folder, and official license reference. Nothing is started, downloaded, installed, or uploaded.");
+        try
+        {
+            if (OllamaRuntimeProfileBox.SelectedItem is not RuntimeProfileRow profile)
+            {
+                throw new InvalidOperationException("Choose a supported Ollama runtime dependency profile.");
+            }
+            var modelRoot = OllamaRuntimeSelectionStore.ValidateModelRoot(
+                OllamaModelRootPath.Text);
+            var review = await ollamaRuntimeReviewer.ReviewAsync(
+                OllamaRuntimeExecutablePath.Text,
+                profile.Id,
+                DateTimeOffset.UtcNow,
+                lifetime.Token);
+            reviewedOllamaRuntime = review;
+            SetOllamaRuntimeReview(review, modelRoot);
+            var signed = string.Equals(
+                review.Binding.AuthenticodeStatus,
+                "Valid",
+                StringComparison.Ordinal);
+            OllamaRuntimeApprovalBox.IsEnabled = signed;
+            SaveOllamaRuntimeButton.IsEnabled = signed;
+            SetStatus(signed
+                ? "The exact signed runtime tree and model folder are ready for review. Approval remains unchecked. No process or model was started."
+                : "The runtime review completed, but its Windows publisher signature is not valid. It cannot be approved or started.");
+            OllamaRuntimeDetails.Focus();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            ResetOllamaRuntimeReview(
+                "Runtime review failed closed. Verify the existing local paths, dependency profile, complete runtime tree, and Windows signature.");
+            SetStatus(
+                "The Ollama runtime could not be reviewed safely. No approval changed and nothing was started, downloaded, installed, or uploaded.");
+            OllamaRuntimeDetails.Focus();
+        }
+        finally
+        {
+            SetOllamaRuntimeControlsEnabled(true);
+        }
+    }
+
+    private async void OnSaveOllamaRuntimeClick(object sender, RoutedEventArgs e)
+    {
+        if (OllamaRuntimeApprovalBox.IsChecked != true || reviewedOllamaRuntime is null ||
+            OllamaRuntimeProfileBox.SelectedItem is not RuntimeProfileRow profile)
+        {
+            SetStatus(
+                "Runtime approval was not saved. Review the exact signed tree and model folder, then check the explicit approval box.");
+            OllamaRuntimeApprovalBox.Focus();
+            return;
+        }
+
+        SetOllamaRuntimeControlsEnabled(false);
+        SetStatus(
+            "Revalidating every runtime file, signer, dependency profile, and model folder before saving protected approval.");
+        try
+        {
+            var modelRoot = OllamaRuntimeSelectionStore.ValidateModelRoot(
+                OllamaModelRootPath.Text);
+            var rechecked = await ollamaRuntimeReviewer.ReviewAsync(
+                OllamaRuntimeExecutablePath.Text,
+                profile.Id,
+                DateTimeOffset.UtcNow,
+                lifetime.Token);
+            if (!HasSameRuntimeIdentity(reviewedOllamaRuntime.Binding, rechecked.Binding))
+            {
+                throw new InvalidOperationException("The reviewed Ollama runtime changed before approval.");
+            }
+            if (ollamaRuntimeHost is not null)
+            {
+                await ollamaRuntimeHost.StopAsync(lifetime.Token);
+            }
+            await ollamaRuntimeStore.SetAsync(
+                rechecked,
+                modelRoot,
+                explicitlyApproved: true,
+                DateTimeOffset.UtcNow,
+                lifetime.Token);
+            reviewedOllamaRuntime = rechecked;
+            OllamaRuntimeApprovalBox.IsChecked = false;
+            await UpdateOllamaRuntimeSelectionAsync();
+            SetStatus(
+                "Protected approval for the exact signed DCx-owned runtime was saved. Refreshing model inventory through a temporary owned process; no model will be loaded.");
+            await RefreshAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            OllamaRuntimeApprovalBox.IsChecked = false;
+            SetStatus(
+                "Runtime files, signer evidence, model folder, or protected approval could not be revalidated. No approval was saved and no runtime remains running.");
+        }
+        finally
+        {
+            SetOllamaRuntimeControlsEnabled(true);
+        }
+    }
+
+    private async void OnClearOllamaRuntimeClick(object sender, RoutedEventArgs e)
+    {
+        SetOllamaRuntimeControlsEnabled(false);
+        SetStatus(
+            "Clearing only the protected DCx runtime approval. No runtime, model, or other Ollama service will be deleted or reconfigured.");
+        try
+        {
+            if (ollamaRuntimeHost is not null)
+            {
+                await ollamaRuntimeHost.StopAsync(lifetime.Token);
+            }
+            await ollamaRuntimeStore.ClearAsync(lifetime.Token);
+            ResetOllamaRuntimeReview(
+                "Enter an existing runtime executable and model folder, choose a dependency profile, then review them.");
+            ModelsList.ItemsSource = null;
+            await UpdateOllamaRuntimeSelectionAsync();
+            SetStatus(
+                "The DCx-owned Ollama runtime approval was cleared. Model inventory and inference are unavailable until a signed runtime is reviewed and explicitly approved again.");
+            CurrentOllamaRuntimeText.Focus();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            SetStatus(
+                "The protected runtime approval could not be cleared safely. No runtime, model, or other service was changed.");
+        }
+        finally
+        {
+            SetOllamaRuntimeControlsEnabled(true);
+        }
+    }
+
     private void OnOpenBenchmarkReviewClick(object sender, RoutedEventArgs e)
     {
-        var window = new LocalModelBenchmarkWindow(store, whisperStore, ApplicationDataRoot.Resolve())
+        var window = new LocalModelBenchmarkWindow(
+            store,
+            ollamaRuntimeStore,
+            whisperStore,
+            ApplicationDataRoot.Resolve(),
+            ollamaRuntimeHost)
         {
             Owner = this,
         };
@@ -777,7 +987,10 @@ public partial class LocalModelsWindow : Window
         SetDetails($"Reviewing {selected.Descriptor.Name}.");
         try
         {
-            using var client = new OllamaLocalClient(OllamaOrigin, TimeSpan.FromSeconds(30));
+            await using var runtime = await ollamaRuntimeStore.StartApprovedAsync(
+                TimeSpan.FromSeconds(30),
+                lifetime.Token);
+            using var client = runtime.CreateClient(TimeSpan.FromSeconds(30));
             var inspection = await client.InspectModelAsync(selected.Descriptor.Name, lifetime.Token);
             if (ModelsList.SelectedItem is not CandidateRow current || !ReferenceEquals(current, selected)) return;
             if (string.IsNullOrWhiteSpace(inspection.License))
@@ -1065,7 +1278,21 @@ public partial class LocalModelsWindow : Window
         {
             await UpdateWhisperSelectionAsync();
             await UpdateFfmpegSelectionAsync();
-            using var client = new OllamaLocalClient(OllamaOrigin, TimeSpan.FromSeconds(30));
+            await UpdateOllamaRuntimeSelectionAsync();
+            var runtimeSelection = await ollamaRuntimeStore.GetStateAsync(lifetime.Token);
+            if (runtimeSelection.Runtime is null)
+            {
+                ModelsList.ItemsSource = null;
+                await UpdateCurrentSelectionsAsync();
+                SetStatus(ollamaRuntimeStore.RequiresReapproval
+                    ? "The stored Ollama runtime approval did not match its protected per-user anchor. Model inventory and inference are unavailable until the exact signed runtime is reviewed and explicitly approved again."
+                    : "No DCx-owned Ollama runtime is approved. Review an existing signed runtime tree and model folder before model inventory or inference. No shared service was contacted.");
+                return;
+            }
+            await using var runtime = await ollamaRuntimeStore.StartApprovedAsync(
+                TimeSpan.FromSeconds(30),
+                lifetime.Token);
+            using var client = runtime.CreateClient(TimeSpan.FromSeconds(30));
             var models = await client.ListModelsAsync(lifetime.Token);
             var resourceSelection = hardwareProfile is null
                 ? null
@@ -1081,7 +1308,8 @@ public partial class LocalModelsWindow : Window
             ModelsList.ItemsSource = rows;
             await UpdateCurrentSelectionsAsync();
             var eligible = rows.Count(row => row.EligibleVision || row.EligibleEmbedding);
-            if (store.RequiresReapproval || whisperStore.RequiresReapproval || ffmpegStore.RequiresReapproval)
+            if (store.RequiresReapproval || ollamaRuntimeStore.RequiresReapproval ||
+                whisperStore.RequiresReapproval || ffmpegStore.RequiresReapproval)
             {
                 SetStatus(
                     "One or more stored local-model approvals did not match protected per-user anchors. They are unavailable until reviewed and explicitly approved again. Nothing was downloaded or executed.");
@@ -1092,7 +1320,7 @@ public partial class LocalModelsWindow : Window
                     hardwareProfile is null
                         ? $"Found {rows.Length} installed model records, but none is eligible because the native hardware profile is unavailable. Nothing was downloaded or uploaded."
                         : $"Found {rows.Length} installed model records. {eligible} resource-selected digest-bound records are eligible. " +
-                          $"{resourceSelection!.Vision.Reason} {resourceSelection.Embedding.Reason} Nothing was downloaded or uploaded.");
+                          $"{resourceSelection!.Vision.Reason} {resourceSelection.Embedding.Reason} Inventory came from a temporary PID-proven DCx-owned runtime that was stopped after this refresh. Nothing was downloaded or uploaded.");
             }
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
@@ -1128,7 +1356,10 @@ public partial class LocalModelsWindow : Window
         SetControlsEnabled(false);
         try
         {
-            using var client = new OllamaLocalClient(OllamaOrigin, TimeSpan.FromSeconds(30));
+            await using var runtime = await ollamaRuntimeStore.StartApprovedAsync(
+                TimeSpan.FromSeconds(30),
+                lifetime.Token);
+            using var client = runtime.CreateClient(TimeSpan.FromSeconds(30));
             var inventory = await client.ListModelsAsync(lifetime.Token);
             var sameName = inventory.Where(candidate =>
                     string.Equals(candidate.Name, reviewedCandidate.Descriptor.Name, StringComparison.Ordinal))
@@ -1209,6 +1440,22 @@ public partial class LocalModelsWindow : Window
         SetCurrent(CurrentEmbeddingText, "Embedding", state.Embedding);
     }
 
+    private async Task UpdateOllamaRuntimeSelectionAsync()
+    {
+        var state = await ollamaRuntimeStore.GetStateAsync(lifetime.Token);
+        var configuration = state.Runtime;
+        var value = ollamaRuntimeStore.RequiresReapproval
+            ? "Ollama runtime: a stored approval did not match its protected per-user anchor. Owned runtime execution is unavailable until reviewed and explicitly approved again."
+            : configuration is null
+                ? "Ollama runtime: none selected. Shared Ollama services are not used for model inventory or inference."
+                : $"Ollama runtime: {System.IO.Path.GetFileName(configuration.Runtime.ExecutablePath)}. " +
+                  $"Profile {configuration.Runtime.RuntimeProfile}. Tree SHA-256 {configuration.Runtime.TreeSha256}. " +
+                  $"Windows signature {configuration.Runtime.AuthenticodeStatus}. Signer {configuration.Runtime.SignerSubject}. " +
+                  $"Signer certificate SHA-256 {configuration.Runtime.SignerCertificateSha256}. Approved {configuration.ApprovedUtc:u}.";
+        CurrentOllamaRuntimeText.Text = value;
+        AutomationProperties.SetName(CurrentOllamaRuntimeText, value);
+    }
+
     private async Task UpdateWhisperSelectionAsync()
     {
         var state = await whisperStore.GetStateAsync(lifetime.Token);
@@ -1244,6 +1491,23 @@ public partial class LocalModelsWindow : Window
         ApprovalBox.IsEnabled = enabled;
         UseVisionButton.IsEnabled = enabled && reviewedCandidate?.EligibleVision == true;
         UseEmbeddingButton.IsEnabled = enabled && reviewedCandidate?.EligibleEmbedding == true;
+    }
+
+    private void SetOllamaRuntimeControlsEnabled(bool enabled)
+    {
+        OllamaRuntimeExecutablePath.IsEnabled = enabled;
+        OllamaModelRootPath.IsEnabled = enabled;
+        OllamaRuntimeProfileBox.IsEnabled = enabled;
+        BrowseOllamaRuntimeExecutableButton.IsEnabled = enabled;
+        BrowseOllamaModelRootButton.IsEnabled = enabled;
+        ReviewOllamaRuntimeButton.IsEnabled = enabled;
+        var signedReview = reviewedOllamaRuntime is not null && string.Equals(
+            reviewedOllamaRuntime.Binding.AuthenticodeStatus,
+            "Valid",
+            StringComparison.Ordinal);
+        OllamaRuntimeApprovalBox.IsEnabled = enabled && signedReview;
+        SaveOllamaRuntimeButton.IsEnabled = enabled && signedReview;
+        ClearOllamaRuntimeButton.IsEnabled = enabled;
     }
 
     private void SetWhisperControlsEnabled(bool enabled)
@@ -1323,6 +1587,37 @@ public partial class LocalModelsWindow : Window
         }
         if (StageDependencyRuntimeButton is not null) StageDependencyRuntimeButton.IsEnabled = false;
         SetDependencyArtifactResult(message);
+    }
+
+    private void ResetOllamaRuntimeReview(string message)
+    {
+        reviewedOllamaRuntime = null;
+        if (OllamaRuntimeApprovalBox is null) return;
+        OllamaRuntimeApprovalBox.IsChecked = false;
+        OllamaRuntimeApprovalBox.IsEnabled = false;
+        SaveOllamaRuntimeButton.IsEnabled = false;
+        SetOllamaRuntimeDetails(message);
+    }
+
+    private void SetOllamaRuntimeReview(OllamaRuntimeReview review, string modelRoot)
+    {
+        var binding = review.Binding;
+        var signer = binding.AuthenticodeStatus == "Valid"
+            ? $"Signer {binding.SignerSubject}. Signer certificate SHA-256 {binding.SignerCertificateSha256}."
+            : "No valid Windows publisher signature was established; this runtime cannot be approved.";
+        SetOllamaRuntimeDetails(
+            $"Executable {binding.ExecutablePath}. Runtime root {binding.RuntimeRoot}. " +
+            $"Dependency profile {binding.RuntimeProfile}. {binding.Files.Count:N0} files. " +
+            $"{review.TotalBytes:N0} total bytes. Tree SHA-256 {binding.TreeSha256}. " +
+            $"Windows signature status {binding.AuthenticodeStatus}. {signer} " +
+            $"Model folder {modelRoot}. Official source-license reference {review.OfficialLicenseUri}. " +
+            "This review grants no download, installation, model transfer, publication, legal redistribution approval, or authority over another Ollama service.");
+    }
+
+    private void SetOllamaRuntimeDetails(string value)
+    {
+        OllamaRuntimeDetails.Text = value;
+        AutomationProperties.SetName(OllamaRuntimeDetails, value);
     }
 
     private void BrowseInto(TextBox target, string filter, string title)
@@ -1567,6 +1862,25 @@ public partial class LocalModelsWindow : Window
         string.Equals(expected.Name, actual.Name, StringComparison.Ordinal) &&
         string.Equals(expected.Digest, actual.Digest, StringComparison.Ordinal) &&
         expected.SizeBytes == actual.SizeBytes;
+
+    private static bool HasSameRuntimeIdentity(
+        ApprovedOllamaRuntimeBinding expected,
+        ApprovedOllamaRuntimeBinding actual) =>
+        string.Equals(expected.RuntimeRoot, actual.RuntimeRoot, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(expected.RuntimeProfile, actual.RuntimeProfile, StringComparison.Ordinal) &&
+        string.Equals(expected.ExecutableRelativePath, actual.ExecutableRelativePath, StringComparison.Ordinal) &&
+        string.Equals(expected.TreeSha256, actual.TreeSha256, StringComparison.Ordinal) &&
+        string.Equals(expected.AuthenticodeStatus, actual.AuthenticodeStatus, StringComparison.Ordinal) &&
+        string.Equals(expected.SignerSubject, actual.SignerSubject, StringComparison.Ordinal) &&
+        string.Equals(
+            expected.SignerCertificateSha256,
+            actual.SignerCertificateSha256,
+            StringComparison.Ordinal);
+
+    private sealed record RuntimeProfileRow(string Id, string Display)
+    {
+        public override string ToString() => Display;
+    }
 
     private sealed record CandidateRow(
         LocalModelDescriptor Descriptor,

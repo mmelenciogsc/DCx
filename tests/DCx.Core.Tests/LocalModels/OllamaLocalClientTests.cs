@@ -91,6 +91,99 @@ public sealed class OllamaLocalClientTests
     }
 
     [Fact]
+    public async Task OwnedWarmVision_RetainsOnlyExactTargetAcrossSequentialRequests()
+    {
+        var handler = new FixtureHandler { UseCanonicalResidentAlias = true };
+        var resourceAdmission = new ColdLoadOnlyResourceAdmission();
+        using var client = new OllamaLocalClient(
+            handler,
+            new Uri("http://127.0.0.1:11434/"),
+            TimeSpan.FromSeconds(5),
+            UncoordinatedOllamaInferenceLease.Instance,
+            resourceAdmission,
+            retainPinnedModel: true);
+        var image = Path.GetTempFileName();
+        await File.WriteAllBytesAsync(
+            image,
+            [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+        try
+        {
+            await client.DescribeImagePinnedAsync(
+                VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes.");
+            await client.DescribeImagePinnedAsync(
+                VisionModel, VisionDigest, LicenseDigest, image, "Describe colors.");
+
+            Assert.Contains("\"keep_alive\":\"5m\"", handler.ChatRequest, StringComparison.Ordinal);
+            Assert.True(handler.Loaded);
+            Assert.False(handler.UnloadRequested);
+            Assert.True(handler.RunningModelRequests >= 8);
+            Assert.Equal(1, resourceAdmission.VisionAdmissions);
+        }
+        finally
+        {
+            File.Delete(image);
+        }
+    }
+
+    [Fact]
+    public async Task OwnedWarmVision_DeniesUnrelatedResidentWithoutInterference()
+    {
+        var handler = new FixtureHandler { InitiallyLoaded = true };
+        using var client = new OllamaLocalClient(
+            handler,
+            new Uri("http://127.0.0.1:11434/"),
+            TimeSpan.FromSeconds(5),
+            UncoordinatedOllamaInferenceLease.Instance,
+            UncheckedLocalModelResourceAdmission.Instance,
+            retainPinnedModel: true);
+        var image = Path.GetTempFileName();
+        await File.WriteAllBytesAsync(image, [0xFF, 0xD8, 0xFF]);
+        try
+        {
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                client.DescribeImagePinnedAsync(
+                    VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."));
+
+            Assert.Contains("other than the exact approved target", failure.Message, StringComparison.Ordinal);
+            Assert.Empty(handler.ChatRequest);
+            Assert.False(handler.UnloadRequested);
+            Assert.True(handler.Loaded);
+        }
+        finally
+        {
+            File.Delete(image);
+        }
+    }
+
+    [Fact]
+    public async Task OwnedWarmVision_FailureUnloadsTheExactTarget()
+    {
+        var handler = new FixtureHandler { ReturnIncompleteVision = true };
+        using var client = new OllamaLocalClient(
+            handler,
+            new Uri("http://127.0.0.1:11434/"),
+            TimeSpan.FromSeconds(5),
+            UncoordinatedOllamaInferenceLease.Instance,
+            UncheckedLocalModelResourceAdmission.Instance,
+            retainPinnedModel: true);
+        var image = Path.GetTempFileName();
+        await File.WriteAllBytesAsync(image, [0xFF, 0xD8, 0xFF]);
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                client.DescribeImagePinnedAsync(
+                    VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."));
+
+            Assert.True(handler.UnloadRequested);
+            Assert.False(handler.Loaded);
+        }
+        finally
+        {
+            File.Delete(image);
+        }
+    }
+
+    [Fact]
     public async Task VisionInference_IsSerializedAcrossClientsForTheEntirePinnedOperation()
     {
         var coordinationRoot = Path.Combine(
@@ -574,6 +667,7 @@ public sealed class OllamaLocalClientTests
         public bool InferenceLeaseViolation { get; private set; }
         public bool ReturnInvalidRuntimeVersion { get; init; }
         public bool ReturnInvalidRunningResources { get; init; }
+        public bool UseCanonicalResidentAlias { get; init; }
         public Uri? ResponseUri { get; init; }
         public bool Loaded { get; private set; }
         public bool UnrelatedLoaded { get; private set; }
@@ -585,6 +679,8 @@ public sealed class OllamaLocalClientTests
         private int inspectionCalls;
         private bool embedded;
         private bool initiallyLoaded;
+        private string loadedModel = EmbeddingModel;
+        private string loadedDigest = EmbeddingDigest;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -607,7 +703,7 @@ public sealed class OllamaLocalClientTests
                 return Json(UnrelatedLoaded
                     ? $"{{\"models\":[{{\"name\":\"unrelated:{OtherDigest}\",\"digest\":\"{OtherDigest}\",\"size\":200000000,\"size_vram\":100000000,\"expires_at\":\"2026-10-18T04:00:00Z\"}}]}}"
                     : Loaded
-                    ? $"{{\"models\":[{{\"name\":\"{EmbeddingModel}\",\"digest\":\"{EmbeddingDigest}\",\"size\":400000000,\"size_vram\":{(ReturnInvalidRunningResources ? 500000000 : 300000000)},\"expires_at\":\"2026-10-18T04:00:00Z\"}}]}}"
+                    ? $"{{\"models\":[{{\"name\":\"{(UseCanonicalResidentAlias ? $"sha256-{loadedDigest}:latest" : loadedModel)}\",\"digest\":\"{loadedDigest}\",\"size\":400000000,\"size_vram\":{(ReturnInvalidRunningResources ? 500000000 : 300000000)},\"expires_at\":\"2026-10-18T04:00:00Z\"}}]}}"
                     : "{\"models\":[]}", request);
             }
 
@@ -649,7 +745,13 @@ public sealed class OllamaLocalClientTests
                 EmbeddingRequest = await request.Content!.ReadAsStringAsync(cancellationToken);
                 embedded = true;
                 EmbeddingStarted.TrySetResult(true);
-                if (EmbeddingRequest.Contains("\"keep_alive\":\"1m\"", StringComparison.Ordinal)) Loaded = true;
+                if (EmbeddingRequest.Contains("\"keep_alive\":\"1m\"", StringComparison.Ordinal) ||
+                    EmbeddingRequest.Contains("\"keep_alive\":\"5m\"", StringComparison.Ordinal))
+                {
+                    Loaded = true;
+                    loadedModel = EmbeddingModel;
+                    loadedDigest = EmbeddingDigest;
+                }
                 if (DelayEmbedding) await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
                 return Json(ReturnInconsistentEmbeddings
                     ? $"{{\"model\":\"{EmbeddingModel}\",\"embeddings\":[[0.1,0.2],[0.3]],\"prompt_eval_count\":7,\"total_duration\":100}}"
@@ -671,6 +773,12 @@ public sealed class OllamaLocalClientTests
             }
 
             ChatRequest = await request.Content!.ReadAsStringAsync(cancellationToken);
+            if (ChatRequest.Contains("\"keep_alive\":\"5m\"", StringComparison.Ordinal))
+            {
+                Loaded = true;
+                loadedModel = VisionModel;
+                loadedDigest = VisionDigest;
+            }
             if (VisionProbe is not null)
             {
                 await VisionProbe.ObserveAsync(cancellationToken);
@@ -775,5 +883,25 @@ public sealed class OllamaLocalClientTests
                     "The approved embedding model no longer fits the current available system-memory safety budget.");
             }
         }
+    }
+
+    private sealed class ColdLoadOnlyResourceAdmission : ILocalModelResourceAdmission
+    {
+        private int visionAdmissions;
+
+        public int VisionAdmissions => Volatile.Read(ref visionAdmissions);
+
+        public void EnsureVisionAllowed(LocalModelDescriptor model)
+        {
+            ArgumentNullException.ThrowIfNull(model);
+            if (Interlocked.Increment(ref visionAdmissions) != 1)
+            {
+                throw new InvalidOperationException(
+                    "Resident model GPU memory was incorrectly counted as a new cold load.");
+            }
+        }
+
+        public void EnsureEmbeddingAllowed(LocalModelDescriptor model) =>
+            ArgumentNullException.ThrowIfNull(model);
     }
 }

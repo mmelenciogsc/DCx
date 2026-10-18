@@ -10,8 +10,9 @@ namespace DCx.Desktop;
 
 public partial class LocalModelBenchmarkWindow : Window
 {
-    private static readonly Uri OllamaOrigin = new("http://localhost:11434/");
     private readonly LocalModelSelectionStore localModelStore;
+    private readonly OllamaRuntimeSelectionStore ollamaRuntimeStore;
+    private readonly OllamaApprovedRuntimeHost? ollamaRuntimeHost;
     private readonly WhisperBackendSelectionStore whisperStore;
     private readonly string applicationDataRoot;
     private readonly CancellationTokenSource lifetime = new();
@@ -19,6 +20,7 @@ public partial class LocalModelBenchmarkWindow : Window
     private ApprovedWhisperBackendBinding? reviewedWhisperBinding;
     private ApprovedLocalModelBinding? reviewedEmbeddingBinding;
     private string? reviewedEmbeddingRuntimeVersion;
+    private ApprovedOllamaRuntimeConfiguration? reviewedOllamaRuntime;
     private string? reviewedBackendSha256;
     private DateTimeOffset reviewedAtUtc;
     private CancellationTokenSource? activeRun;
@@ -26,10 +28,15 @@ public partial class LocalModelBenchmarkWindow : Window
 
     public LocalModelBenchmarkWindow(
         LocalModelSelectionStore localModelStore,
+        OllamaRuntimeSelectionStore ollamaRuntimeStore,
         WhisperBackendSelectionStore whisperStore,
-        string applicationDataRoot)
+        string applicationDataRoot,
+        OllamaApprovedRuntimeHost? ollamaRuntimeHost = null)
     {
         this.localModelStore = localModelStore ?? throw new ArgumentNullException(nameof(localModelStore));
+        this.ollamaRuntimeStore = ollamaRuntimeStore ??
+            throw new ArgumentNullException(nameof(ollamaRuntimeStore));
+        this.ollamaRuntimeHost = ollamaRuntimeHost;
         this.whisperStore = whisperStore ?? throw new ArgumentNullException(nameof(whisperStore));
         ArgumentException.ThrowIfNullOrWhiteSpace(applicationDataRoot);
         this.applicationDataRoot = Path.GetFullPath(applicationDataRoot);
@@ -103,13 +110,32 @@ public partial class LocalModelBenchmarkWindow : Window
                     SetStatus("The exact embedding suite was reviewed, but running is unavailable until an installed digest-bound embedding model is explicitly selected.");
                     return;
                 }
-
+                var runtimeConfiguration =
+                    (await ollamaRuntimeStore.GetStateAsync(lifetime.Token)).Runtime;
+                if (runtimeConfiguration is null)
+                {
+                    SetReviewDetails(DescribeEmbeddingReview(
+                        embedding,
+                        "No protected DCx-owned Ollama runtime is approved."));
+                    SetStatus(
+                        "The exact embedding suite was reviewed, but running is unavailable until an existing signed Ollama runtime is explicitly approved.");
+                    return;
+                }
+                if (ollamaRuntimeHost is not null)
+                {
+                    await ollamaRuntimeHost.StopAsync(lifetime.Token);
+                }
+                await using var runtime = await ollamaRuntimeStore.StartApprovedAsync(
+                    TimeSpan.FromSeconds(30),
+                    lifetime.Token);
                 using var backend = await OllamaEmbeddingBenchmarkBackend.CreateAsync(
                     binding,
-                    OllamaOrigin,
+                    runtime.BaseAddress,
                     OllamaTimeout(embedding),
+                    runtimeConfiguration.Runtime.TreeSha256,
                     lifetime.Token);
                 reviewedEmbeddingBinding = binding;
+                reviewedOllamaRuntime = runtimeConfiguration;
                 reviewedEmbeddingRuntimeVersion = backend.RuntimeVersion;
                 reviewedBackendSha256 = backend.BindingSha256;
                 SetReviewDetails(DescribeEmbeddingReview(
@@ -140,7 +166,8 @@ public partial class LocalModelBenchmarkWindow : Window
         if (ApprovalBox.IsChecked != true ||
             reviewedManifest is null || reviewedBackendSha256 is null ||
             reviewedManifest is TranscriptionBenchmarkManifestReview && reviewedWhisperBinding is null ||
-            reviewedManifest is EmbeddingBenchmarkManifestReview && reviewedEmbeddingBinding is null)
+            reviewedManifest is EmbeddingBenchmarkManifestReview &&
+            (reviewedEmbeddingBinding is null || reviewedOllamaRuntime is null))
         {
             SetStatus("No benchmark ran. Review an available backend and exact manifest, then check the explicit approval box.");
             ApprovalBox.Focus();
@@ -188,6 +215,7 @@ public partial class LocalModelBenchmarkWindow : Window
             reviewedWhisperBinding = null;
             reviewedEmbeddingBinding = null;
             reviewedEmbeddingRuntimeVersion = null;
+            reviewedOllamaRuntime = null;
             reviewedBackendSha256 = null;
             activeRun?.Dispose();
             activeRun = null;
@@ -244,10 +272,24 @@ public partial class LocalModelBenchmarkWindow : Window
         {
             throw new InvalidOperationException("The approved embedding model changed after review.");
         }
+        var currentRuntime = (await ollamaRuntimeStore.GetStateAsync(cancellationToken)).Runtime;
+        if (currentRuntime is null || reviewedOllamaRuntime is null ||
+            !reviewedOllamaRuntime.HasSameIdentity(currentRuntime))
+        {
+            throw new InvalidOperationException("The approved Ollama runtime changed after review.");
+        }
+        if (ollamaRuntimeHost is not null)
+        {
+            await ollamaRuntimeHost.StopAsync(cancellationToken);
+        }
+        await using var runtime = await ollamaRuntimeStore.StartApprovedAsync(
+            TimeSpan.FromSeconds(30),
+            cancellationToken);
         using var backend = await OllamaEmbeddingBenchmarkBackend.CreateAsync(
             currentBinding,
-            OllamaOrigin,
+            runtime.BaseAddress,
             OllamaTimeout(current),
+            currentRuntime.Runtime.TreeSha256,
             cancellationToken);
         RequireBackendBinding(backend.BindingSha256);
         if (!string.Equals(backend.RuntimeVersion, reviewedEmbeddingRuntimeVersion, StringComparison.Ordinal))
@@ -309,12 +351,15 @@ public partial class LocalModelBenchmarkWindow : Window
         {
             var whisper = (await whisperStore.GetStateAsync(lifetime.Token)).Backend;
             var embedding = (await localModelStore.GetStateAsync(lifetime.Token)).Embedding;
+            var runtime = (await ollamaRuntimeStore.GetStateAsync(lifetime.Token)).Runtime;
             var transcriptionStatus = whisper is null
                 ? "Transcription benchmark unavailable: no explicitly approved local Whisper backend is registered."
                 : $"Transcription benchmark available through the approved {Path.GetFileName(whisper.ExecutablePath)} and {Path.GetFileName(whisper.ModelPath)} binding.";
-            var embeddingStatus = embedding is null
+            var embeddingStatus = runtime is null
+                ? "Embedding benchmark unavailable: no protected DCx-owned Ollama runtime is approved."
+                : embedding is null
                 ? "Embedding benchmark unavailable: no approved digest-bound Ollama embedding model is selected."
-                : $"Embedding benchmark available for exact review through the approved {embedding.Name} binding; runtime version and loaded resources are revalidated before execution.";
+                : $"Embedding benchmark available for exact review through the approved {embedding.Name} binding and runtime tree {runtime.Runtime.TreeSha256}; runtime version and loaded resources are revalidated before execution.";
             SetBackend(transcriptionStatus + " " + embeddingStatus);
             SetStatus("Choose a strict local benchmark manifest to begin exact review. Approval is unchecked by default.");
         }
@@ -335,6 +380,7 @@ public partial class LocalModelBenchmarkWindow : Window
         reviewedWhisperBinding = null;
         reviewedEmbeddingBinding = null;
         reviewedEmbeddingRuntimeVersion = null;
+        reviewedOllamaRuntime = null;
         reviewedBackendSha256 = null;
         reviewedAtUtc = default;
         ApprovalBox.IsChecked = false;
@@ -350,7 +396,8 @@ public partial class LocalModelBenchmarkWindow : Window
         BrowseManifestButton.IsEnabled = !value;
         ReviewManifestButton.IsEnabled = !value;
         ApprovalBox.IsEnabled = !value &&
-                                (reviewedWhisperBinding is not null || reviewedEmbeddingBinding is not null);
+                                (reviewedWhisperBinding is not null ||
+                                 reviewedEmbeddingBinding is not null && reviewedOllamaRuntime is not null);
         RunButton.IsEnabled = false;
         CancelButton.IsEnabled = value && running;
         if (!value) UpdateRunAvailability();
@@ -359,7 +406,8 @@ public partial class LocalModelBenchmarkWindow : Window
     private void UpdateRunAvailability() =>
         RunButton.IsEnabled = !busy && ApprovalBox.IsChecked == true &&
                               (reviewedManifest is TranscriptionBenchmarkManifestReview && reviewedWhisperBinding is not null ||
-                               reviewedManifest is EmbeddingBenchmarkManifestReview && reviewedEmbeddingBinding is not null);
+                               reviewedManifest is EmbeddingBenchmarkManifestReview &&
+                               reviewedEmbeddingBinding is not null && reviewedOllamaRuntime is not null);
 
     private static void RequireSameReview(
         ILocalModelBenchmarkManifestReview expected,

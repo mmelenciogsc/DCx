@@ -38,7 +38,7 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
     private readonly BrowserControlCoordinator _controlCoordinator = new();
     private readonly BrowserDomAdapter _domAdapter;
     private readonly FacebookHistoricalPostPageInspector _facebookPostPageInspector = new();
-    private readonly WebVideoFrameDescriptionService _webVideoFrameDescriptionService = new();
+    private WebVideoFrameDescriptionService? _webVideoFrameDescriptionService;
     private readonly Dictionary<string, Task<CoreWebView2Environment>> _environments = new(StringComparer.Ordinal);
     private readonly ObservableCollection<BrowserHistoryEntry> _historyItems = [];
     private readonly ObservableCollection<BrowserBookmark> _bookmarkItems = [];
@@ -63,6 +63,8 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
     private CareContributorDashboardWindow? _careContributorDashboardWindow;
     private CrashDiagnosticsWindow? _crashDiagnosticsWindow;
     private Task<LocalModelSelectionStore>? _localModelSelectionStore;
+    private Task<OllamaRuntimeSelectionStore>? _ollamaRuntimeSelectionStore;
+    private Task<OllamaApprovedRuntimeHost>? _ollamaRuntimeHost;
     private Task<WhisperBackendSelectionStore>? _whisperBackendSelectionStore;
     private Task<FfmpegBackendSelectionStore>? _ffmpegBackendSelectionStore;
     private Task<PayoutRecipientSnapshotStore>? _payoutRecipientSnapshotStore;
@@ -220,6 +222,10 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
         foreach (var tab in GetTabs())
         {
             tab.Browser.Dispose();
+        }
+        if (_ollamaRuntimeHost is { IsCompletedSuccessfully: true })
+        {
+            _ollamaRuntimeHost.Result.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
     }
 
@@ -1146,8 +1152,10 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
 
             _localModelsWindow = new LocalModelsWindow(
                 await GetLocalModelSelectionStoreAsync(),
+                await GetOllamaRuntimeSelectionStoreAsync(),
                 await GetWhisperBackendSelectionStoreAsync(),
-                await GetFfmpegBackendSelectionStoreAsync())
+                await GetFfmpegBackendSelectionStoreAsync(),
+                await GetOllamaRuntimeHostAsync())
             {
                 Owner = this,
             };
@@ -1173,6 +1181,7 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
         {
             _contentViewerWindow = new ContentViewerWindow(
                 await GetLocalModelSelectionStoreAsync(),
+                await GetOllamaRuntimeHostAsync(),
                 await GetWhisperBackendSelectionStoreAsync(),
                 await GetFfmpegBackendSelectionStoreAsync())
             {
@@ -1214,7 +1223,10 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
 
         _pausedWebVideoTab = tab;
         _pausedWebVideoPage = tab.Browser.Source;
-        var result = await _webVideoFrameDescriptionService.DescribeAsync(
+        var service = _webVideoFrameDescriptionService ??=
+            new WebVideoFrameDescriptionService(
+                await GetOllamaRuntimeHostAsync());
+        var result = await service.DescribeAsync(
             tab.Browser,
             binding.Name,
             binding.Digest,
@@ -1234,7 +1246,10 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
             throw new WebVideoFrameException("web_video_page_changed");
         }
 
-        await _webVideoFrameDescriptionService.ResumeAsync(tab.Browser, page, cancellationToken);
+        var service = _webVideoFrameDescriptionService ??=
+            new WebVideoFrameDescriptionService(
+                await GetOllamaRuntimeHostAsync());
+        await service.ResumeAsync(tab.Browser, page, cancellationToken);
         _pausedWebVideoTab = null;
         _pausedWebVideoPage = null;
     }
@@ -1396,6 +1411,16 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
 
     private Task<LocalModelSelectionStore> GetLocalModelSelectionStoreAsync() =>
         _localModelSelectionStore ??= LocalModelSelectionStore.OpenAsync(ApplicationDataRoot.Resolve());
+
+    private Task<OllamaRuntimeSelectionStore> GetOllamaRuntimeSelectionStoreAsync() =>
+        _ollamaRuntimeSelectionStore ??=
+            OllamaRuntimeSelectionStore.OpenAsync(ApplicationDataRoot.Resolve());
+
+    private Task<OllamaApprovedRuntimeHost> GetOllamaRuntimeHostAsync() =>
+        _ollamaRuntimeHost ??= CreateOllamaRuntimeHostAsync();
+
+    private async Task<OllamaApprovedRuntimeHost> CreateOllamaRuntimeHostAsync() =>
+        new(await GetOllamaRuntimeSelectionStoreAsync().ConfigureAwait(false));
 
     private Task<WhisperBackendSelectionStore> GetWhisperBackendSelectionStoreAsync() =>
         _whisperBackendSelectionStore ??= WhisperBackendSelectionStore.OpenAsync(ApplicationDataRoot.Resolve());

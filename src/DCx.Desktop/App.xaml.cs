@@ -285,12 +285,17 @@ public partial class App : Application
             var approvalAnchorStore = new FixtureLocalModelApprovalStateAnchorStore();
             var modelStore = LocalModelSelectionStore.OpenWithAnchorAsync(applicationDataRoot, approvalAnchorStore)
                 .GetAwaiter().GetResult();
+            var ollamaRuntimeStore = OllamaRuntimeSelectionStore.OpenWithAnchorAsync(
+                    applicationDataRoot,
+                    approvalAnchorStore)
+                .GetAwaiter().GetResult();
             var whisperStore = WhisperBackendSelectionStore.OpenWithAnchorAsync(applicationDataRoot, approvalAnchorStore)
                 .GetAwaiter().GetResult();
             var ffmpegStore = FfmpegBackendSelectionStore.OpenWithAnchorAsync(applicationDataRoot, approvalAnchorStore)
                 .GetAwaiter().GetResult();
             MainWindow = new LocalModelsWindow(
                 modelStore,
+                ollamaRuntimeStore,
                 whisperStore,
                 ffmpegStore,
                 applicationDataRoot,
@@ -352,12 +357,17 @@ public partial class App : Application
             var anchorStore = new FixtureLocalModelApprovalStateAnchorStore();
             var modelStore = LocalModelSelectionStore.OpenWithAnchorAsync(applicationDataRoot, anchorStore)
                 .GetAwaiter().GetResult();
+            var ollamaRuntimeStore = OllamaRuntimeSelectionStore.OpenWithAnchorAsync(
+                    applicationDataRoot,
+                    anchorStore)
+                .GetAwaiter().GetResult();
             var whisperStore = WhisperBackendSelectionStore.OpenWithAnchorAsync(applicationDataRoot, anchorStore)
                 .GetAwaiter().GetResult();
             var ffmpegStore = FfmpegBackendSelectionStore.OpenWithAnchorAsync(applicationDataRoot, anchorStore)
                 .GetAwaiter().GetResult();
             MainWindow = new LocalModelsWindow(
                 modelStore,
+                ollamaRuntimeStore,
                 whisperStore,
                 ffmpegStore,
                 applicationDataRoot,

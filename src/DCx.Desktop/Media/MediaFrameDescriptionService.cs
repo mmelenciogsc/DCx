@@ -5,6 +5,11 @@ namespace DCx.Desktop.Media;
 
 public sealed class MediaFrameDescriptionService
 {
+    private readonly OllamaApprovedRuntimeHost runtimeHost;
+
+    public MediaFrameDescriptionService(OllamaApprovedRuntimeHost runtimeHost) =>
+        this.runtimeHost = runtimeHost ?? throw new ArgumentNullException(nameof(runtimeHost));
+
     public async Task<OllamaVisionResult> DescribeAsync(
         string mediaPath,
         TimeSpan position,
@@ -21,15 +26,13 @@ public sealed class MediaFrameDescriptionService
         if (!prompt.IsAllowed) throw new ArgumentException(prompt.Reason, nameof(question));
         var processor = ffmpegBinding.CreateProcessor(TimeSpan.FromSeconds(20));
         await using var frame = await processor.ExtractFrameAsync(mediaPath, position, cancellationToken);
-        using var ollama = new OllamaLocalClient(
-            new Uri("http://localhost:11434/"),
-            TimeSpan.FromMinutes(3));
-        return await ollama.DescribeImagePinnedAsync(
+        return await runtimeHost.DescribeImagePinnedAsync(
             model,
             modelDigest,
             modelLicenseSha256,
             frame.Path,
             prompt.Prompt,
-            cancellationToken);
+            TimeSpan.FromMinutes(5),
+            cancellationToken).ConfigureAwait(false);
     }
 }

@@ -56,6 +56,7 @@ try {
         "DCx.Core.Tests.LocalModels.WhisperBackendRegistrationTests.Store_RejectsLinkedSelectionFile",
         "DCx.Core.Tests.LocalModels.FfmpegBackendRegistrationTests.Store_RejectsSettingsDirectorySwappedForLinkAfterOpen",
         "DCx.Core.Tests.LocalModels.FfmpegBackendRegistrationTests.Store_RejectsLinkedSelectionFile",
+        "DCx.Core.Tests.LocalModels.OllamaRuntimeSelectionStoreTests.Store_RejectsLinkedStateAndSettingsSwapWithoutWritingOutside",
         "DCx.Core.Tests.LocalModels.LocalModelBenchmarkManifestTests.EvidenceStore_RejectsDirectorySwappedForLinkAfterOpen",
         "DCx.Core.Tests.LocalModels.LocalModelBenchmarkManifestTests.EvidenceStore_RejectsLinkedTargetWithoutChangingOutsideFile"
     )
@@ -143,7 +144,10 @@ try {
         "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.ProductionInference_DeniesPreloadedRuntimeWithoutInterfering",
         "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.ProductionInference_DeniesUnrelatedModelIntroducedDuringCleanup",
         "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.NormalInference_FailsClosedWhenExactUnloadIsNotConfirmed",
-        "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.InspectionAndEmbedding_ValidateCapabilitiesAndBoundedVectors"
+        "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.InspectionAndEmbedding_ValidateCapabilitiesAndBoundedVectors",
+        "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.OwnedWarmVision_RetainsOnlyExactTargetAcrossSequentialRequests",
+        "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.OwnedWarmVision_DeniesUnrelatedResidentWithoutInterference",
+        "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.OwnedWarmVision_FailureUnloadsTheExactTarget"
     )
     $requiredOwnedOllamaRuntimeContracts = @(
         "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.Review_BindsExactCompleteRuntimeTreeAndSignerEvidence",
@@ -155,7 +159,14 @@ try {
         "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.Runtime_DeniesChangedOrExpandedTreeBeforeStartingChild",
         "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.Runtime_DeniesListenerWhoseOwnerCannotBeProvenAndKillsChild",
         "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.Runtime_DeniesChildExitBeforeReadiness",
-        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.JobObject_CloseKillsAssignedRuntimeProcess"
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.JobObject_CloseKillsAssignedRuntimeProcess",
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.ProtectedSelection_StartsOnlyTheApprovedRuntimeAndStopsItOnDisposal",
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.ApprovedHost_ReusesOneProcessAndRevocationStopsItBeforeFailingClosed",
+        "DCx.Core.Tests.LocalModels.OllamaOwnedRuntimeTests.ApprovedHost_OperationFailureKillsItsEntireOwnedProcess",
+        "DCx.Core.Tests.LocalModels.OllamaRuntimeSelectionStoreTests.Selection_RequiresExplicitSignedReviewAndSurvivesProtectedReopenUntilCleared",
+        "DCx.Core.Tests.LocalModels.OllamaRuntimeSelectionStoreTests.Selection_RejectsUnsignedChangedLicenseAndUnsafeModelRoot",
+        "DCx.Core.Tests.LocalModels.OllamaRuntimeSelectionStoreTests.ProtectedApproval_RejectsRollbackMissingAnchorAndAllowsExactReapproval",
+        "DCx.Core.Tests.LocalModels.OllamaRuntimeSelectionStoreTests.Store_RejectsLinkedStateAndSettingsSwapWithoutWritingOutside"
     )
     $requiredApprovalStateContracts = @(
         "DCx.Core.Tests.LocalModels.LocalModelApprovalStateAnchorStoreTests.WindowsVaultAnchor_RoundTripsOverwritesIsolatesAndRejectsMalformedState",
@@ -286,7 +297,19 @@ try {
         $ownedOllamaEvidence.kill_on_job_close -ne $true -or
         $ownedOllamaEvidence.no_cloud -ne $true -or
         $ownedOllamaEvidence.no_prune -ne $true -or
-        $ownedOllamaEvidence.inference_performed -ne $false -or
+        $ownedOllamaEvidence.protected_runtime_approval -ne $true -or
+        $ownedOllamaEvidence.protected_runtime_approval_cleared -ne $true -or
+        $ownedOllamaEvidence.inference_performed -ne $true -or
+        $ownedOllamaEvidence.inference_cleanup_confirmed -ne $true -or
+        $ownedOllamaEvidence.retained_exact_model_between_requests -ne $true -or
+        $ownedOllamaEvidence.same_owned_process_between_requests -ne $true -or
+        $ownedOllamaEvidence.cold_inference_elapsed_ms -le 0 -or
+        $ownedOllamaEvidence.warm_inference_elapsed_ms -le 0 -or
+        $ownedOllamaEvidence.warm_inference_elapsed_ms -ge $ownedOllamaEvidence.cold_inference_elapsed_ms -or
+        $ownedOllamaEvidence.retained_runtime_model_name -cne
+            "sha256-$($ownedOllamaEvidence.inference_model_digest):latest" -or
+        $ownedOllamaEvidence.inference_prompt_tokens -lt 1 -or
+        $ownedOllamaEvidence.inference_output_tokens -lt 1 -or
         $ownedOllamaEvidence.model_transfer_performed -ne $false -or
         $ownedOllamaEvidence.existing_service_survived -ne $true -or
         $ownedOllamaEvidence.owned_process_stopped -ne $true -or
@@ -510,7 +533,7 @@ if ($dependencyRedirectPolicy.AllowsRedirects -or
     throw "The production dependency redirect policy is not a canonical deny-all review."
 }
 $client = [DCx.Core.LocalModels.OllamaLocalClient]::new(
-    [Uri]"http://localhost:11434/", [TimeSpan]::FromMinutes(3))
+    [Uri]"http://localhost:11434/", [TimeSpan]::FromMinutes(5))
 try {
     $inventory = $client.ListModelsAsync([Threading.CancellationToken]::None).GetAwaiter().GetResult()
     $nativeResourceSelection = [DCx.Core.LocalModels.LocalModelSelector]::new().SelectForHardware(
@@ -570,7 +593,7 @@ $unloaded = $false
 $started = Get-Date
 try {
     $response = Invoke-RestMethod -Method Post -Uri "http://localhost:11434/api/chat" `
-        -ContentType "application/json" -Body $body -TimeoutSec 180 -NoProxy -MaximumRedirection 0
+        -ContentType "application/json" -Body $body -TimeoutSec 300 -NoProxy -MaximumRedirection 0
     $wallMilliseconds = [long]((Get-Date) - $started).TotalMilliseconds
     $responseModel = [string]$response.model
     if ($responseModel -ne $model -or $response.done -ne $true) {
@@ -806,7 +829,17 @@ $manifest = [ordered]@{
     owned_ollama_runtime_listener_pid_verified = $true
     owned_ollama_runtime_job_kill_on_close = $true
     owned_ollama_existing_service_preserved = $true
-    owned_ollama_inference_performed = $false
+    owned_ollama_protected_approval_cleared = $true
+    owned_ollama_inference_performed = $true
+    owned_ollama_inference_model = [string]$ownedOllamaEvidence.inference_model
+    owned_ollama_inference_model_digest = [string]$ownedOllamaEvidence.inference_model_digest
+    owned_ollama_inference_prompt_tokens = [int]$ownedOllamaEvidence.inference_prompt_tokens
+    owned_ollama_inference_output_tokens = [int]$ownedOllamaEvidence.inference_output_tokens
+    owned_ollama_cold_inference_elapsed_ms = [long]$ownedOllamaEvidence.cold_inference_elapsed_ms
+    owned_ollama_warm_inference_elapsed_ms = [long]$ownedOllamaEvidence.warm_inference_elapsed_ms
+    owned_ollama_retained_exact_model = $true
+    owned_ollama_same_process_follow_up = $true
+    owned_ollama_inference_cleanup_confirmed = $true
     owned_ollama_transfer_performed = $false
     native_hardware_profile_passed = $true
     native_hardware_operating_system = [string]$nativeHardwareProfile.OperatingSystem
@@ -897,7 +930,7 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Native product hardware profile contracts=PASS ($($manifest.native_hardware_profile_contract_tests)/$($manifest.native_hardware_profile_contract_tests)); CPU=$($manifest.native_hardware_cpu); logical processors=$($manifest.native_hardware_logical_processors); physical memory bytes=$($manifest.native_hardware_physical_memory_bytes); available system memory bytes=$($manifest.native_hardware_available_memory_bytes); application-data storage available bytes=$($manifest.native_hardware_storage_available_bytes); NVIDIA registry driver=$($manifest.native_hardware_nvidia_registry_driver); registry graphics memory bytes=$($manifest.native_hardware_nvidia_registry_memory_bytes); live available graphics memory bytes=$($manifest.native_hardware_nvidia_available_memory_bytes) from $($manifest.native_hardware_nvidia_available_memory_source); DXGI inventory-only adapters=$(@($manifest.native_hardware_dxgi_inventory_adapters).Count)"
 "Per-user cross-process Ollama inference sequencing contracts=PASS ($($manifest.ollama_inference_lease_contract_tests)/$($manifest.ollama_inference_lease_contract_tests)); lock data retained=False"
 "Runtime resource-admission and verified-unload contracts=PASS ($($manifest.ollama_runtime_resource_unload_contract_tests)/$($manifest.ollama_runtime_resource_unload_contract_tests))"
-"Owned Ollama runtime contracts=PASS ($($manifest.owned_ollama_runtime_contract_tests)/$($manifest.owned_ollama_runtime_contract_tests)); version=$($manifest.owned_ollama_runtime_version); profile=$($manifest.owned_ollama_runtime_profile); signed=$($manifest.owned_ollama_runtime_signed); files=$($manifest.owned_ollama_runtime_files); bytes=$($manifest.owned_ollama_runtime_bytes); listener PID verified=True; kill-on-job-close=True; existing service preserved=True; inference=False; transfer=False"
+"Owned Ollama runtime contracts=PASS ($($manifest.owned_ollama_runtime_contract_tests)/$($manifest.owned_ollama_runtime_contract_tests)); version=$($manifest.owned_ollama_runtime_version); profile=$($manifest.owned_ollama_runtime_profile); signed=$($manifest.owned_ollama_runtime_signed); files=$($manifest.owned_ollama_runtime_files); bytes=$($manifest.owned_ollama_runtime_bytes); listener PID verified=True; kill-on-job-close=True; protected approval cleared=True; existing service preserved=True; inference=True; cleanup=True; transfer=False"
 "Native hardware-bound model selection=PASS; available graphics bytes=$($manifest.native_resource_available_graphics_memory_bytes); available system bytes=$($manifest.native_resource_available_system_memory_bytes); vision=$($manifest.native_resource_selected_vision_model); embedding available=$($manifest.native_resource_selected_embedding_available)"
 "Local-model linked-root, linked-file and swapped-directory denials=PASS ($($manifest.local_model_storage_link_denials)/$($manifest.local_model_storage_link_denials)); external writes=$($manifest.local_model_storage_external_writes)"
 "Pinned dependency catalog=$($manifest.dependency_catalog_id); SHA-256=$($manifest.dependency_catalog_sha256)"

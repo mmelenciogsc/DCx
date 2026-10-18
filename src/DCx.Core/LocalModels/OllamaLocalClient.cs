@@ -17,6 +17,7 @@ public sealed class OllamaLocalClient : IDisposable
     private const int MaximumEmbeddingDimensions = 8192;
     private const int MaximumResponseBytes = 16 * 1024 * 1024;
     private const int MaximumVisionResponseCharacters = 32 * 1024;
+    private const string RetainedModelKeepAlive = "5m";
     private const int RequiredQuiescentObservations = 3;
     private static readonly TimeSpan QuiescentObservationInterval = TimeSpan.FromMilliseconds(250);
     private static readonly byte[] PngSignature = [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A];
@@ -25,6 +26,7 @@ public sealed class OllamaLocalClient : IDisposable
     private readonly Uri _baseAddress;
     private readonly IOllamaInferenceLeaseCoordinator inferenceLeaseCoordinator;
     private readonly ILocalModelResourceAdmission resourceAdmission;
+    private readonly bool retainPinnedModel;
 
     public OllamaLocalClient(Uri baseAddress, TimeSpan? timeout = null)
         : this(
@@ -32,7 +34,8 @@ public sealed class OllamaLocalClient : IDisposable
             WindowsLocalModelResourceAdmission.CreateForCurrentUser(),
             new HttpClient(CreateHardenedHandler(), disposeHandler: true),
             baseAddress,
-            timeout)
+            timeout,
+            retainPinnedModel: false)
     {
     }
 
@@ -41,8 +44,15 @@ public sealed class OllamaLocalClient : IDisposable
         ILocalModelResourceAdmission resourceAdmission,
         HttpClient httpClient,
         Uri baseAddress,
-        TimeSpan? timeout)
-        : this(httpClient, baseAddress, timeout, inferenceLeaseCoordinator, resourceAdmission)
+        TimeSpan? timeout,
+        bool retainPinnedModel)
+        : this(
+            httpClient,
+            baseAddress,
+            timeout,
+            inferenceLeaseCoordinator,
+            resourceAdmission,
+            retainPinnedModel)
     {
     }
 
@@ -52,7 +62,8 @@ public sealed class OllamaLocalClient : IDisposable
             baseAddress,
             timeout,
             UncoordinatedOllamaInferenceLease.Instance,
-            UncheckedLocalModelResourceAdmission.Instance)
+            UncheckedLocalModelResourceAdmission.Instance,
+            retainPinnedModel: false)
     {
     }
 
@@ -66,7 +77,8 @@ public sealed class OllamaLocalClient : IDisposable
             baseAddress,
             timeout,
             inferenceLeaseCoordinator,
-            UncheckedLocalModelResourceAdmission.Instance)
+            UncheckedLocalModelResourceAdmission.Instance,
+            retainPinnedModel: false)
     {
     }
 
@@ -81,7 +93,25 @@ public sealed class OllamaLocalClient : IDisposable
             baseAddress,
             timeout,
             inferenceLeaseCoordinator,
-            resourceAdmission)
+            resourceAdmission,
+            retainPinnedModel: false)
+    {
+    }
+
+    internal OllamaLocalClient(
+        HttpMessageHandler handler,
+        Uri baseAddress,
+        TimeSpan? timeout,
+        IOllamaInferenceLeaseCoordinator inferenceLeaseCoordinator,
+        ILocalModelResourceAdmission resourceAdmission,
+        bool retainPinnedModel)
+        : this(
+            new HttpClient(handler, disposeHandler: true),
+            baseAddress,
+            timeout,
+            inferenceLeaseCoordinator,
+            resourceAdmission,
+            retainPinnedModel)
     {
     }
 
@@ -90,7 +120,8 @@ public sealed class OllamaLocalClient : IDisposable
         Uri baseAddress,
         TimeSpan? timeout,
         IOllamaInferenceLeaseCoordinator inferenceLeaseCoordinator,
-        ILocalModelResourceAdmission resourceAdmission)
+        ILocalModelResourceAdmission resourceAdmission,
+        bool retainPinnedModel)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         if (inferenceLeaseCoordinator is null)
@@ -105,6 +136,7 @@ public sealed class OllamaLocalClient : IDisposable
             throw new ArgumentNullException(nameof(resourceAdmission));
         }
         this.resourceAdmission = resourceAdmission;
+        this.retainPinnedModel = retainPinnedModel;
         if (baseAddress is null)
         {
             _httpClient.Dispose();
@@ -310,12 +342,22 @@ public sealed class OllamaLocalClient : IDisposable
         IReadOnlyList<string> inputs,
         CancellationToken cancellationToken = default)
     {
-        ValidateEmbeddingRequest(model, expectedDigest, expectedLicenseSha256, inputs, keepAlive: 0);
+        object keepAlive = retainPinnedModel ? RetainedModelKeepAlive : 0;
+        ValidateEmbeddingRequest(model, expectedDigest, expectedLicenseSha256, inputs, keepAlive);
         using var inferenceLease = await inferenceLeaseCoordinator.AcquireAsync(cancellationToken)
             .ConfigureAwait(false);
-        await EnsureRuntimeQuiescentAsync(cancellationToken).ConfigureAwait(false);
+        var exactModelAlreadyResident = await EnsureRuntimeReadyAsync(
+            model,
+            expectedDigest,
+            cancellationToken).ConfigureAwait(false);
         return await EmbedPinnedCoreAsync(
-            model, expectedDigest, expectedLicenseSha256, inputs, keepAlive: 0, cancellationToken)
+            model,
+            expectedDigest,
+            expectedLicenseSha256,
+            inputs,
+            keepAlive,
+            skipResourceAdmission: exactModelAlreadyResident,
+            cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -359,7 +401,13 @@ public sealed class OllamaLocalClient : IDisposable
         try
         {
             result = await EmbedPinnedCoreAsync(
-                model, expectedDigest, expectedLicenseSha256, inputs, keepAlive: "1m", cancellationToken)
+                model,
+                expectedDigest,
+                expectedLicenseSha256,
+                inputs,
+                keepAlive: "1m",
+                skipResourceAdmission: false,
+                cancellationToken)
                 .ConfigureAwait(false);
             var matches = (await ListRunningModelsAsync(cancellationToken).ConfigureAwait(false))
                 .Where(item => string.Equals(item.Digest, expectedDigest, StringComparison.OrdinalIgnoreCase))
@@ -418,7 +466,10 @@ public sealed class OllamaLocalClient : IDisposable
 
         using var inferenceLease = await inferenceLeaseCoordinator.AcquireAsync(cancellationToken)
             .ConfigureAwait(false);
-        await EnsureRuntimeQuiescentAsync(cancellationToken).ConfigureAwait(false);
+        var exactModelAlreadyResident = await EnsureRuntimeReadyAsync(
+            model,
+            expectedDigest,
+            cancellationToken).ConfigureAwait(false);
         var imageBytes = new byte[checked((int)file.Length)];
         await using (var stream = new FileStream(
                          file.FullName,
@@ -432,6 +483,7 @@ public sealed class OllamaLocalClient : IDisposable
         }
 
         string image;
+        var completed = false;
         try
         {
             if (!HasSupportedImageSignature(imageBytes))
@@ -442,7 +494,10 @@ public sealed class OllamaLocalClient : IDisposable
             var boundModel = await RequireBoundModelAsync(
                 model, expectedDigest, expectedLicenseSha256,
                 requireVision: true, requireEmbedding: false, cancellationToken).ConfigureAwait(false);
-            resourceAdmission.EnsureVisionAllowed(boundModel);
+            if (!exactModelAlreadyResident)
+            {
+                resourceAdmission.EnsureVisionAllowed(boundModel);
+            }
 
             image = Convert.ToBase64String(imageBytes);
         }
@@ -453,12 +508,13 @@ public sealed class OllamaLocalClient : IDisposable
 
         try
         {
+            object keepAlive = retainPinnedModel ? RetainedModelKeepAlive : 0;
             var body = new
             {
                 model,
                 messages = new[] { new { role = "user", content = prompt, images = new[] { image } } },
                 stream = false,
-                keep_alive = 0,
+                keep_alive = keepAlive,
                 options = new { temperature = 0, num_predict = 160 },
             };
             using var response = await _httpClient.PostAsJsonAsync("api/chat", body, cancellationToken);
@@ -489,11 +545,22 @@ public sealed class OllamaLocalClient : IDisposable
             await RequireBoundModelAsync(
                 model, expectedDigest, expectedLicenseSha256,
                 requireVision: true, requireEmbedding: false, cancellationToken).ConfigureAwait(false);
+            if (retainPinnedModel)
+            {
+                await EnsureOnlyExactModelRunningAsync(
+                    model,
+                    expectedDigest,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            completed = true;
             return result;
         }
         finally
         {
-            await UnloadAfterOperationAsync(model, expectedDigest).ConfigureAwait(false);
+            if (!retainPinnedModel || !completed)
+            {
+                await UnloadAfterOperationAsync(model, expectedDigest).ConfigureAwait(false);
+            }
         }
     }
 
@@ -503,6 +570,7 @@ public sealed class OllamaLocalClient : IDisposable
         string expectedLicenseSha256,
         IReadOnlyList<string> inputs,
         object keepAlive,
+        bool skipResourceAdmission,
         CancellationToken cancellationToken)
     {
         ValidateEmbeddingRequest(model, expectedDigest, expectedLicenseSha256, inputs, keepAlive);
@@ -510,8 +578,12 @@ public sealed class OllamaLocalClient : IDisposable
         var boundModel = await RequireBoundModelAsync(
             model, expectedDigest, expectedLicenseSha256,
             requireVision: false, requireEmbedding: true, cancellationToken).ConfigureAwait(false);
-        resourceAdmission.EnsureEmbeddingAllowed(boundModel);
+        if (!skipResourceAdmission)
+        {
+            resourceAdmission.EnsureEmbeddingAllowed(boundModel);
+        }
         var shouldVerifyUnload = keepAlive is int keepAliveSeconds && keepAliveSeconds == 0;
+        var completed = false;
         try
         {
             using var response = await _httpClient.PostAsJsonAsync(
@@ -565,11 +637,19 @@ public sealed class OllamaLocalClient : IDisposable
             await RequireBoundModelAsync(
                 model, expectedDigest, expectedLicenseSha256,
                 requireVision: false, requireEmbedding: true, cancellationToken).ConfigureAwait(false);
+            if (!shouldVerifyUnload)
+            {
+                await EnsureOnlyExactModelRunningAsync(
+                    model,
+                    expectedDigest,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            completed = true;
             return result;
         }
         finally
         {
-            if (shouldVerifyUnload)
+            if (shouldVerifyUnload || !completed)
             {
                 await UnloadAfterOperationAsync(model, expectedDigest).ConfigureAwait(false);
             }
@@ -639,6 +719,66 @@ public sealed class OllamaLocalClient : IDisposable
         }
     }
 
+    private async Task<bool> EnsureRuntimeReadyAsync(
+        string model,
+        string expectedDigest,
+        CancellationToken cancellationToken)
+    {
+        if (!retainPinnedModel)
+        {
+            await EnsureRuntimeQuiescentAsync(cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        var exactModelAlreadyResident = false;
+        for (var observation = 0; observation < RequiredQuiescentObservations; observation++)
+        {
+            var running = await ListRunningModelsAsync(cancellationToken).ConfigureAwait(false);
+            if (running.Count > 1 || running.Any(candidate =>
+                    !IsExpectedRunningIdentity(candidate, model, expectedDigest)))
+            {
+                throw new InvalidOperationException(
+                    "The DCx-owned Ollama runtime contains a model other than the exact approved target.");
+            }
+            exactModelAlreadyResident = running.Count == 1;
+            if (observation + 1 < RequiredQuiescentObservations)
+            {
+                await Task.Delay(QuiescentObservationInterval, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        return exactModelAlreadyResident;
+    }
+
+    private async Task EnsureOnlyExactModelRunningAsync(
+        string model,
+        string expectedDigest,
+        CancellationToken cancellationToken)
+    {
+        var running = await ListRunningModelsAsync(cancellationToken).ConfigureAwait(false);
+        if (running.Count != 1 ||
+            !IsExpectedRunningIdentity(running[0], model, expectedDigest))
+        {
+            var observed = running.Count == 0
+                ? "none"
+                : string.Join(
+                    ", ",
+                    running.Select(candidate => $"{candidate.Name} ({candidate.Digest})"));
+            throw new InvalidOperationException(
+                $"The DCx-owned Ollama runtime did not retain only the exact approved model. Observed: {observed}.");
+        }
+    }
+
+    private static bool IsExpectedRunningIdentity(
+        OllamaRunningModel candidate,
+        string requestedModel,
+        string expectedDigest) =>
+        string.Equals(candidate.Digest, expectedDigest, StringComparison.OrdinalIgnoreCase) &&
+        (string.Equals(candidate.Name, requestedModel, StringComparison.Ordinal) ||
+         string.Equals(
+             candidate.Name,
+             $"sha256-{expectedDigest.ToLowerInvariant()}:latest",
+             StringComparison.Ordinal));
+
     private async Task UnloadAfterOperationAsync(string model, string expectedDigest)
     {
         using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -697,7 +837,9 @@ public sealed class OllamaLocalClient : IDisposable
         ArgumentNullException.ThrowIfNull(inputs);
         if (inputs.Count is 0 or > MaximumEmbeddingInputs || inputs.Any(input =>
                 string.IsNullOrWhiteSpace(input) || input.Length > MaximumEmbeddingInputCharacters || input.Contains('\0')) ||
-            keepAlive is not 0 && !string.Equals(keepAlive as string, "1m", StringComparison.Ordinal))
+            keepAlive is not 0 &&
+            !string.Equals(keepAlive as string, "1m", StringComparison.Ordinal) &&
+            !string.Equals(keepAlive as string, RetainedModelKeepAlive, StringComparison.Ordinal))
         {
             throw new ArgumentException("Embedding input or keep-alive policy is outside its safety bounds.", nameof(inputs));
         }

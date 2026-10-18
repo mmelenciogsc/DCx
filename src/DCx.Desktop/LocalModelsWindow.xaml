@@ -74,6 +74,124 @@
                                    TextWrapping="Wrap"
                                    AutomationProperties.AutomationId="CurrentFfmpegBackend"
                                    AutomationProperties.Name="Media processor: none selected." />
+                        <TextBlock x:Name="CurrentOllamaRuntimeText"
+                                   Margin="0,8,0,0"
+                                   Text="Ollama runtime: none selected."
+                                   TextWrapping="Wrap"
+                                   Focusable="True"
+                                   AutomationProperties.AutomationId="CurrentOllamaRuntime"
+                                   AutomationProperties.Name="Ollama runtime: none selected." />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Margin="0,20,0,0" Header="DCx-owned Ollama runtime">
+                    <StackPanel Margin="12,8">
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="Review and approve an already-installed, Windows-signed Ollama runtime before DCx reads models or performs inference. DCx starts its own random loopback listener with a private profile, no cloud, one workload at a time, and kill-on-close containment. It does not stop or reconfigure another Ollama service." />
+                        <Label Margin="0,10,0,0"
+                               Padding="0,0,0,4"
+                               Target="{Binding ElementName=OllamaRuntimeExecutablePath}"
+                               Content="Ollama runtime e_xecutable (.exe)" />
+                        <DockPanel LastChildFill="True">
+                            <Button x:Name="BrowseOllamaRuntimeExecutableButton"
+                                    DockPanel.Dock="Right"
+                                    MinWidth="150"
+                                    MinHeight="34"
+                                    Margin="8,0,0,0"
+                                    Content="Browse _runtime..."
+                                    AutomationProperties.AutomationId="BrowseOllamaRuntimeExecutableButton"
+                                    AutomationProperties.Name="Browse for an already-installed Ollama runtime executable"
+                                    AutomationProperties.HelpText="Chooses one existing local executable for exact signed-tree review. Nothing is downloaded, installed, or started."
+                                    Click="OnBrowseOllamaRuntimeExecutableClick" />
+                            <TextBox x:Name="OllamaRuntimeExecutablePath"
+                                     MinHeight="34"
+                                     Padding="6"
+                                     AutomationProperties.AutomationId="OllamaRuntimeExecutablePath"
+                                     AutomationProperties.Name="Already-installed Ollama runtime executable path"
+                                     TextChanged="OnOllamaRuntimeInputChanged" />
+                        </DockPanel>
+                        <Label Margin="0,10,0,0"
+                               Padding="0,0,0,4"
+                               Target="{Binding ElementName=OllamaModelRootPath}"
+                               Content="Ollama model _folder" />
+                        <DockPanel LastChildFill="True">
+                            <Button x:Name="BrowseOllamaModelRootButton"
+                                    DockPanel.Dock="Right"
+                                    MinWidth="150"
+                                    MinHeight="34"
+                                    Margin="8,0,0,0"
+                                    Content="Browse _models..."
+                                    AutomationProperties.AutomationId="BrowseOllamaModelRootButton"
+                                    AutomationProperties.Name="Browse for the existing Ollama model folder"
+                                    AutomationProperties.HelpText="Chooses an existing local model folder. DCx will not pull, copy, delete, or modify a model."
+                                    Click="OnBrowseOllamaModelRootClick" />
+                            <TextBox x:Name="OllamaModelRootPath"
+                                     MinHeight="34"
+                                     Padding="6"
+                                     AutomationProperties.AutomationId="OllamaModelRootPath"
+                                     AutomationProperties.Name="Existing Ollama model folder"
+                                     TextChanged="OnOllamaRuntimeInputChanged" />
+                        </DockPanel>
+                        <Label Margin="0,10,0,0"
+                               Padding="0,0,0,4"
+                               Target="{Binding ElementName=OllamaRuntimeProfileBox}"
+                               Content="Runtime dependency _profile" />
+                        <ComboBox x:Name="OllamaRuntimeProfileBox"
+                                  MinHeight="34"
+                                  DisplayMemberPath="Display"
+                                  AutomationProperties.AutomationId="OllamaRuntimeProfileBox"
+                                  AutomationProperties.Name="Ollama runtime dependency profile"
+                                  AutomationProperties.HelpText="NVIDIA CUDA v13 binds only the executable, base files, and complete CUDA v13 runner. Complete tree binds every installed runtime backend file."
+                                  SelectionChanged="OnOllamaRuntimeProfileChanged" />
+                        <Button x:Name="ReviewOllamaRuntimeButton"
+                                Width="240"
+                                MinHeight="36"
+                                Margin="0,14,0,0"
+                                HorizontalAlignment="Left"
+                                Content="Re_view signed runtime"
+                                AutomationProperties.AutomationId="ReviewOllamaRuntimeButton"
+                                AutomationProperties.Name="Review exact signed Ollama runtime tree"
+                                AutomationProperties.HelpText="Hashes every admitted runtime file and reads Windows publisher-signature evidence. It does not start the runtime or contact a model."
+                                Click="OnReviewOllamaRuntimeClick" />
+                        <TextBox x:Name="OllamaRuntimeDetails"
+                                 MinHeight="130"
+                                 MaxHeight="260"
+                                 Margin="0,12,0,0"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="Enter an existing runtime executable and model folder, choose a dependency profile, then review them."
+                                 AutomationProperties.AutomationId="OllamaRuntimeDetails"
+                                 AutomationProperties.Name="Enter an existing runtime executable and model folder, choose a dependency profile, then review them." />
+                        <CheckBox x:Name="OllamaRuntimeApprovalBox"
+                                  Margin="0,14,0,0"
+                                  FontWeight="SemiBold"
+                                  IsEnabled="False"
+                                  Content="I reviewed the exact signed runtime tree, signer certificate, model folder, and official license reference and a_pprove DCx-owned execution"
+                                  AutomationProperties.AutomationId="ApproveOllamaRuntimeBox"
+                                  AutomationProperties.Name="I reviewed the exact signed Ollama runtime tree, signer certificate, model folder, and official license reference and approve DCx-owned execution"
+                                  AutomationProperties.HelpText="Unchecked by default. Approval is protected for this Windows user and grants only bounded local runtime execution; it grants no download, model transfer, publication, or redistribution authority." />
+                        <WrapPanel Margin="0,14,0,0">
+                            <Button x:Name="SaveOllamaRuntimeButton"
+                                    MinWidth="180"
+                                    MinHeight="36"
+                                    Margin="0,0,10,0"
+                                    IsEnabled="False"
+                                    Content="Save runtime appr_oval"
+                                    AutomationProperties.AutomationId="SaveOllamaRuntimeButton"
+                                    AutomationProperties.Name="Save approved DCx-owned Ollama runtime"
+                                    Click="OnSaveOllamaRuntimeClick" />
+                            <Button x:Name="ClearOllamaRuntimeButton"
+                                    MinWidth="180"
+                                    MinHeight="36"
+                                    Content="Clear runtime approva_l"
+                                    AutomationProperties.AutomationId="ClearOllamaRuntimeButton"
+                                    AutomationProperties.Name="Clear DCx-owned Ollama runtime approval"
+                                    AutomationProperties.HelpText="Clears only the protected DCx approval. It does not stop another service or delete a runtime or model."
+                                    Click="OnClearOllamaRuntimeClick" />
+                        </WrapPanel>
                     </StackPanel>
                 </GroupBox>
 

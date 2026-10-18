@@ -6,6 +6,9 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $repoRoot "src\DCx.Desktop\bin\Release\net10.0-windows10.0.19041.0\DCx.exe"
 $ffmpeg = (Get-Command ffmpeg -ErrorAction Stop).Source
 $ffmpegLicense = Join-Path (Split-Path -Parent (Split-Path -Parent $ffmpeg)) "LICENSE"
+$ollamaExecutable = "D:\Programs\Ollama\ollama.exe"
+$ollamaModelRoot = "D:\OllamaModels"
+$ollamaTreeDigest = "1abc86c70ee5a6337e8054b1bf0bdc13d61a13e4461b30995be353b0dd3d0999"
 $magick = (Get-Command magick -ErrorAction Stop).Source
 $previousRepoRoot = $env:DCX_REPO_ROOT
 $previousDataRoot = $env:DCX_DATA_ROOT
@@ -23,6 +26,9 @@ $webServerOutputTask = $null
 $webServerErrorTask = $null
 $process = $null
 $cleanupFailure = $null
+$priorOllamaServerIds = @(Get-CimInstance Win32_Process | Where-Object {
+    $_.Name -ceq "ollama.exe" -and $_.ExecutablePath -ceq $ollamaExecutable -and $_.CommandLine -like "*serve*"
+} | ForEach-Object { [int]$_.ProcessId })
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -68,6 +74,10 @@ function Get-EphemeralPort {
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 if (-not (Test-Path -LiteralPath $ffmpegLicense -PathType Leaf)) {
     throw "The installed FFmpeg candidate lacks its co-located complete license file."
+}
+if (-not (Test-Path -LiteralPath $ollamaExecutable -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $ollamaModelRoot -PathType Container)) {
+    throw "The installed Ollama runtime or direct model folder is unavailable."
 }
 [IO.File]::WriteAllText($textFixture, "Accessible fixture line one.`r`nSecond line.")
 & $ffmpeg -hide_banner -loglevel error -f lavfi -i "color=c=blue:s=320x180:d=1" -c:v libx264 -pix_fmt yuv420p -y $videoFixture
@@ -147,8 +157,68 @@ try {
     } "The accessible local model settings window did not open."
     $localModelsStatus = Wait-For {
         $candidate = Find-ById $localModelsWindow "LocalModelsStatus"
-        if ($null -ne $candidate -and $candidate.Current.Name -like "Found * installed model records.*") { $candidate }
-    } "Local model inventory did not finish."
+        if ($null -ne $candidate -and $candidate.Current.Name -like "No DCx-owned Ollama runtime is approved.*") { $candidate }
+    } "The default-off owned-runtime state was not exposed."
+    $runtimeExecutablePath = Require-ById $localModelsWindow "OllamaRuntimeExecutablePath" "The Ollama runtime path field was not exposed."
+    $runtimeModelRootPath = Require-ById $localModelsWindow "OllamaModelRootPath" "The Ollama model-folder field was not exposed."
+    $runtimeProfile = Require-ById $localModelsWindow "OllamaRuntimeProfileBox" "The Ollama dependency-profile selector was not exposed."
+    $selectedProfiles = $runtimeProfile.GetCurrentPattern(
+        [System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection()
+    if ($selectedProfiles.Count -ne 1 -or $selectedProfiles[0].Current.Name -notlike "NVIDIA CUDA v13*") {
+        throw "The NVIDIA host did not default to the bounded CUDA v13 runtime profile."
+    }
+    $runtimeExecutablePath.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern).SetValue($ollamaExecutable)
+    $runtimeModelRootPath.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern).SetValue($ollamaModelRoot)
+    $reviewRuntime = Require-ById $localModelsWindow "ReviewOllamaRuntimeButton" "The exact runtime review action was not exposed."
+    $reviewRuntime.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $runtimeDetails = Wait-For {
+        $candidate = Find-ById $localModelsWindow "OllamaRuntimeDetails"
+        if ($null -ne $candidate -and
+            $candidate.Current.Name -like "*Dependency profile nvidia-cuda-v13. 63 files.*" -and
+            $candidate.Current.Name -like "*Tree SHA-256 $ollamaTreeDigest*" -and
+            $candidate.Current.Name -like "*Windows signature status Valid.*" -and
+            $candidate.Current.Name -like "*Signer certificate SHA-256*") { $candidate }
+    } "The exact signed CUDA-v13 runtime tree was not exposed for review." 240
+    $runtimeApproval = Require-ById $localModelsWindow "ApproveOllamaRuntimeBox" "The explicit runtime approval checkbox was not exposed."
+    $runtimeApprovalToggle = $runtimeApproval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+    if ($runtimeApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "Ollama runtime approval did not default to unchecked."
+    }
+    $runtimeActionIds = @(
+        "BrowseOllamaRuntimeExecutableButton", "BrowseOllamaModelRootButton",
+        "ReviewOllamaRuntimeButton", "ApproveOllamaRuntimeBox",
+        "SaveOllamaRuntimeButton", "ClearOllamaRuntimeButton")
+    $runtimeAccessKeys = @()
+    foreach ($automationId in $runtimeActionIds) {
+        $action = Find-ById $localModelsWindow $automationId
+        if ($null -eq $action -or -not $action.Current.IsKeyboardFocusable -or
+            [string]::IsNullOrWhiteSpace($action.Current.AccessKey)) {
+            throw "The $automationId action lacks a keyboard-focusable access key."
+        }
+        $runtimeAccessKeys += $action.Current.AccessKey
+    }
+    if (@($runtimeAccessKeys | Sort-Object -Unique).Count -ne $runtimeAccessKeys.Count) {
+        throw "Owned Ollama runtime actions expose duplicate access keys."
+    }
+    $runtimeApprovalToggle.Toggle()
+    $saveRuntime = Require-ById $localModelsWindow "SaveOllamaRuntimeButton" "The runtime approval save action was not exposed."
+    $saveRuntime.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $currentRuntime = Wait-For {
+        $candidate = Find-ById $localModelsWindow "CurrentOllamaRuntime"
+        if ($null -ne $candidate -and
+            $candidate.Current.Name -like "Ollama runtime: ollama.exe.*" -and
+            $candidate.Current.Name -like "*Profile nvidia-cuda-v13.*" -and
+            $candidate.Current.Name -like "*Tree SHA-256 $ollamaTreeDigest*") { $candidate }
+    } "The protected owned-runtime approval was not exposed." 240
+    $localModelsStatus = Wait-For {
+        $candidate = Find-ById $localModelsWindow "LocalModelsStatus"
+        if ($null -ne $candidate -and $candidate.Current.Name -like "Found * installed model records.*temporary PID-proven DCx-owned runtime*") { $candidate }
+    } "Owned-runtime model inventory did not finish." 240
+    if ($runtimeApprovalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw "Ollama runtime approval was not reset after saving."
+    }
     $approval = Wait-For {
         Find-ById $localModelsWindow "ApproveLocalModelSelectionBox"
     } "The explicit local model approval checkbox was not exposed."
@@ -281,8 +351,10 @@ try {
     $null = Wait-For { $status.Current.Name -eq "Media playing." } "The media Play action failed."
     $mediaPause.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $status.Current.Name -eq "Media paused." } "The media Pause action failed."
+    $localDescriptionClock = [Diagnostics.Stopwatch]::StartNew()
     $describeFrame.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    $null = Wait-For { $status.Current.Name -like "Frame description complete.*" } "The local VLM frame description did not complete." 300
+    $null = Wait-For { $status.Current.Name -like "Frame description complete.*" } "The local VLM frame description did not complete." 1100
+    $localDescriptionClock.Stop()
     $frameDescription = Wait-For {
         $candidate = Find-ById $viewer "FrameDescriptionText"
         if ($null -ne $candidate -and [string]$candidate.Current.Name -match "(?i)blue") { $candidate }
@@ -340,6 +412,7 @@ try {
     if ($resumeWebVideo.Current.IsEnabled) {
         throw "Web-video resume was enabled before DCx paused a video."
     }
+    $webDescriptionClock = [Diagnostics.Stopwatch]::StartNew()
     $askWebVideo.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     try {
         $null = Wait-For {
@@ -348,6 +421,10 @@ try {
     }
     catch {
         throw "The bounded shared-viewport web-video frame question did not complete. Status=$($status.Current.Name)"
+    }
+    $webDescriptionClock.Stop()
+    if ($webDescriptionClock.Elapsed -ge $localDescriptionClock.Elapsed) {
+        throw "The retained-model web-video follow-up was not faster than the cold local-frame description."
     }
     $webFrameAnswer = Wait-For {
         $candidate = Find-ById $viewer "FrameDescriptionText"
@@ -423,7 +500,11 @@ try {
     "Local MP4 initial state=paused"
     "Local MP4 play/pause=PASS"
     "Local VLM frame description=$frameDescriptionValue"
+    "Local VLM cold description milliseconds=$($localDescriptionClock.ElapsedMilliseconds)"
     "Persisted local model selection UIA=PASS"
+    "Protected signed owned Ollama runtime UIA=PASS"
+    "Owned runtime approval default unchecked=True"
+    "Owned runtime tree SHA-256=$ollamaTreeDigest"
     "Complete local model license text UIA=PASS"
     "Local model approval default unchecked=True"
     "Local model download action absent=True"
@@ -436,6 +517,8 @@ try {
     "Lookalike YouTube host blocked=True"
     "Canonical YouTube handoff tab=True"
     "Shared-viewport web-video visible-rectangle Q&A=$webFrameAnswerValue"
+    "Shared-viewport warm description milliseconds=$($webDescriptionClock.ElapsedMilliseconds)"
+    "Same-app retained-model speedup=True"
     "Web video remains paused for follow-up=True"
     "Explicit web-video resume=PASS"
     "Windows OCR golden text=True"
@@ -452,6 +535,26 @@ finally {
         if (-not $process.WaitForExit(5000)) { $process.Kill() }
     }
     try {
+        $null = Wait-For {
+            $currentIds = @(Get-CimInstance Win32_Process | Where-Object {
+                $_.Name -ceq "ollama.exe" -and
+                $_.ExecutablePath -ceq $ollamaExecutable -and
+                $_.CommandLine -like "*serve*"
+            } | ForEach-Object { [int]$_.ProcessId })
+            @($currentIds | Where-Object { $priorOllamaServerIds -notcontains $_ }).Count -eq 0
+        } "The app-owned Ollama runtime survived DCx process exit."
+        foreach ($priorId in $priorOllamaServerIds) {
+            if ($null -eq (Get-Process -Id $priorId -ErrorAction SilentlyContinue)) {
+                throw "A pre-existing Ollama service did not survive DCx process exit."
+            }
+        }
+        "App-owned Ollama runtime stopped on DCx exit=True"
+        "Pre-existing Ollama services preserved=True"
+    }
+    catch {
+        if ($null -eq $cleanupFailure) { $cleanupFailure = $_ }
+    }
+    try {
         $coreAssembly = Join-Path $repoRoot "src\DCx.Core\bin\Release\net10.0\DCx.Core.dll"
         [void][Reflection.Assembly]::LoadFrom($coreAssembly)
         $localModelStore = [DCx.Core.LocalModels.LocalModelSelectionStore]::OpenAsync(
@@ -459,6 +562,10 @@ finally {
         $null = $localModelStore.ClearVisionAsync(
             [Threading.CancellationToken]::None).GetAwaiter().GetResult()
         $null = $localModelStore.ClearEmbeddingAsync(
+            [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $ollamaRuntimeStore = [DCx.Core.LocalModels.OllamaRuntimeSelectionStore]::OpenAsync(
+            $dataRoot, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $null = $ollamaRuntimeStore.ClearAsync(
             [Threading.CancellationToken]::None).GetAwaiter().GetResult()
         $whisperStore = [DCx.Core.LocalModels.WhisperBackendSelectionStore]::OpenAsync(
             $dataRoot, [Threading.CancellationToken]::None).GetAwaiter().GetResult()

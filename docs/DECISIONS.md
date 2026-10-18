@@ -92,5 +92,6 @@
 | [0088](architecture/adr/0088-inventory-dxgi-gpu-memory-without-granting-compute-admission.md) | Inventory DXGI GPU memory without granting compute admission | Accepted for Windows inventory; non-NVIDIA compute admission remains blocked | 2026-10-19 |
 | [0089](architecture/adr/0089-fence-shared-ollama-runtime-activity.md) | Fence shared Ollama runtime activity without altering other workloads | Accepted for fail-closed overlap detection; exclusive external-client isolation remains blocked | 2026-10-19 |
 | [0090](architecture/adr/0090-owned-ollama-runtime-boundary.md) | Bind an independently owned Ollama runtime before production composition | Accepted as a validated isolation foundation; accessible approval and production composition remain blocked | 2026-10-19 |
+| [0091](architecture/adr/0091-protected-owned-ollama-production-host.md) | Compose protected owned Ollama approval with bounded exact-model residency | Accepted for local vision production composition; malicious same-user isolation remains blocked | 2026-10-19 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

@@ -50,11 +50,27 @@ public sealed class OllamaOwnedRuntime : IAsyncDisposable
     public string Version { get; }
     public int ProcessId { get; }
 
+    public bool IsRunning =>
+        Volatile.Read(ref disposed) == 0 && !process.HasExited;
+
     public OllamaLocalClient CreateClient(TimeSpan? timeout = null)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
         if (process.HasExited) throw new InvalidOperationException("The DCx-owned Ollama runtime is no longer running.");
         return new OllamaLocalClient(BaseAddress, timeout);
+    }
+
+    internal OllamaLocalClient CreateRetainedModelClient(TimeSpan? timeout = null)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+        if (process.HasExited) throw new InvalidOperationException("The DCx-owned Ollama runtime is no longer running.");
+        return new OllamaLocalClient(
+            OllamaLocalClient.CreateHardenedHandler(),
+            BaseAddress,
+            timeout,
+            OllamaInferenceLeaseCoordinator.CreateForCurrentUser(),
+            WindowsLocalModelResourceAdmission.CreateForCurrentUser(),
+            retainPinnedModel: true);
     }
 
     public async ValueTask DisposeAsync()
@@ -120,7 +136,7 @@ public sealed class OllamaOwnedRuntimeLauncher
         OllamaRuntimeReviewer.ValidateBinding(binding);
         if (options.StartupTimeout < TimeSpan.FromSeconds(1) || options.StartupTimeout > TimeSpan.FromMinutes(2))
             throw new ArgumentOutOfRangeException(nameof(options), "Ollama startup must be bounded between one second and two minutes.");
-        var modelRoot = ValidateModelRoot(options.ModelRoot);
+        var modelRoot = OllamaRuntimeSelectionStore.ValidateModelRoot(options.ModelRoot);
         var port = options.Port ?? ReserveEphemeralPort();
         if (port is < 1024 or > 65535) throw new ArgumentOutOfRangeException(nameof(options), "The Ollama loopback port is invalid.");
 
@@ -345,19 +361,6 @@ public sealed class OllamaOwnedRuntimeLauncher
             foreach (var lease in leases) lease.Dispose();
             throw;
         }
-    }
-
-    private static string ValidateModelRoot(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path) || path.Length > 1024 || path.Contains('\0'))
-            throw new ArgumentException("The Ollama model root is invalid.", nameof(path));
-        var root = Path.GetFullPath(path.Trim());
-        if (!Path.IsPathFullyQualified(root) || root.StartsWith("\\\\", StringComparison.Ordinal) || !Directory.Exists(root))
-            throw new ArgumentException("The Ollama model root must be an existing local directory.", nameof(path));
-        for (var current = new DirectoryInfo(root); current is not null; current = current.Parent)
-            if ((current.Attributes & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidOperationException("The Ollama model root cannot cross a reparse point.");
-        return root;
     }
 
     private static int ReserveEphemeralPort()

@@ -23,6 +23,7 @@ public sealed class WebVideoFrameException(string code) : Exception(code)
 
 public sealed class WebVideoFrameDescriptionService
 {
+    private readonly OllamaApprovedRuntimeHost runtimeHost;
     private const int MaximumScreenshotBytes = 20 * 1024 * 1024;
     private const int MaximumScreenshotResponseCharacters = 28 * 1024 * 1024;
     private const double MaximumMediaSeconds = 7 * 24 * 60 * 60;
@@ -38,6 +39,9 @@ public sealed class WebVideoFrameDescriptionService
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         MaxDepth = 4,
     };
+
+    public WebVideoFrameDescriptionService(OllamaApprovedRuntimeHost runtimeHost) =>
+        this.runtimeHost = runtimeHost ?? throw new ArgumentNullException(nameof(runtimeHost));
 
     private const string PauseScript =
         "(() => {" +
@@ -192,15 +196,13 @@ public sealed class WebVideoFrameDescriptionService
                 4096,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
 
-            using var ollama = new OllamaLocalClient(
-                new Uri("http://localhost:11434/"),
-                TimeSpan.FromMinutes(3));
-            var vision = await ollama.DescribeImagePinnedAsync(
+            var vision = await runtimeHost.DescribeImagePinnedAsync(
                 model,
                 modelDigest,
                 modelLicenseSha256,
                 framePath,
                 prompt.Prompt,
+                TimeSpan.FromMinutes(5),
                 cancellationToken).ConfigureAwait(false);
             return new WebVideoFrameDescriptionResult(
                 vision,

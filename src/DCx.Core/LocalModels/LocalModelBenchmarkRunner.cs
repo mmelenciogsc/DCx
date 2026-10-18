@@ -119,21 +119,29 @@ public sealed class OllamaEmbeddingBenchmarkBackend : IEmbeddingBenchmarkBackend
     private OllamaEmbeddingBenchmarkBackend(
         ApprovedLocalModelBinding binding,
         OllamaLocalClient client,
-        string runtimeVersion)
+        string runtimeVersion,
+        string? runtimeTreeSha256)
     {
         ArgumentNullException.ThrowIfNull(binding);
         this.client = client ?? throw new ArgumentNullException(nameof(client));
         ArgumentException.ThrowIfNullOrWhiteSpace(runtimeVersion);
         this.binding = binding;
         RuntimeVersion = runtimeVersion;
+        var identity = new List<LocalModelBenchmarkIdentityPart>
+        {
+            new("model", binding.Digest),
+            new("model_license", binding.LicenseSha256),
+            new("model_name", Sha256(binding.Name)),
+            new("runtime_version", Sha256(runtimeVersion)),
+        };
+        if (runtimeTreeSha256 is not null)
+        {
+            ValidateDigest(runtimeTreeSha256);
+            identity.Add(new("runtime_tree", runtimeTreeSha256.ToLowerInvariant()));
+        }
         BindingSha256 = LocalModelBenchmarkRunner.ComputeBackendBindingSha256(
             LocalModelBenchmarkKind.EmbeddingRetrieval,
-            [
-                new("model", binding.Digest),
-                new("model_license", binding.LicenseSha256),
-                new("model_name", Sha256(binding.Name)),
-                new("runtime_version", Sha256(runtimeVersion)),
-            ]);
+            identity);
     }
 
     public string BindingSha256 { get; }
@@ -149,7 +157,36 @@ public sealed class OllamaEmbeddingBenchmarkBackend : IEmbeddingBenchmarkBackend
         var client = new OllamaLocalClient(origin, timeout);
         try
         {
-            return await CreateAsync(binding, client, cancellationToken).ConfigureAwait(false);
+            return await CreateAsync(
+                binding,
+                client,
+                runtimeTreeSha256: null,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            client.Dispose();
+            throw;
+        }
+    }
+
+    public static async Task<OllamaEmbeddingBenchmarkBackend> CreateAsync(
+        ApprovedLocalModelBinding binding,
+        Uri origin,
+        TimeSpan timeout,
+        string runtimeTreeSha256,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(binding);
+        ValidateDigest(runtimeTreeSha256);
+        var client = new OllamaLocalClient(origin, timeout);
+        try
+        {
+            return await CreateAsync(
+                binding,
+                client,
+                runtimeTreeSha256,
+                cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -162,6 +199,17 @@ public sealed class OllamaEmbeddingBenchmarkBackend : IEmbeddingBenchmarkBackend
         ApprovedLocalModelBinding binding,
         OllamaLocalClient client,
         CancellationToken cancellationToken = default)
+        => await CreateAsync(
+            binding,
+            client,
+            runtimeTreeSha256: null,
+            cancellationToken).ConfigureAwait(false);
+
+    private static async Task<OllamaEmbeddingBenchmarkBackend> CreateAsync(
+        ApprovedLocalModelBinding binding,
+        OllamaLocalClient client,
+        string? runtimeTreeSha256,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(binding);
         ArgumentNullException.ThrowIfNull(client);
@@ -171,7 +219,11 @@ public sealed class OllamaEmbeddingBenchmarkBackend : IEmbeddingBenchmarkBackend
             binding.LicenseSha256,
             cancellationToken).ConfigureAwait(false);
         var version = await client.GetVersionAsync(cancellationToken).ConfigureAwait(false);
-        return new OllamaEmbeddingBenchmarkBackend(binding, client, version);
+        return new OllamaEmbeddingBenchmarkBackend(
+            binding,
+            client,
+            version,
+            runtimeTreeSha256);
     }
 
     public async Task<EmbeddingBenchmarkBackendResult> EmbedAsync(
@@ -198,6 +250,17 @@ public sealed class OllamaEmbeddingBenchmarkBackend : IEmbeddingBenchmarkBackend
 
     private static string Sha256(string value) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static void ValidateDigest(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length != 64 ||
+            value.Any(character => !char.IsAsciiHexDigit(character)))
+        {
+            throw new ArgumentException(
+                "The runtime tree SHA-256 must contain 64 hexadecimal characters.",
+                nameof(value));
+        }
+    }
 }
 
 public sealed record TranscriptionBenchmarkEvidence(
