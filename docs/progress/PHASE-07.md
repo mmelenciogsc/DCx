@@ -1,7 +1,7 @@
 # P07 — Files, documents, accessibility and media
 
 - Status: Complete (automated native gate; human assistive-technology pass unverified)
-- Implementation commits: `e21c654`, `4e8ee1f`, `c47edf9`, `c618254`, `10e07d5`, `ed6f001`, `acc8e62`, `040fb4e`, `1a3b28e`, `15a6061`
+- Implementation commits: `e21c654`, `4e8ee1f`, `c47edf9`, `c618254`, `10e07d5`, `ed6f001`, `acc8e62`, `040fb4e`, `1a3b28e`, `15a6061`, `73c154d`
 - Documentation commit: recorded by the commit containing this file
 
 ## Implemented
@@ -39,7 +39,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 - Windows OCR recognized the golden `DCX`/`42` content and returned normalized geometry.
 - Semantic repair, HTML export, real OPC DOCX export and DOCX viewer round-trip passed.
 - Native UIA script result: `P07 content viewer UIA validation=PASS`.
-- Latest passing evidence directory: `artifacts/test-results/p07-87601bf2cff445b1b790e30d4c14dcaa/` (generated from committed source `15a6061` and intentionally not committed). The disposable profile explicitly registered the real installed FFmpeg candidate, proved the local blue-frame result through that exact binding and the native hardware-policy-selected 4B vision identity, and did not retain approval. It clears all disposable Ollama, Whisper and FFmpeg state and protected anchors after the app closes; the post-gate audit found zero DCx test/model credentials. Composed P06 evidence at `artifacts/test-results/p06-b7abc6a470674cfa8278954849cf758a/` contains the inert item/set transfer contracts, native hardware/resource selection, exact transfer preflight, protected approval-state warnings, WAV/MP3 transcription, deterministic audio extraction and FFmpeg-registration/clear-denial evidence.
+- Latest passing evidence directory: `artifacts/test-results/p07-2106b101e2b94f8a8587170e04f77321/` (generated from committed source `73c154d` and intentionally not committed). The disposable profile explicitly registered the real installed FFmpeg candidate, proved the local blue-frame result through that exact binding and the native hardware-policy-selected 4B vision identity, and did not retain approval. It clears all disposable Ollama, Whisper and FFmpeg state and protected anchors after the app closes; the post-gate audit found zero DCx test/model credentials. Composed P06 evidence at `artifacts/test-results/p06-526411f764ff4ada96abf1b52397a773/` contains the default-off accessible transfer workflow, inert item/set transfer contracts, native hardware/resource selection, exact transfer preflight, protected approval-state warnings, WAV/MP3 transcription, deterministic audio extraction and FFmpeg-registration/clear-denial evidence. The full native suite passes 482/482.
 - One earlier committed-source run transiently failed to observe the current vision-model UIA name after the persisted-save status. No orphan DCx process remained; the immediate rerun and a later independent rerun both passed. The passing runs are the accepted gate evidence, while the isolated timing observation remains documented rather than being represented as a zero-flake claim.
 
 ## Security, accessibility and limitations

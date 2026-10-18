@@ -1,7 +1,7 @@
 # P14 — Pilot and release readiness
 
 - Status: BLOCKED / NO_GO (local readiness controls pass; pilot and production activation are off)
-- Implementation commits: `01539fd`, `66715b0`, `edd516a`, `26da605`, `993149e`, `54f66bc`, `9877a60`, `faf6b71`, `1631ebb`, `599cee9`, `ec37d1f`, `a662abb`, `8583b29`, `d5624a6`, `9576d63`, `261f6ee`, `76d0750`, `562667b`, `f66dd20`, `3bf9452`, `23ed1d9`, `9140183`, `8cb2db4`, `eb81ac3`, `66c4c8c`, `05345b9`, `0c72488`, `70f8dd7`, `abd91c0`, `7829af1`, `8783ed2`, `7df8c0a`, `84de38b`, `1bb4d7e`, `efc607c`, `0381f5e`, `b7d281e`, `21d8a9d`, `89f7bb3`, `6bd7acc`, `e559975`, `c292a21`, `f4810e0`, `0518333`, `040fb4e`, `1a3b28e`, `15a6061`
+- Implementation commits: `01539fd`, `66715b0`, `edd516a`, `26da605`, `993149e`, `54f66bc`, `9877a60`, `faf6b71`, `1631ebb`, `599cee9`, `ec37d1f`, `a662abb`, `8583b29`, `d5624a6`, `9576d63`, `261f6ee`, `76d0750`, `562667b`, `f66dd20`, `3bf9452`, `23ed1d9`, `9140183`, `8cb2db4`, `eb81ac3`, `66c4c8c`, `05345b9`, `0c72488`, `70f8dd7`, `abd91c0`, `7829af1`, `8783ed2`, `7df8c0a`, `84de38b`, `1bb4d7e`, `efc607c`, `0381f5e`, `b7d281e`, `21d8a9d`, `89f7bb3`, `6bd7acc`, `e559975`, `c292a21`, `f4810e0`, `0518333`, `040fb4e`, `1a3b28e`, `15a6061`, `73c154d`
 - Documentation commit: recorded by the commit containing this file
 
 No pilot was started, no telemetry was collected, no user was enrolled, and no production service or payment was activated.
@@ -41,7 +41,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled consent state, blocker list, metric-definition list and refresh action. The validator confirmed that no control named `Activate production` exists.
 - The P11 readiness gate was rerun after opaque exact-review blocked-case dispositions were implemented. The local accessible workflow now passes while structurally leaving events blocked and making zero provider/financial calls. P11 remains blocking because exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider plus closure/requeue policy, real operator identity/MFA/TLS/secret custody/centralized audit, deployed distributed fencing, external alert delivery/human acknowledgment/escalation and authorized provider acceptance remain absent.
-- Evidence: `artifacts/test-results/p14-2c669bcc6b4a42dd93e2797661e7b5c2/go-no-go.json` with `p14-readiness.trx` beside it, generated from exact committed source `15a6061` and intentionally not committed.
+- Evidence: `artifacts/test-results/p14-e2a28c221396455196926c4660b87e44/go-no-go.json` with `p14-readiness.trx` beside it, generated from exact committed source `73c154d` and intentionally not committed. The exact-source full suite passes 482/482 with zero build warnings/errors.
 
 ## Changed files in the latest milestone
 
