@@ -35,3 +35,7 @@ The tested recovery service includes browser history/bookmarks and private CKB/C
 6. Complete JAWS, NVDA and Narrator acceptance with recorded human results.
 
 Do not publish either staging artifact or describe either as installable. Deployment to the Ubuntu server, external publication, signing, installation and production activation require separate owner approval.
+
+## CARE service deployment constraint
+
+Schema v13's registered period/allocation subledger is validated only in the local SQLite sandbox. It does not authorize deployment or establish who may close a production earning period. Before any Ubuntu deployment, define authenticated close/adjustment roles, MFA/TLS and secret custody, distributed transaction/fencing behavior, approved carry-forward/dispute/tax policy, retention and contributor rights, PayPal sandbox credentials/eligibility, centralized audit/alerting and rollback. Re-run credentialed sandbox and multi-instance acceptance only after explicit owner approval. No server write, container, credential use, PayPal call or payout was performed for this checkpoint.

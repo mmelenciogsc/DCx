@@ -1,7 +1,7 @@
 # P14 — Pilot and release readiness
 
 - Status: BLOCKED / NO_GO (local readiness controls pass; pilot and production activation are off)
-- Implementation commits: `01539fd`, `66715b0`, `edd516a`, `26da605`, `993149e`, `54f66bc`, `9877a60`, `faf6b71`, `1631ebb`, `599cee9`, `ec37d1f`, `a662abb`, `8583b29`, `d5624a6`, `9576d63`, `261f6ee`, `76d0750`, `562667b`, `f66dd20`, `3bf9452`, `23ed1d9`, `9140183`, `8cb2db4`, `eb81ac3`, `66c4c8c`, `05345b9`, `0c72488`, `70f8dd7`, `abd91c0`, `7829af1`, `8783ed2`, `7df8c0a`, `84de38b`, `1bb4d7e`, `efc607c`, `0381f5e`, `b7d281e`, `21d8a9d`, `89f7bb3`, `6bd7acc`, `e559975`, `c292a21`, `f4810e0`, `0518333`, `040fb4e`, `1a3b28e`, `15a6061`, `73c154d`, `ac6debc`, `c12606d`, `a7cbd89`, `5873218`, `b82c270`, `5cb8003`, `45f4e2b`, `0a2dab8`, `e02d570`, `2ef725d`
+- Implementation commits through current exact source: `2cbad15`
 - Documentation commit: recorded by the commit containing this file
 
 No pilot was started, no telemetry was collected, no user was enrolled, and no production service or payment was activated.
@@ -32,7 +32,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 exact-namespace release/readiness tests: passed 10, failed 0, skipped 0; about 1 second. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
-- Current committed-source expanded full suite: passed 507, failed 0, skipped 0; native Windows, about 8 seconds.
+- Current committed-source expanded full suite: passed 510, failed 0, skipped 0; native Windows, about 8 seconds.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -40,8 +40,8 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 - Decision: `NO_GO`.
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled consent state, blocker list, metric-definition list and refresh action. The validator confirmed that no control named `Activate production` exists.
-- The P11 readiness gate was rerun after schema-v12 aggregate-liability reservation. The local accounting boundary now denies missing or concurrently over-reserved contributor liability before provider send while existing blocked-event review remains non-financial. P11 remains blocking because contributor/period allocation authority, exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider plus closure/requeue policy, real operator identity/MFA/TLS/secret custody/centralized audit, deployed distributed fencing, external alert delivery/human acknowledgment/escalation and authorized provider acceptance remain absent.
-- Evidence: `artifacts/test-results/p14-0a65aa53ab0f4c60991329f689db1e32/go-no-go.json` with `p14-readiness.trx` beside it, generated from exact committed source `2ef725d` and intentionally not committed. The exact-source full suite passes 507/507 with zero build warnings/errors.
+- The P11 readiness gate was rerun after schema-v13 registered contributor-period allocation binding. The local accounting boundary now denies missing registration, contributor/amount/period substitution, stored allocation tamper and concurrent duplicate allocation before provider send, while existing blocked-event review remains non-financial. P11 remains blocking because authoritative production close/adjustment/hold/dispute/tax authority, exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider plus closure/requeue policy, real operator identity/MFA/TLS/secret custody/centralized audit, deployed distributed fencing, external alert delivery/human acknowledgment/escalation and authorized provider acceptance remain absent.
+- Evidence: `artifacts/test-results/p14-f8ee0f5eedf2495287e03c803b4efaa4/go-no-go.json` with `p14-readiness.trx` beside it, generated from exact committed source `2cbad15` and intentionally not committed. The exact-source full suite passes 510/510 with zero build warnings/errors.
 
 ## Changed files in the latest milestone
 
