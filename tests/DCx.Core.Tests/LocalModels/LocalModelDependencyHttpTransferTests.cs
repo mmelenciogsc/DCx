@@ -710,6 +710,8 @@ public sealed class LocalModelDependencyHttpTransferTests
 
     private sealed class ReviewOnlyRedirectPolicy : ILocalModelDependencyRedirectPolicy
     {
+        public string? PlanSha256 => null;
+
         public LocalModelDependencyRedirectPolicyReview Review =>
             LocalModelDependencyRedirectPolicyReview.DenyAll;
     }
@@ -717,6 +719,8 @@ public sealed class LocalModelDependencyHttpTransferTests
     private sealed class MutableRedirectPolicy(LocalModelDependencyRedirectPolicyReview review)
         : ILocalModelDependencyRedirectPolicy
     {
+        public string? PlanSha256 => null;
+
         public LocalModelDependencyRedirectPolicyReview Review { get; set; } = review;
     }
 

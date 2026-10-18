@@ -124,7 +124,7 @@
                                             IsEnabled="False"
                                             AutomationProperties.AutomationId="ReviewDependencyRoutesButton"
                                             AutomationProperties.Name="Observe current dependency provider routes with HEAD requests only"
-                                            AutomationProperties.HelpText="Explicitly contacts the displayed public dependency sources with bounded HEAD requests. It reads no response body or payload, retains no signed query value, and does not approve a transfer."
+                                            AutomationProperties.HelpText="Explicitly contacts the displayed public dependency sources with bounded HEAD requests. It reads no response body or payload, retains no signed query value, and does not approve a transfer. A successful review is bound only to the exact displayed plan; a changed plan is denied before provider payload contact or storage creation."
                                             Click="OnReviewDependencyRoutesClick" />
                                     <Button x:Name="CancelDependencyRouteReviewButton"
                                             MinWidth="180"

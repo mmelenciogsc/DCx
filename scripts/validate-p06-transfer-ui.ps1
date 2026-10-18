@@ -115,6 +115,7 @@ try {
         $routeReview.Current.Name -notlike "*HEAD requests only*" -or
         $routeReview.Current.HelpText -notlike "*reads no response body or payload*" -or
         $routeReview.Current.HelpText -notlike "*does not approve a transfer*" -or
+        $routeReview.Current.HelpText -notlike "*changed plan is denied before provider payload contact or storage creation*" -or
         $routeReview.Current.IsEnabled -or $routeReviewCancel.Current.IsEnabled) {
         throw "The synthetic fixture did not expose a disabled, accurately described provider-route review boundary."
     }
@@ -228,6 +229,7 @@ try {
         redirect_policy_bound_to_one_time_approval_and_receipt = $true
         provider_route_review_accessible = $true
         provider_route_review_explicit_and_head_only = $true
+        provider_route_review_exact_plan_bound = $true
         provider_route_review_does_not_approve_transfer = $true
         item_and_byte_progress_announced = $true
         cancellation_available = $true

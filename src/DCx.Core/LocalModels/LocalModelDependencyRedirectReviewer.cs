@@ -307,6 +307,8 @@ internal sealed class SessionLocalModelDependencyRedirectPolicy(
     LocalModelDependencyRedirectReviewSession session,
     TimeProvider timeProvider) : ILocalModelDependencyRedirectPolicy
 {
+    public string? PlanSha256 => session.PlanSha256;
+
     public LocalModelDependencyRedirectPolicyReview Review =>
         timeProvider.GetUtcNow() < session.ExpiresAtUtc
             ? session.PolicyReview

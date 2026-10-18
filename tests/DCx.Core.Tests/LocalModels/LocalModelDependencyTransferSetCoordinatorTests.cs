@@ -192,6 +192,25 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
     }
 
     [Fact]
+    public async Task Transfer_RejectsReviewedPlanSubstitutionBeforeStorage()
+    {
+        var fixture = Fixture("reviewed-plan-substitution");
+        fixture.Transfer.RedirectPolicyPlanSha256 = new string('b', 64);
+
+        await AssertCodeAsync("dependency_transfer_approval_invalid", () =>
+            fixture.Coordinator.TransferAsync(
+                fixture.Plan,
+                LocalModelDependencyTransferSetApproval.Create(
+                    fixture.Plan,
+                    fixture.Coordinator.RedirectPolicyReview,
+                    approved: true)));
+
+        Assert.Equal(0, fixture.Transfer.Calls);
+        Assert.False(Directory.Exists(Path.Combine(fixture.Root, "LocalModels")));
+        Assert.Empty(fixture.Anchors.Values);
+    }
+
+    [Fact]
     public async Task CancellationBeforeAndDuringTransferLeavesNoPublishedOrPartialSet()
     {
         var before = Fixture("cancel-before");
@@ -436,6 +455,7 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
     {
         public LocalModelDependencyRedirectPolicyReview RedirectPolicyReview { get; set; } =
             LocalModelDependencyRedirectPolicyReview.DenyAll;
+        public string? RedirectPolicyPlanSha256 { get; set; }
 
         public int Calls { get; private set; }
         public int? FailAtCall { get; set; }

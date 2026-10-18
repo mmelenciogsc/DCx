@@ -553,7 +553,10 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
         LocalModelDependencyTransferPlanner.ValidateForTransfer(plan);
         ArgumentNullException.ThrowIfNull(approval);
         if (approval.SchemaVersion != LocalModelDependencyTransferSetApproval.CurrentSchemaVersion ||
-            !approval.Approved || !DigestEquals(approval.PlanSha256, plan.PlanSha256) ||
+            !approval.Approved ||
+            (transfer.RedirectPolicyPlanSha256 is { } reviewedPlanSha256 &&
+                !DigestEquals(reviewedPlanSha256, plan.PlanSha256)) ||
+            !DigestEquals(approval.PlanSha256, plan.PlanSha256) ||
             !DigestEquals(approval.RedirectPolicySha256, redirectPolicy.PolicySha256))
         {
             throw new LocalModelDependencyTransferException("dependency_transfer_approval_invalid");

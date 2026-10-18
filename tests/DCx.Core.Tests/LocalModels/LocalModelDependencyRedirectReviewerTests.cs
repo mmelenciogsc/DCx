@@ -39,6 +39,7 @@ public sealed class LocalModelDependencyRedirectReviewerTests
         Assert.Equal(2, session.ExactLengthCount);
         Assert.Equal(Now, session.ObservedAtUtc);
         Assert.Equal(Now.AddMinutes(30), session.ExpiresAtUtc);
+        Assert.Equal(fixture.Plan.PlanSha256, session.CreatePolicy().PlanSha256);
         Assert.True(session.PolicyReview.AllowsRedirects);
         var route = Assert.Single(session.PolicyReview.Routes);
         Assert.Equal(fixture.PayloadItem.SourceUri, route.FromUriWithoutQuery);
@@ -181,6 +182,48 @@ public sealed class LocalModelDependencyRedirectReviewerTests
             TimeSpan.FromMinutes(30));
         var session = await Review(reviewer, fixture);
 
+        var substitutedPlan = new LocalModelDependencyTransferPlanner().Create(
+            fixture.Catalog,
+            [fixture.AlternateCandidateId],
+            long.MaxValue);
+        var substitutedItem = substitutedPlan.Items[0];
+        var coordinatorRoot = Path.Combine(
+            Path.GetTempPath(),
+            "dcx-reviewed-plan-substitution-" + Guid.NewGuid().ToString("N"));
+        using (var substitutionCoordinator = new LocalModelDependencyTransferSetCoordinator(
+            coordinatorRoot,
+            session))
+        {
+            await AssertTransferCodeAsync("dependency_transfer_approval_invalid", () =>
+                substitutionCoordinator.TransferAsync(
+                    substitutedPlan,
+                    LocalModelDependencyTransferSetApproval.Create(
+                        substitutedPlan,
+                        session.PolicyReview,
+                        approved: true)));
+        }
+        Assert.False(Directory.Exists(coordinatorRoot));
+
+        var substitutionHandler = new TransferFixtureHandler(request =>
+            TransferResponse(request, "substituted payload"u8.ToArray()));
+        using (var substitutionTransfer = new LocalModelDependencyHttpTransfer(
+            substitutionHandler,
+            fixture.Catalog,
+            redirectPolicy: session.CreatePolicy()))
+        {
+            var substitutedApproval = LocalModelDependencyTransferApproval.Create(
+                substitutedPlan,
+                substitutedItem,
+                session.PolicyReview,
+                approved: true);
+            await AssertTransferCodeAsync("dependency_transfer_approval_invalid", () =>
+                substitutionTransfer.TransferAsync(
+                    substitutedPlan,
+                    substitutedApproval,
+                    new MemoryStream()));
+        }
+        Assert.Empty(substitutionHandler.RequestedUris);
+
         var payload = "redirect review payload"u8.ToArray();
         var transferTarget = new Uri("https://assets.example.test/releases/dependency.bin?signature=fresh-secret");
         var transferHandler = new TransferFixtureHandler(request =>
@@ -281,15 +324,33 @@ public sealed class LocalModelDependencyRedirectReviewerTests
                 Digest(license),
                 false),
             []);
+        var alternatePayload = "alternate review payload"u8.ToArray();
+        var alternateCandidate = new PinnedLocalModelDependencyCandidate(
+            "alternate-review-fixture",
+            LocalModelDependencyKind.WhisperModel,
+            "Alternate redirect review fixture",
+            new Uri("https://github.com/dcx/alternate-dependency.bin"),
+            alternatePayload.LongLength,
+            Digest(alternatePayload),
+            new LocalModelDependencyLicense(
+                "MIT",
+                new Uri("https://raw.githubusercontent.com/dcx/ALTERNATE-LICENSE"),
+                license.LongLength,
+                Digest(license),
+                false),
+            []);
         var catalog = new LocalModelDependencyCatalogReview(
             LocalModelDependencyCatalogLoader.CurrentSchemaVersion,
             "redirect-review-fixture",
             new string('a', 64),
-            Array.AsReadOnly([candidate]));
-        var plan = new LocalModelDependencyTransferPlanner().CreateForAll(catalog, long.MaxValue);
+            Array.AsReadOnly([candidate, alternateCandidate]));
+        var plan = new LocalModelDependencyTransferPlanner().Create(
+            catalog,
+            [candidate.Id],
+            long.MaxValue);
         var payloadItem = Assert.Single(plan.Items, item => item.SourceUri == candidate.SourceUri);
         var licenseItem = Assert.Single(plan.Items, item => item.SourceUri == candidate.License.SourceUri);
-        return new Fixture(catalog, plan, payloadItem, licenseItem);
+        return new Fixture(catalog, plan, payloadItem, licenseItem, alternateCandidate.Id);
     }
 
     private static string Digest(byte[] bytes) =>
@@ -332,7 +393,8 @@ public sealed class LocalModelDependencyRedirectReviewerTests
         LocalModelDependencyCatalogReview Catalog,
         LocalModelDependencyTransferPlan Plan,
         LocalModelDependencyTransferItem PayloadItem,
-        LocalModelDependencyTransferItem LicenseItem);
+        LocalModelDependencyTransferItem LicenseItem,
+        string AlternateCandidateId);
 
     private sealed class FixtureHandler(
         Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler

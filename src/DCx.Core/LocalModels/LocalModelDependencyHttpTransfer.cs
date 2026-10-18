@@ -78,6 +78,12 @@ public interface ILocalModelDependencyTransfer
 {
     LocalModelDependencyRedirectPolicyReview RedirectPolicyReview { get; }
 
+    /// <summary>
+    /// The exact plan reviewed for this redirect policy, or null only when the policy is not
+    /// session-derived. A non-null binding must match before provider contact or set storage.
+    /// </summary>
+    string? RedirectPolicyPlanSha256 { get; }
+
     Task<LocalModelDependencyTransferResult> TransferAsync(
         LocalModelDependencyTransferPlan plan,
         LocalModelDependencyTransferApproval approval,
@@ -258,6 +264,7 @@ public sealed record LocalModelDependencyRedirectPolicyReview(
 internal interface ILocalModelDependencyRedirectPolicy
 {
     LocalModelDependencyRedirectPolicyReview Review { get; }
+    string? PlanSha256 { get; }
 }
 
 internal sealed class DenyAllLocalModelDependencyRedirectPolicy : ILocalModelDependencyRedirectPolicy
@@ -270,6 +277,8 @@ internal sealed class DenyAllLocalModelDependencyRedirectPolicy : ILocalModelDep
 
     public LocalModelDependencyRedirectPolicyReview Review =>
         LocalModelDependencyRedirectPolicyReview.DenyAll;
+
+    public string? PlanSha256 => null;
 }
 
 internal sealed record LocalModelDependencyRedirectRule(
@@ -288,6 +297,7 @@ internal sealed class ExactLocalModelDependencyRedirectPolicy : ILocalModelDepen
 {
     private const int MaximumRules = 32;
     public LocalModelDependencyRedirectPolicyReview Review { get; }
+    public string? PlanSha256 => null;
 
     public ExactLocalModelDependencyRedirectPolicy(
         IReadOnlyList<LocalModelDependencyRedirectRule> rules)
@@ -384,6 +394,7 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
     private readonly ILocalModelDependencyRedirectPolicy redirectPolicy;
 
     public LocalModelDependencyRedirectPolicyReview RedirectPolicyReview => redirectPolicy.Review;
+    public string? RedirectPolicyPlanSha256 => redirectPolicy.PlanSha256;
 
     public LocalModelDependencyHttpTransfer()
         : this(
@@ -652,7 +663,9 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
         {
             throw new LocalModelDependencyTransferException("dependency_transfer_capacity_unapproved");
         }
-        if (approval.SchemaVersion != LocalModelDependencyTransferApproval.CurrentSchemaVersion ||
+        if ((redirectPolicy.PlanSha256 is { } reviewedPlanSha256 &&
+                !DigestEquals(reviewedPlanSha256, plan.PlanSha256)) ||
+            approval.SchemaVersion != LocalModelDependencyTransferApproval.CurrentSchemaVersion ||
             !approval.Approved ||
             !DigestEquals(approval.PlanSha256, plan.PlanSha256) ||
             !DigestEquals(approval.RedirectPolicySha256, redirectPolicyReview.PolicySha256))

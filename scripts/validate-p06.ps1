@@ -108,6 +108,7 @@ try {
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Transfer_RequiresExplicitApprovalAndFreshCapacityBeforeCreatingStorage",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Transfer_StreamsEveryItemProtectsReceiptAndAtomicallyPublishesVerifiableSet",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Transfer_RejectsRedirectPolicySubstitutionBeforeStorage",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Transfer_RejectsReviewedPlanSubstitutionBeforeStorage",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.TransferFailureAndProtectedWriteFailureLeaveNoPublishedOrPartialSet",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.CancellationBeforeAndDuringTransferLeavesNoPublishedOrPartialSet",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Verify_DeniesMissingProtectionTamperedPayloadAndUnexpectedFile",
@@ -290,6 +291,7 @@ try {
         $dependencyTransferUiEvidence.keyboard_focusable_unique_access_keys -ne $true -or
         $dependencyTransferUiEvidence.provider_route_review_accessible -ne $true -or
         $dependencyTransferUiEvidence.provider_route_review_explicit_and_head_only -ne $true -or
+        $dependencyTransferUiEvidence.provider_route_review_exact_plan_bound -ne $true -or
         $dependencyTransferUiEvidence.provider_route_review_does_not_approve_transfer -ne $true -or
         $dependencyTransferUiEvidence.item_and_byte_progress_announced -ne $true -or
         $dependencyTransferUiEvidence.cancellation_available -ne $true -or
