@@ -11,7 +11,9 @@ public sealed record LocalGpuProfile(
     string? Provider,
     string? DriverVersion,
     long? ReportedMemoryBytes,
-    string? MemorySource);
+    string? MemorySource,
+    long? AvailableMemoryBytes = null,
+    string? AvailableMemorySource = null);
 
 public sealed record LocalHardwareProfile(
     DateTimeOffset CapturedUtc,
@@ -103,22 +105,41 @@ public sealed class LocalHardwareProfiler
                 ValidateOptionalText(rawGpu.Provider, 128, "graphics provider"),
                 ValidateOptionalText(rawGpu.DriverVersion, 64, "graphics driver version"),
                 ValidateGpuMemory(rawGpu.ReportedMemoryBytes),
-                ValidateOptionalText(rawGpu.MemorySource, 64, "graphics memory source"));
+                ValidateOptionalText(rawGpu.MemorySource, 64, "graphics memory source"),
+                ValidateAvailableGpuMemory(rawGpu.AvailableMemoryBytes),
+                ValidateOptionalText(rawGpu.AvailableMemorySource, 64, "available graphics memory source"));
             if ((gpu.ReportedMemoryBytes is null) != (gpu.MemorySource is null))
             {
                 throw new InvalidOperationException("Graphics memory and its source must be reported together.");
+            }
+            if ((gpu.AvailableMemoryBytes is null) != (gpu.AvailableMemorySource is null))
+            {
+                throw new InvalidOperationException("Available graphics memory and its source must be reported together.");
+            }
+            if (gpu.AvailableMemoryBytes is not null && gpu.ReportedMemoryBytes is null)
+            {
+                throw new InvalidOperationException("Available graphics memory requires a reported total.");
+            }
+            if (gpu.AvailableMemoryBytes is long availableGraphicsMemory &&
+                gpu.ReportedMemoryBytes is long reportedGraphicsMemory &&
+                availableGraphicsMemory > reportedGraphicsMemory)
+            {
+                throw new InvalidOperationException("Available graphics memory exceeds reported graphics memory.");
             }
             var identity = string.Join('\n',
                 gpu.Name,
                 gpu.Provider ?? string.Empty,
                 gpu.DriverVersion ?? string.Empty,
                 gpu.ReportedMemoryBytes?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
-                gpu.MemorySource ?? string.Empty);
+                gpu.MemorySource ?? string.Empty,
+                gpu.AvailableMemoryBytes?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                gpu.AvailableMemorySource ?? string.Empty);
             if (identities.Add(identity)) gpus.Add(gpu);
         }
 
         var orderedGpus = gpus
-            .OrderByDescending(gpu => gpu.ReportedMemoryBytes ?? -1)
+            .OrderByDescending(gpu => gpu.AvailableMemoryBytes ?? -1)
+            .ThenByDescending(gpu => gpu.ReportedMemoryBytes ?? -1)
             .ThenBy(gpu => gpu.Name, StringComparer.Ordinal)
             .ToArray();
         return new LocalHardwareProfile(
@@ -152,6 +173,16 @@ public sealed class LocalHardwareProfiler
         return value;
     }
 
+    private static long? ValidateAvailableGpuMemory(long? value)
+    {
+        if (value is null) return null;
+        if (value < 0 || value > MaximumGpuMemoryBytes)
+        {
+            throw new InvalidOperationException("The available graphics memory value is invalid.");
+        }
+        return value;
+    }
+
     private static string ValidateRequiredText(string? value, int maximumLength, string label) =>
         ValidateOptionalText(value, maximumLength, label)
         ?? throw new InvalidOperationException($"The {label} is unavailable.");
@@ -172,6 +203,17 @@ public sealed class WindowsLocalHardwareProfileSource : ILocalHardwareProfileSou
 {
     private const string VideoRegistryPath = @"SYSTEM\CurrentControlSet\Control\Video";
     private const string CpuRegistryPath = @"HARDWARE\DESCRIPTION\System\CentralProcessor\0";
+    private readonly INvidiaGpuTelemetrySource nvidiaTelemetry;
+
+    public WindowsLocalHardwareProfileSource()
+        : this(new NvidiaNvmlGpuTelemetrySource())
+    {
+    }
+
+    internal WindowsLocalHardwareProfileSource(INvidiaGpuTelemetrySource nvidiaTelemetry)
+    {
+        this.nvidiaTelemetry = nvidiaTelemetry ?? throw new ArgumentNullException(nameof(nvidiaTelemetry));
+    }
 
     public RawLocalHardwareProfile Read(string applicationDataPath)
     {
@@ -217,16 +259,17 @@ public sealed class WindowsLocalHardwareProfileSource : ILocalHardwareProfileSou
     }
 
     [SupportedOSPlatform("windows")]
-    private static IEnumerable<LocalGpuProfile> ReadGpus()
+    private IEnumerable<LocalGpuProfile> ReadGpus()
     {
+        var telemetry = nvidiaTelemetry.Read();
+        var telemetryUsed = new bool[telemetry.Count];
         using var videoRoot = Registry.LocalMachine.OpenSubKey(VideoRegistryPath, writable: false);
-        if (videoRoot is null) yield break;
         var yielded = 0;
-        foreach (var adapterKeyName in videoRoot.GetSubKeyNames()
+        foreach (var adapterKeyName in (videoRoot?.GetSubKeyNames() ?? [])
                      .OrderBy(value => value, StringComparer.Ordinal)
                      .Take(64))
         {
-            using var adapterKey = videoRoot.OpenSubKey($@"{adapterKeyName}\0000", writable: false);
+            using var adapterKey = videoRoot!.OpenSubKey($@"{adapterKeyName}\0000", writable: false);
             if (adapterKey is null) continue;
             var name = ReadRegistryText(adapterKey.GetValue("DriverDesc")) ??
                        ReadRegistryText(adapterKey.GetValue("HardwareInformation.AdapterString"));
@@ -239,15 +282,55 @@ public sealed class WindowsLocalHardwareProfileSource : ILocalHardwareProfileSou
                 memory = ReadRegistryMemory(adapterKey.GetValue("HardwareInformation.MemorySize"));
                 memorySource = memory is null ? null : "HardwareInformation.MemorySize";
             }
+            var telemetryIndex = FindUniqueTelemetry(name.Trim(), telemetry, telemetryUsed);
+            var snapshot = telemetryIndex >= 0 ? telemetry[telemetryIndex] : null;
+            if (telemetryIndex >= 0) telemetryUsed[telemetryIndex] = true;
+            if (memory is null && snapshot is not null)
+            {
+                memory = snapshot.TotalMemoryBytes;
+                memorySource = "NVIDIA NVML total memory";
+            }
             yield return new LocalGpuProfile(
                 name.Trim(),
                 ReadRegistryText(adapterKey.GetValue("ProviderName"))?.Trim(),
                 ReadRegistryText(adapterKey.GetValue("DriverVersion"))?.Trim(),
                 memory,
-                memorySource);
+                memorySource,
+                snapshot?.AvailableMemoryBytes,
+                snapshot is null ? null : "NVIDIA NVML free memory");
             yielded++;
             if (yielded == 16) yield break;
         }
+
+        for (var index = 0; index < telemetry.Count && yielded < 16; index++)
+        {
+            if (telemetryUsed[index]) continue;
+            var snapshot = telemetry[index];
+            yield return new LocalGpuProfile(
+                snapshot.Name,
+                "NVIDIA",
+                snapshot.DriverVersion,
+                snapshot.TotalMemoryBytes,
+                "NVIDIA NVML total memory",
+                snapshot.AvailableMemoryBytes,
+                "NVIDIA NVML free memory");
+            yielded++;
+        }
+    }
+
+    private static int FindUniqueTelemetry(
+        string name,
+        IReadOnlyList<NvidiaGpuMemorySnapshot> telemetry,
+        IReadOnlyList<bool> used)
+    {
+        var match = -1;
+        for (var index = 0; index < telemetry.Count; index++)
+        {
+            if (used[index] || !string.Equals(name, telemetry[index].Name, StringComparison.OrdinalIgnoreCase)) continue;
+            if (match >= 0) return -1;
+            match = index;
+        }
+        return match;
     }
 
     private static string? ReadRegistryText(object? value)

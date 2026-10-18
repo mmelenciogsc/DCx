@@ -123,7 +123,9 @@ try {
         "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.Capture_ValidatesDeduplicatesAndOrdersBoundedHardwareEvidence",
         "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.Capture_RejectsMalformedCapacityTextAndGraphicsEvidence",
         "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.WindowsSource_CapturesCurrentHostWithoutAChildProcess",
-        "DCx.Core.Tests.LocalModels.LocalModelSelectorTests.SelectForHardware_BindsNativeGraphicsAndPhysicalMemoryBudgets"
+        "DCx.Core.Tests.LocalModels.WindowsLocalHardwareProfileTests.NvidiaTelemetry_LoadsOnlyInstalledSystemDriverAndReturnsBoundedLiveMemory",
+        "DCx.Core.Tests.LocalModels.LocalModelSelectorTests.SelectForHardware_UsesLiveAvailableGpuAndSystemMemoryBudgets",
+        "DCx.Core.Tests.LocalModels.LocalModelSelectorTests.SelectForHardware_FailsClosedWithoutLiveGpuCapacityAndUsesAvailableRam"
     )
     $requiredOllamaInferenceLeaseContracts = @(
         "DCx.Core.Tests.LocalModels.OllamaInferenceLeaseCoordinatorTests.SameUserLease_SerializesCancellationAndRecovery",
@@ -131,6 +133,11 @@ try {
         "DCx.Core.Tests.LocalModels.OllamaInferenceLeaseCoordinatorTests.UnsafeLockPath_IsDeniedWithoutFollowingIt",
         "DCx.Core.Tests.LocalModels.OllamaInferenceLeaseCoordinatorTests.PreCanceledLease_CreatesNoStorageAndTimingBoundsFailClosed",
         "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.VisionInference_IsSerializedAcrossClientsForTheEntirePinnedOperation"
+    )
+    $requiredOllamaRuntimeResourceContracts = @(
+        "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.ProductionInference_DeniesCurrentResourceFailureBeforeModelOperation",
+        "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.NormalInference_FailsClosedWhenExactUnloadIsNotConfirmed",
+        "DCx.Core.Tests.LocalModels.OllamaLocalClientTests.InspectionAndEmbedding_ValidateCapabilitiesAndBoundedVectors"
     )
     $requiredApprovalStateContracts = @(
         "DCx.Core.Tests.LocalModels.LocalModelApprovalStateAnchorStoreTests.WindowsVaultAnchor_RoundTripsOverwritesIsolatesAndRejectsMalformedState",
@@ -210,6 +217,14 @@ try {
         })
         if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
             throw "P06 did not prove required Ollama inference-sequencing contract: $requiredOllamaInferenceLeaseContract"
+        }
+    }
+    foreach ($requiredOllamaRuntimeResourceContract in $requiredOllamaRuntimeResourceContracts) {
+        $matchingResults = @($localModelResults | Where-Object {
+            $_.testName -ceq $requiredOllamaRuntimeResourceContract
+        })
+        if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
+            throw "P06 did not prove required runtime resource/unload contract: $requiredOllamaRuntimeResourceContract"
         }
     }
     foreach ($requiredApprovalStateContract in $requiredApprovalStateContracts) {
@@ -400,7 +415,10 @@ $nativeNvidiaProfiles = @($nativeHardwareProfile.Gpus | Where-Object {
     $_.Provider -ceq "NVIDIA" -and
     $_.DriverVersion -ceq "32.0.16.1078" -and
     $_.ReportedMemoryBytes -eq 8585740288 -and
-    $_.MemorySource -ceq "HardwareInformation.qwMemorySize"
+    $_.MemorySource -ceq "HardwareInformation.qwMemorySize" -and
+    $_.AvailableMemoryBytes -gt 0 -and
+    $_.AvailableMemoryBytes -le $_.ReportedMemoryBytes -and
+    $_.AvailableMemorySource -ceq "NVIDIA NVML free memory"
 })
 if ($nativeHardwareProfile.OperatingSystem -notlike "Microsoft Windows *" -or
     $nativeHardwareProfile.CpuName -cne "12th Gen Intel(R) Core(TM) i7-12650H" -or
@@ -700,6 +718,7 @@ $manifest = [ordered]@{
     ollama_inference_lease_contract_tests = $requiredOllamaInferenceLeaseContracts.Count
     ollama_inference_lease_cross_process = $true
     ollama_inference_lease_file_contains_data = $false
+    ollama_runtime_resource_unload_contract_tests = $requiredOllamaRuntimeResourceContracts.Count
     native_hardware_profile_passed = $true
     native_hardware_operating_system = [string]$nativeHardwareProfile.OperatingSystem
     native_hardware_process_architecture = [string]$nativeHardwareProfile.ProcessArchitecture
@@ -712,6 +731,10 @@ $manifest = [ordered]@{
     native_hardware_gpu_count = [int]$nativeHardwareProfile.Gpus.Count
     native_hardware_nvidia_registry_driver = [string]$nativeNvidiaProfiles[0].DriverVersion
     native_hardware_nvidia_registry_memory_bytes = [long]$nativeNvidiaProfiles[0].ReportedMemoryBytes
+    native_hardware_nvidia_available_memory_bytes = [long]$nativeNvidiaProfiles[0].AvailableMemoryBytes
+    native_hardware_nvidia_available_memory_source = [string]$nativeNvidiaProfiles[0].AvailableMemorySource
+    native_resource_available_system_memory_bytes = [long]$nativeResourceSelection.AvailableSystemMemoryBytes
+    native_resource_available_graphics_memory_bytes = [long]$nativeResourceSelection.AvailableGraphicsMemoryBytes
     native_resource_selected_vision_model = [string]$nativeResourceSelection.Vision.Model.Name
     native_resource_selected_vision_digest = [string]$nativeResourceSelection.Vision.Model.Digest
     native_resource_selected_embedding_available = [bool]$nativeResourceSelection.Embedding.IsAvailable
@@ -771,9 +794,10 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Bounded Ollama embedding adapter fixture=PASS"
 "Ollama redirect/cookie/proxy denial and response-origin validation=PASS"
 "Low-resource and local-first fallback tests=PASS"
-"Native product hardware profile contracts=PASS ($($manifest.native_hardware_profile_contract_tests)/$($manifest.native_hardware_profile_contract_tests)); CPU=$($manifest.native_hardware_cpu); logical processors=$($manifest.native_hardware_logical_processors); physical memory bytes=$($manifest.native_hardware_physical_memory_bytes); application-data storage available bytes=$($manifest.native_hardware_storage_available_bytes); NVIDIA registry driver=$($manifest.native_hardware_nvidia_registry_driver); registry graphics memory bytes=$($manifest.native_hardware_nvidia_registry_memory_bytes)"
+"Native product hardware profile contracts=PASS ($($manifest.native_hardware_profile_contract_tests)/$($manifest.native_hardware_profile_contract_tests)); CPU=$($manifest.native_hardware_cpu); logical processors=$($manifest.native_hardware_logical_processors); physical memory bytes=$($manifest.native_hardware_physical_memory_bytes); available system memory bytes=$($manifest.native_hardware_available_memory_bytes); application-data storage available bytes=$($manifest.native_hardware_storage_available_bytes); NVIDIA registry driver=$($manifest.native_hardware_nvidia_registry_driver); registry graphics memory bytes=$($manifest.native_hardware_nvidia_registry_memory_bytes); live available graphics memory bytes=$($manifest.native_hardware_nvidia_available_memory_bytes) from $($manifest.native_hardware_nvidia_available_memory_source)"
 "Per-user cross-process Ollama inference sequencing contracts=PASS ($($manifest.ollama_inference_lease_contract_tests)/$($manifest.ollama_inference_lease_contract_tests)); lock data retained=False"
-"Native hardware-bound model selection=PASS; vision=$($manifest.native_resource_selected_vision_model); embedding available=$($manifest.native_resource_selected_embedding_available)"
+"Runtime resource-admission and verified-unload contracts=PASS ($($manifest.ollama_runtime_resource_unload_contract_tests)/$($manifest.ollama_runtime_resource_unload_contract_tests))"
+"Native hardware-bound model selection=PASS; available graphics bytes=$($manifest.native_resource_available_graphics_memory_bytes); available system bytes=$($manifest.native_resource_available_system_memory_bytes); vision=$($manifest.native_resource_selected_vision_model); embedding available=$($manifest.native_resource_selected_embedding_available)"
 "Local-model linked-root, linked-file and swapped-directory denials=PASS ($($manifest.local_model_storage_link_denials)/$($manifest.local_model_storage_link_denials)); external writes=$($manifest.local_model_storage_external_writes)"
 "Pinned dependency catalog=$($manifest.dependency_catalog_id); SHA-256=$($manifest.dependency_catalog_sha256)"
 "Pinned dependency catalog/reviewer contracts=PASS ($($manifest.dependency_catalog_contract_tests)/$($manifest.dependency_catalog_contract_tests)); downloads or installs=$($manifest.dependency_downloads_or_installs)"

@@ -1492,8 +1492,11 @@ public partial class LocalModelsWindow : Window
                     $"{gpu.Name}. Provider {gpu.Provider ?? "unavailable"}. " +
                     $"Windows driver {gpu.DriverVersion ?? "unavailable"}. " +
                     (gpu.ReportedMemoryBytes is long memory
-                        ? $"Registry-reported graphics memory {Number(memory)} bytes from {gpu.MemorySource}."
-                        : "Registry-reported graphics memory unavailable.")));
+                        ? $"Reported graphics memory {Number(memory)} bytes from {gpu.MemorySource}. "
+                        : "Reported graphics memory unavailable. ") +
+                    (gpu.AvailableMemoryBytes is long available
+                        ? $"Currently available graphics memory {Number(available)} bytes from {gpu.AvailableMemorySource}."
+                        : "Current usable graphics-memory telemetry unavailable; GPU model selection fails closed.")));
         return
             $"Hardware profile. Captured UTC {profile.CapturedUtc:O}. " +
             $"Operating system {profile.OperatingSystem}. Process architecture {profile.ProcessArchitecture}.\n" +
@@ -1501,7 +1504,7 @@ public partial class LocalModelsWindow : Window
             $"Physical memory {Number(profile.PhysicalMemoryBytes)} bytes. Available memory {Number(profile.AvailableMemoryBytes)} bytes.\n" +
             $"Application-data storage {Number(profile.StorageTotalBytes)} total bytes. {Number(profile.StorageAvailableBytes)} available bytes.\n" +
             $"{graphics}\n" +
-            "This profile used native Windows kernel and read-only registry data. No external process or network request ran. Capacity is volatile and must be rechecked before resource-intensive work.";
+            "This profile used native Windows kernel, read-only registry data and, when present, the NVIDIA driver telemetry library loaded only from Windows System32. No external process or network request ran. Available capacity is volatile and must be rechecked before resource-intensive work.";
     }
 
     private static string FormatDependencyTransferPlan(

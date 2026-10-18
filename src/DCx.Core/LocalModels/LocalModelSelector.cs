@@ -13,15 +13,15 @@ public sealed class LocalModelSelector
         ArgumentNullException.ThrowIfNull(installedModels);
         var inventory = installedModels.Where(model => model is not null).ToArray();
         var graphicsMemory = hardware.Gpus
-            .Where(gpu => gpu.ReportedMemoryBytes is > 0)
-            .Select(gpu => gpu.ReportedMemoryBytes!.Value)
+            .Where(gpu => gpu.AvailableMemoryBytes is > 0)
+            .Select(gpu => gpu.AvailableMemoryBytes!.Value)
             .DefaultIfEmpty(0)
             .Max();
         return new LocalModelResourceSelection(
             graphicsMemory,
-            hardware.PhysicalMemoryBytes,
+            hardware.AvailableMemoryBytes,
             SelectVisionModel(graphicsMemory, inventory),
-            SelectEmbeddingModel(hardware.PhysicalMemoryBytes, inventory));
+            SelectEmbeddingModel(hardware.AvailableMemoryBytes, inventory));
     }
 
     public LocalModelSelection SelectVisionModel(long availableVramBytes, IEnumerable<LocalModelDescriptor> installedModels)
@@ -43,10 +43,10 @@ public sealed class LocalModelSelector
             .ThenBy(model => model.Digest, StringComparer.Ordinal)
             .FirstOrDefault();
         return selected is null
-            ? new LocalModelSelection(null, $"No uniquely digest-bound installed vision model fits the {budget} byte VRAM safety budget.")
+            ? new LocalModelSelection(null, $"No uniquely digest-bound installed vision model fits the {budget} byte usable-VRAM safety budget.")
             : new LocalModelSelection(
                 selected,
-                $"Selected the largest uniquely digest-bound installed vision model within 70% of measured VRAM: {selected.Name} ({selected.SizeBytes} bytes).");
+                $"Selected the largest uniquely digest-bound installed vision model within 70% of currently available GPU memory: {selected.Name} ({selected.SizeBytes} bytes).");
     }
 
     public LocalModelSelection SelectEmbeddingModel(
@@ -66,15 +66,15 @@ public sealed class LocalModelSelector
             .ThenBy(model => model.Digest, StringComparer.Ordinal)
             .FirstOrDefault();
         return selected is null
-            ? new LocalModelSelection(null, $"No uniquely digest-bound installed embedding model fits the {budget} byte RAM safety budget.")
+            ? new LocalModelSelection(null, $"No uniquely digest-bound installed embedding model fits the {budget} byte available-RAM safety budget.")
             : new LocalModelSelection(
                 selected,
-                $"Selected the smallest uniquely digest-bound installed embedding model within 25% of measured RAM: {selected.Name} ({selected.SizeBytes} bytes).");
+                $"Selected the smallest uniquely digest-bound installed embedding model within 25% of currently available system memory: {selected.Name} ({selected.SizeBytes} bytes).");
     }
 }
 
 public sealed record LocalModelResourceSelection(
-    long ReportedGraphicsMemoryBytes,
-    long PhysicalMemoryBytes,
+    long AvailableGraphicsMemoryBytes,
+    long AvailableSystemMemoryBytes,
     LocalModelSelection Vision,
     LocalModelSelection Embedding);

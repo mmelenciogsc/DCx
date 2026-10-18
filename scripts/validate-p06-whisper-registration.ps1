@@ -203,8 +203,8 @@ try {
         if ($null -ne $candidate -and
             $candidate.Current.Name -like "Hardware profile. Captured UTC *" -and
             $candidate.Current.Name -like "*Processor 12th Gen Intel(R) Core(TM) i7-12650H. 16 logical processors.*" -and
-            $candidate.Current.Name -like "*NVIDIA GeForce RTX 4060 Laptop GPU. Provider NVIDIA. Windows driver 32.0.16.1078. Registry-reported graphics memory 8,585,740,288 bytes from HardwareInformation.qwMemorySize.*" -and
-            $candidate.Current.Name -like "*No external process or network request ran. Capacity is volatile and must be rechecked before resource-intensive work.*") {
+            $candidate.Current.Name -like "*NVIDIA GeForce RTX 4060 Laptop GPU. Provider NVIDIA. Windows driver 32.0.16.1078. Reported graphics memory 8,585,740,288 bytes from HardwareInformation.qwMemorySize. Currently available graphics memory * bytes from NVIDIA NVML free memory.*" -and
+            $candidate.Current.Name -like "*No external process or network request ran. Available capacity is volatile and must be rechecked before resource-intensive work.*") {
             $candidate
         }
     } "The native bounded hardware profile was not exposed accessibly."

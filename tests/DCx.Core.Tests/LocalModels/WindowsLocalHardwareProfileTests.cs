@@ -15,7 +15,9 @@ public sealed class WindowsLocalHardwareProfileTests
             "Provider",
             "1.2.3.4",
             8L * 1024 * 1024 * 1024,
-            "HardwareInformation.qwMemorySize");
+            "HardwareInformation.qwMemorySize",
+            6L * 1024 * 1024 * 1024,
+            "fixture live free memory");
         var profile = new LocalHardwareProfiler(
             new FixtureSource(new RawLocalHardwareProfile(
                 "Microsoft Windows fixture",
@@ -38,6 +40,7 @@ public sealed class WindowsLocalHardwareProfileTests
         Assert.Equal(2, profile.Gpus.Count);
         Assert.Equal("GPU Large", profile.Gpus[0].Name);
         Assert.Equal(8L * 1024 * 1024 * 1024, profile.Gpus[0].ReportedMemoryBytes);
+        Assert.Equal(6L * 1024 * 1024 * 1024, profile.Gpus[0].AvailableMemoryBytes);
         Assert.Equal("GPU Small", profile.Gpus[1].Name);
     }
 
@@ -51,6 +54,18 @@ public sealed class WindowsLocalHardwareProfileTests
         Assert.Throws<InvalidOperationException>(() => Capture(valid with
         {
             Gpus = [new("GPU", null, null, 1024, null)],
+        }));
+        Assert.Throws<InvalidOperationException>(() => Capture(valid with
+        {
+            Gpus = [new("GPU", null, null, 1024, "fixture", 512, null)],
+        }));
+        Assert.Throws<InvalidOperationException>(() => Capture(valid with
+        {
+            Gpus = [new("GPU", null, null, null, null, 512, "fixture live")],
+        }));
+        Assert.Throws<InvalidOperationException>(() => Capture(valid with
+        {
+            Gpus = [new("GPU", null, null, 1024, "fixture", 2048, "fixture live")],
         }));
         Assert.Throws<InvalidOperationException>(() => Capture(valid with
         {
@@ -73,6 +88,30 @@ public sealed class WindowsLocalHardwareProfileTests
         Assert.True(profile.StorageTotalBytes >= profile.StorageAvailableBytes);
         Assert.InRange(profile.Gpus.Count, 0, 16);
         Assert.All(profile.Gpus, gpu => Assert.False(string.IsNullOrWhiteSpace(gpu.Name)));
+        Assert.All(profile.Gpus.Where(gpu => gpu.AvailableMemoryBytes is not null), gpu =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(gpu.AvailableMemorySource));
+            Assert.InRange(gpu.AvailableMemoryBytes!.Value, 0, gpu.ReportedMemoryBytes!.Value);
+        });
+    }
+
+    [Fact]
+    public void NvidiaTelemetry_LoadsOnlyInstalledSystemDriverAndReturnsBoundedLiveMemory()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var libraryPath = Path.Combine(Environment.SystemDirectory, "nvml.dll");
+        if (!File.Exists(libraryPath)) return;
+
+        var snapshots = new NvidiaNvmlGpuTelemetrySource().Read();
+
+        Assert.NotEmpty(snapshots);
+        Assert.InRange(snapshots.Count, 1, 16);
+        Assert.All(snapshots, snapshot =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(snapshot.Name));
+            Assert.False(string.IsNullOrWhiteSpace(snapshot.DriverVersion));
+            Assert.InRange(snapshot.AvailableMemoryBytes, 0, snapshot.TotalMemoryBytes);
+        });
     }
 
     private static LocalHardwareProfile Capture(RawLocalHardwareProfile raw) =>

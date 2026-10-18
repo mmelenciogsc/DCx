@@ -80,6 +80,9 @@ public sealed class OllamaLocalClientTests
             Assert.Equal(8, result.OutputTokens);
             Assert.Contains("\"stream\":false", handler.ChatRequest, StringComparison.Ordinal);
             Assert.Contains("\"images\":[\"iVBORw0KGgo=\"]", handler.ChatRequest, StringComparison.Ordinal);
+            Assert.True(handler.UnloadRequested);
+            Assert.Contains(VisionModel, handler.UnloadRequest, StringComparison.Ordinal);
+            Assert.True(handler.RunningModelRequests >= 3);
         }
         finally
         {
@@ -162,6 +165,8 @@ public sealed class OllamaLocalClientTests
         Assert.Equal(1, coordinator.Acquisitions);
         Assert.False(coordinator.IsActive);
         Assert.False(handler.InferenceLeaseViolation);
+        Assert.True(handler.UnloadRequested);
+        Assert.True(handler.RunningModelRequests >= 3);
     }
 
     [Fact]
@@ -212,6 +217,71 @@ public sealed class OllamaLocalClientTests
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 client.DescribeImagePinnedAsync(
                     VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."));
+        }
+        finally
+        {
+            File.Delete(image);
+        }
+    }
+
+    [Fact]
+    public async Task ProductionInference_DeniesCurrentResourceFailureBeforeModelOperation()
+    {
+        var image = Path.GetTempFileName();
+        await File.WriteAllBytesAsync(
+            image,
+            [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+        try
+        {
+            var visionHandler = new FixtureHandler();
+            using var visionClient = new OllamaLocalClient(
+                visionHandler,
+                new Uri("http://localhost:11434/"),
+                timeout: null,
+                inferenceLeaseCoordinator: UncoordinatedOllamaInferenceLease.Instance,
+                resourceAdmission: new DenyingResourceAdmission(denyVision: true, denyEmbedding: false));
+            var visionFailure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                visionClient.DescribeImagePinnedAsync(
+                    VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."));
+            Assert.Contains("current usable GPU-memory", visionFailure.Message, StringComparison.Ordinal);
+            Assert.Empty(visionHandler.ChatRequest);
+            Assert.False(visionHandler.UnloadRequested);
+
+            var embeddingHandler = new FixtureHandler();
+            using var embeddingClient = new OllamaLocalClient(
+                embeddingHandler,
+                new Uri("http://localhost:11434/"),
+                timeout: null,
+                inferenceLeaseCoordinator: UncoordinatedOllamaInferenceLease.Instance,
+                resourceAdmission: new DenyingResourceAdmission(denyVision: false, denyEmbedding: true));
+            var embeddingFailure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                embeddingClient.EmbedPinnedAsync(
+                    EmbeddingModel, EmbeddingDigest, LicenseDigest, ["first", "second"]));
+            Assert.Contains("current available system-memory", embeddingFailure.Message, StringComparison.Ordinal);
+            Assert.Empty(embeddingHandler.EmbeddingRequest);
+            Assert.False(embeddingHandler.UnloadRequested);
+        }
+        finally
+        {
+            File.Delete(image);
+        }
+    }
+
+    [Fact]
+    public async Task NormalInference_FailsClosedWhenExactUnloadIsNotConfirmed()
+    {
+        var handler = new FixtureHandler { RefuseUnload = true };
+        using var client = new OllamaLocalClient(handler, new Uri("http://localhost:11434/"));
+        var image = Path.GetTempFileName();
+        await File.WriteAllBytesAsync(image, [0xFF, 0xD8, 0xFF]);
+        try
+        {
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                client.DescribeImagePinnedAsync(
+                    VisionModel, VisionDigest, LicenseDigest, image, "Describe shapes."));
+
+            Assert.Contains("unload", failure.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.True(handler.UnloadRequested);
         }
         finally
         {
@@ -519,10 +589,13 @@ public sealed class OllamaLocalClientTests
             {
                 UnloadRequest = await request.Content!.ReadAsStringAsync(cancellationToken);
                 UnloadRequested = true;
+                var unloadModel = UnloadRequest.Contains(VisionModel, StringComparison.Ordinal)
+                    ? VisionModel
+                    : EmbeddingModel;
                 if (!RefuseUnload) Loaded = false;
                 return Json(RefuseUnload
-                    ? $"{{\"model\":\"{EmbeddingModel}\",\"response\":\"\",\"done\":true,\"done_reason\":\"stop\"}}"
-                    : $"{{\"model\":\"{EmbeddingModel}\",\"response\":\"\",\"done\":true,\"done_reason\":\"unload\"}}", request);
+                    ? $"{{\"model\":\"{unloadModel}\",\"response\":\"\",\"done\":true,\"done_reason\":\"stop\"}}"
+                    : $"{{\"model\":\"{unloadModel}\",\"response\":\"\",\"done\":true,\"done_reason\":\"unload\"}}", request);
             }
 
             ChatRequest = await request.Content!.ReadAsStringAsync(cancellationToken);
@@ -604,6 +677,30 @@ public sealed class OllamaLocalClientTests
                 if (disposed) return;
                 disposed = true;
                 Assert.Equal(1, Interlocked.Exchange(ref owner.active, 0));
+            }
+        }
+    }
+
+    private sealed class DenyingResourceAdmission(bool denyVision, bool denyEmbedding)
+        : ILocalModelResourceAdmission
+    {
+        public void EnsureVisionAllowed(LocalModelDescriptor model)
+        {
+            ArgumentNullException.ThrowIfNull(model);
+            if (denyVision)
+            {
+                throw new InvalidOperationException(
+                    "The approved vision model no longer fits the current usable GPU-memory safety budget.");
+            }
+        }
+
+        public void EnsureEmbeddingAllowed(LocalModelDescriptor model)
+        {
+            ArgumentNullException.ThrowIfNull(model);
+            if (denyEmbedding)
+            {
+                throw new InvalidOperationException(
+                    "The approved embedding model no longer fits the current available system-memory safety budget.");
             }
         }
     }

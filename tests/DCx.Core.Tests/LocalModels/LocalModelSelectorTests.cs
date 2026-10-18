@@ -79,7 +79,7 @@ public sealed class LocalModelSelectorTests
     }
 
     [Fact]
-    public void SelectForHardware_BindsNativeGraphicsAndPhysicalMemoryBudgets()
+    public void SelectForHardware_UsesLiveAvailableGpuAndSystemMemoryBudgets()
     {
         var profile = new LocalHardwareProfile(
             DateTimeOffset.UtcNow,
@@ -93,16 +93,43 @@ public sealed class LocalModelSelectorTests
             500_000_000_000,
             Array.AsReadOnly<LocalGpuProfile>(
             [
-                new("Small GPU", null, null, 2L * 1024 * 1024 * 1024, "fixture"),
-                new("Large GPU", null, null, 8_188L * 1024 * 1024, "fixture"),
+                new("Small GPU", null, null, 4L * 1024 * 1024 * 1024, "fixture", 2L * 1024 * 1024 * 1024, "fixture live"),
+                new("Large GPU", null, null, 8_188L * 1024 * 1024, "fixture", 6_000_000_000, "fixture live"),
             ]));
 
         var selection = new LocalModelSelector().SelectForHardware(profile, Models);
 
-        Assert.Equal(8_188L * 1024 * 1024, selection.ReportedGraphicsMemoryBytes);
-        Assert.Equal(profile.PhysicalMemoryBytes, selection.PhysicalMemoryBytes);
+        Assert.Equal(6_000_000_000, selection.AvailableGraphicsMemoryBytes);
+        Assert.Equal(profile.AvailableMemoryBytes, selection.AvailableSystemMemoryBytes);
         Assert.Equal("vision-4b:" + Vision4Digest, selection.Vision.Model?.Name);
         Assert.Equal("embed-small:" + EmbedSmallDigest, selection.Embedding.Model?.Name);
+    }
+
+    [Fact]
+    public void SelectForHardware_FailsClosedWithoutLiveGpuCapacityAndUsesAvailableRam()
+    {
+        var profile = new LocalHardwareProfile(
+            DateTimeOffset.UtcNow,
+            "Windows fixture",
+            "X64",
+            "CPU fixture",
+            8,
+            16L * 1024 * 1024 * 1024,
+            512L * 1024 * 1024,
+            1_000_000_000_000,
+            500_000_000_000,
+            Array.AsReadOnly<LocalGpuProfile>(
+            [
+                new("Static-only GPU", null, null, 8L * 1024 * 1024 * 1024, "registry fixture"),
+            ]));
+
+        var selection = new LocalModelSelector().SelectForHardware(profile, Models);
+
+        Assert.Equal(0, selection.AvailableGraphicsMemoryBytes);
+        Assert.False(selection.Vision.IsAvailable);
+        Assert.False(selection.Embedding.IsAvailable);
+        Assert.Contains("usable-VRAM", selection.Vision.Reason, StringComparison.Ordinal);
+        Assert.Contains("available-RAM", selection.Embedding.Reason, StringComparison.Ordinal);
     }
 
     [Theory]
