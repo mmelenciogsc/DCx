@@ -128,6 +128,14 @@
                             AutomationProperties.AutomationId="AgentDrawerButton"
                             AutomationProperties.Name="Open agent controls"
                             Click="OnAgentDrawerClick" />
+                    <Button x:Name="FacebookPostFinderButton"
+                            MinWidth="120"
+                            Margin="0,0,6,0"
+                            Content="Old post finder"
+                            AutomationProperties.AutomationId="FacebookPostFinderButton"
+                            AutomationProperties.Name="Find an old Facebook post"
+                            AutomationProperties.HelpText="Uses the current DCx browser profile for manual sign-in and inspects only a current direct post page."
+                            Click="OnFacebookPostFinderClick" />
                     <Button x:Name="WindowsAppButton"
                             MinWidth="120"
                             Margin="0,0,6,0"

@@ -146,5 +146,20 @@ app.MapGet("/social-posts", () => Results.Content(
     </html>
     """,
     "text/html; charset=utf-8"));
+app.MapGet("/social-blocked", () => Results.Content(
+    """
+    <!doctype html>
+    <html lang="en">
+    <head><meta charset="utf-8"><title>Controlled social-site blocked fixture</title></head>
+    <body>
+      <main>
+        <h1>Assisted access blocked</h1>
+        <p role="alert" data-dcx-social-blocked="true">The site reported temporarily blocked automated behavior.</p>
+        <p>No historical post or direct address is present on this page.</p>
+      </main>
+    </body>
+    </html>
+    """,
+    "text/html; charset=utf-8"));
 
 await app.RunAsync();

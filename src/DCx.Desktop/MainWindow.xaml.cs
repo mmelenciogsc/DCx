@@ -15,6 +15,7 @@ using DCx.Core.LocalModels;
 using DCx.Core.Navigation;
 using DCx.Core.Profiles;
 using DCx.Core.Reliability;
+using DCx.Core.Social;
 using DCx.Core.Storage;
 using DCx.Desktop.Automation;
 using DCx.Desktop.Media;
@@ -23,7 +24,7 @@ using Microsoft.Web.WebView2.Wpf;
 
 namespace DCx.Desktop;
 
-public partial class MainWindow : Window
+public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
 {
     private static readonly Uri StartPage = new("https://example.com/");
     private const string WebView2DownloadPage = "https://developer.microsoft.com/microsoft-edge/webview2/";
@@ -36,6 +37,7 @@ public partial class MainWindow : Window
     private readonly DownloadPathPolicy _downloadPathPolicy = new();
     private readonly BrowserControlCoordinator _controlCoordinator = new();
     private readonly BrowserDomAdapter _domAdapter;
+    private readonly FacebookHistoricalPostPageInspector _facebookPostPageInspector = new();
     private readonly WebVideoFrameDescriptionService _webVideoFrameDescriptionService = new();
     private readonly Dictionary<string, Task<CoreWebView2Environment>> _environments = new(StringComparer.Ordinal);
     private readonly ObservableCollection<BrowserHistoryEntry> _historyItems = [];
@@ -51,6 +53,7 @@ public partial class MainWindow : Window
     private BrowserTabState? _agentTab;
     private Uri? _agentTarget;
     private NativeAppControlWindow? _nativeAppControlWindow;
+    private FacebookHistoricalPostSearchWindow? _facebookPostSearchWindow;
     private OpenAiControlWindow? _openAiControlWindow;
     private LocalModelsWindow? _localModelsWindow;
     private ContentViewerWindow? _contentViewerWindow;
@@ -156,6 +159,8 @@ public partial class MainWindow : Window
         ProfilesBox.IsEnabled = false;
         BookmarkButton.IsEnabled = false;
         AgentDrawerButton.IsEnabled = false;
+        FacebookPostFinderButton.IsEnabled = false;
+        FacebookPostFinderButton.IsEnabled = false;
         WebView2PrerequisiteExplanation.Text = inspectFailed
             ? "DCx could not verify Microsoft Edge WebView2 Runtime, so it did not open a web page. No download or installation was attempted. Use another browser to visit the official Microsoft page. Install or repair the Evergreen Runtime only after you approve it. Then return here and choose Recheck."
             : "DCx cannot open web pages because Microsoft Edge WebView2 Runtime is unavailable. No download or installation was attempted. Use another browser to visit the official Microsoft page. Install the Evergreen Runtime only after you approve it. Then return here and choose Recheck.";
@@ -175,6 +180,8 @@ public partial class MainWindow : Window
         ProfilesBox.IsEnabled = true;
         BookmarkButton.IsEnabled = true;
         AgentDrawerButton.IsEnabled = true;
+        FacebookPostFinderButton.IsEnabled = true;
+        FacebookPostFinderButton.IsEnabled = true;
     }
 
     private void OnCopyWebView2DownloadAddressClick(object sender, RoutedEventArgs e)
@@ -1015,6 +1022,91 @@ public partial class MainWindow : Window
         {
             SetStatus($"Windows application controls could not open. {exception.Message}");
         }
+    }
+
+    private void OnFacebookPostFinderClick(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Opening the manual-sign-in old Facebook post finder.");
+        try
+        {
+            if (_facebookPostSearchWindow is { IsVisible: true })
+            {
+                _facebookPostSearchWindow.Activate();
+                return;
+            }
+
+            var site = ResolveFacebookPostSearchSite();
+            SetStatus("Old-post workflow site boundary resolved. Opening its accessible window.");
+            _facebookPostSearchWindow = new FacebookHistoricalPostSearchWindow(
+                this,
+                site)
+            {
+                Owner = this,
+            };
+            SetStatus("Old-post workflow window constructed. Showing it now.");
+            _facebookPostSearchWindow.Closed += (_, _) => _facebookPostSearchWindow = null;
+            _facebookPostSearchWindow.Show();
+            SetStatus("Old-post workflow window shown. Manual sign-in remains under user control.");
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"The old Facebook post finder could not open. {exception.Message}");
+        }
+    }
+
+    void IFacebookHistoricalPostBrowserHost.NavigateSharedBrowser(Uri address)
+    {
+        var tab = CurrentTab;
+        var decision = _navigationPolicy.Evaluate(address.AbsoluteUri);
+        if (tab?.Browser.CoreWebView2 is null || !decision.IsAllowed || decision.Uri is null)
+        {
+            throw new InvalidOperationException(decision.RejectionReason ?? "A ready shared browser tab is required.");
+        }
+
+        tab.Browser.CoreWebView2.Navigate(decision.Uri.AbsoluteUri);
+        SetStatus("Shared browser navigation started for the old-post workflow.");
+    }
+
+    void IFacebookHistoricalPostBrowserHost.FocusSharedBrowser()
+    {
+        Activate();
+        CurrentTab?.Browser.Focus();
+    }
+
+    async Task<FacebookPostPageEvidence> IFacebookHistoricalPostBrowserHost.InspectCurrentPostPageAsync(
+        CancellationToken cancellationToken)
+    {
+        var tab = CurrentTab ?? throw new InvalidOperationException("No shared browser tab is selected.");
+        var address = tab.Browser.Source ?? throw new InvalidOperationException("The selected browser page has no address.");
+        var generation = tab.NavigationGeneration;
+        var evidence = await _facebookPostPageInspector.InspectAsync(tab.Browser, address, cancellationToken);
+        if (!ReferenceEquals(CurrentTab, tab) ||
+            tab.NavigationGeneration != generation ||
+            tab.Browser.Source != address)
+        {
+            throw new InvalidOperationException("The shared browser page changed during inspection.");
+        }
+
+        return evidence;
+    }
+
+    private static FacebookPostSearchSite ResolveFacebookPostSearchSite()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("DCX_P12_FACEBOOK_FIXTURE"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            return FacebookPostSearchSite.Production;
+        }
+
+        var origin = Environment.GetEnvironmentVariable("DCX_P12_FACEBOOK_FIXTURE_ORIGIN");
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var fixtureOrigin))
+        {
+            throw new InvalidOperationException("The controlled Facebook-search fixture origin is invalid.");
+        }
+
+        return FacebookPostSearchSite.CreateControlledFixture(fixtureOrigin);
     }
 
     private void OnOpenAiClick(object sender, RoutedEventArgs e)

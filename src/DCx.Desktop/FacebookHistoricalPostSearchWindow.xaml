@@ -1,0 +1,157 @@
+<Window x:Class="DCx.Desktop.FacebookHistoricalPostSearchWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Find an old Facebook post"
+        Width="780"
+        Height="760"
+        MinWidth="620"
+        MinHeight="620"
+        AutomationProperties.AutomationId="FacebookHistoricalPostSearchWindow"
+        AutomationProperties.Name="Find an old Facebook post">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="20">
+            <TextBlock x:Name="HeadingText"
+                       Margin="0,0,0,12"
+                       FontSize="24"
+                       FontWeight="SemiBold"
+                       Focusable="True"
+                       Text="Find an old Facebook post"
+                       AutomationProperties.AutomationId="FacebookHistoricalPostSearchHeading"
+                       AutomationProperties.Name="Find an old Facebook post" />
+            <TextBlock x:Name="BoundaryText"
+                       Margin="0,0,0,14"
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="FacebookHistoricalPostSearchBoundary" />
+
+            <GroupBox Header="1. Manual sign-in handoff" Margin="0,0,0,12">
+                <StackPanel Margin="10">
+                    <TextBlock Margin="0,0,0,10"
+                               TextWrapping="Wrap"
+                               Text="DCx opens the site in the current shared browser tab. You retain control for sign-in, MFA, consent, and navigation. DCx does not read password fields, cookies, or another browser's session." />
+                    <Button x:Name="OpenLoginButton"
+                            MinWidth="210"
+                            Margin="0,0,0,10"
+                            HorizontalAlignment="Left"
+                            Content="_Open site for manual sign-in"
+                            AutomationProperties.AutomationId="FacebookOpenManualLoginButton"
+                            AutomationProperties.Name="Open site for manual sign-in"
+                            Click="OnOpenLoginClick" />
+                    <CheckBox x:Name="ManualLoginCompleteCheckBox"
+                              Margin="0,0,0,8"
+                              Content="_I finished manual sign-in, or I am already signed in"
+                              AutomationProperties.AutomationId="FacebookManualLoginCompleteCheckBox"
+                              AutomationProperties.Name="I finished manual sign-in, or I am already signed in"
+                              AutomationProperties.HelpText="This acknowledgment hands navigation back to DCx. It does not prove that Facebook accepted the sign-in."
+                              Checked="OnManualLoginAcknowledgementChanged"
+                              Unchecked="OnManualLoginAcknowledgementChanged" />
+                    <Button x:Name="HandBackAfterLoginButton"
+                            MinWidth="210"
+                            HorizontalAlignment="Left"
+                            IsEnabled="False"
+                            Content="_Hand back after sign-in"
+                            AutomationProperties.AutomationId="FacebookHandBackAfterLoginButton"
+                            AutomationProperties.Name="Hand back after manual sign-in"
+                            Click="OnHandBackAfterLoginClick" />
+                </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="2. Search in the shared browser" Margin="0,0,0,12">
+                <StackPanel Margin="10">
+                    <Label Padding="0" Target="{Binding ElementName=SearchQueryBox}" Content="Search _terms" />
+                    <TextBox x:Name="SearchQueryBox"
+                             Margin="0,4,0,8"
+                             Padding="6"
+                             MaxLength="200"
+                             IsEnabled="False"
+                             AutomationProperties.AutomationId="FacebookHistoricalPostSearchQuery"
+                             AutomationProperties.Name="Facebook historical post search terms" />
+                    <Button x:Name="OpenSearchButton"
+                            MinWidth="210"
+                            HorizontalAlignment="Left"
+                            IsEnabled="False"
+                            Content="Open post _search"
+                            AutomationProperties.AutomationId="FacebookOpenPostSearchButton"
+                            AutomationProperties.Name="Open Facebook post search in the shared browser"
+                            Click="OnOpenSearchClick" />
+                    <TextBlock Margin="0,8,0,0"
+                               TextWrapping="Wrap"
+                               Text="Review the live results yourself and open one candidate post. Site changes, consent screens, rate limits, or inaccessible markup may require fully manual browsing." />
+                </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="3. Inspect only the current open post" Margin="0,0,0,12">
+                <StackPanel Margin="10">
+                    <WrapPanel Margin="0,0,0,10">
+                        <Button x:Name="InspectCurrentPostButton"
+                                MinWidth="190"
+                                Margin="0,0,8,0"
+                                IsEnabled="False"
+                                Content="Inspect _current post"
+                                AutomationProperties.AutomationId="FacebookInspectCurrentPostButton"
+                                AutomationProperties.Name="Inspect the current open Facebook post"
+                                Click="OnInspectCurrentPostClick" />
+                        <Button x:Name="ReportBlockedButton"
+                                MinWidth="170"
+                                Content="Site _blocked or changed"
+                                AutomationProperties.AutomationId="FacebookReportBlockedButton"
+                                AutomationProperties.Name="Report Facebook blocked or changed"
+                                Click="OnReportBlockedClick" />
+                    </WrapPanel>
+                    <TextBlock x:Name="ResultSummaryText"
+                               Margin="0,0,0,10"
+                               Focusable="True"
+                               Text="No current post has been inspected."
+                               TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="FacebookPostInspectionSummary"
+                               AutomationProperties.LiveSetting="Assertive" />
+                    <Label Padding="0" Target="{Binding ElementName=DirectAddressBox}" Content="Inspected direct address" />
+                    <TextBox x:Name="DirectAddressBox"
+                             Margin="0,4,0,8"
+                             Padding="6"
+                             IsReadOnly="True"
+                             AutomationProperties.AutomationId="FacebookInspectedDirectAddress"
+                             AutomationProperties.Name="Inspected Facebook post direct address" />
+                    <Button x:Name="CopyDirectAddressButton"
+                            MinWidth="190"
+                            Margin="0,0,0,10"
+                            HorizontalAlignment="Left"
+                            IsEnabled="False"
+                            Content="Copy inspected _address"
+                            AutomationProperties.AutomationId="FacebookCopyInspectedAddressButton"
+                            AutomationProperties.Name="Copy inspected Facebook post direct address"
+                            Click="OnCopyDirectAddressClick" />
+                    <TextBlock x:Name="PostDetailsText"
+                               Margin="0,0,0,8"
+                               TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="FacebookInspectedPostDetails" />
+                    <ListBox x:Name="MediaLabelsList"
+                             MinHeight="70"
+                             AutomationProperties.AutomationId="FacebookInspectedMediaLabels"
+                             AutomationProperties.Name="Accessible media labels in the inspected post" />
+                </StackPanel>
+            </GroupBox>
+
+            <TextBlock x:Name="StatusText"
+                       Margin="0,0,0,12"
+                       Focusable="True"
+                       Text="Manual sign-in control belongs to you."
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="FacebookHistoricalPostSearchStatus"
+                       AutomationProperties.LiveSetting="Assertive" />
+            <WrapPanel>
+                <Button MinWidth="170"
+                        Margin="0,0,8,0"
+                        Content="_Return to shared browser"
+                        AutomationProperties.AutomationId="FacebookReturnToBrowserButton"
+                        AutomationProperties.Name="Return focus to the shared browser"
+                        Click="OnReturnToBrowserClick" />
+                <Button MinWidth="90"
+                        Content="C_lose"
+                        IsCancel="True"
+                        AutomationProperties.AutomationId="FacebookClosePostSearchButton"
+                        AutomationProperties.Name="Close old Facebook post finder"
+                        Click="OnCloseClick" />
+            </WrapPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Window>

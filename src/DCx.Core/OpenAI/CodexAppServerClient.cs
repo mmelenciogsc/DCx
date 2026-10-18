@@ -15,7 +15,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     ];
 
     private readonly CodexAppServerOptions _options;
-    private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> _pending = new();
+    private readonly ConcurrentDictionary<long, PendingRequest> _pending = new();
     private readonly ConcurrentDictionary<string, TurnState> _turns = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly object _diagnosticLock = new();
@@ -164,17 +164,30 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
         cancellationToken.ThrowIfCancellationRequested();
         // Once turn/start is sent, its bounded response supplies the only turn identity that can
-        // be interrupted safely. A notification may arrive before that response, so user
-        // cancellation must not abandon the identity-bearing request after dispatch.
+        // be interrupted safely. Bind cancellation in the protocol-reader response observer,
+        // before later turn/completed notifications can overtake a delayed task continuation.
+        var cancellationIntent = new TurnCancellationIntent();
+        using var cancellationRegistration = cancellationToken.Register(cancellationIntent.Request);
+        if (cancellationIntent.IsRequested)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        TurnState? state = null;
+        string? turnId = null;
         var turnResponse = await SendRequestAsync(
             "turn/start",
             new { threadId, input = new[] { new { type = "text", text = prompt } } },
-            CancellationToken.None);
-        var turnId = ReadNestedRequiredString(turnResponse, "result", "turn", "id");
-        var state = _turns.GetOrAdd(turnId, _ => new TurnState(threadId, turnId));
+            CancellationToken.None,
+            response =>
+            {
+                turnId = ReadNestedRequiredString(response, "result", "turn", "id");
+                state = _turns.GetOrAdd(turnId, _ => new TurnState(threadId, turnId));
+                cancellationIntent.Bind(() => _ = InterruptForCancellationAsync(threadId, turnId, state));
+            });
+        turnId ??= ReadNestedRequiredString(turnResponse, "result", "turn", "id");
+        state ??= _turns.GetOrAdd(turnId, _ => new TurnState(threadId, turnId));
 
-        using var cancellationRegistration = cancellationToken.Register(() =>
-            _ = InterruptForCancellationAsync(threadId, turnId, state));
         try
         {
             return await state.Completion.Task.WaitAsync(_lifetime?.Token ?? CancellationToken.None);
@@ -279,12 +292,16 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return startInfo;
     }
 
-    private async Task<JsonElement> SendRequestAsync(string method, object parameters, CancellationToken cancellationToken)
+    private async Task<JsonElement> SendRequestAsync(
+        string method,
+        object parameters,
+        CancellationToken cancellationToken,
+        Action<JsonElement>? responseObserver = null)
     {
         EnsureProcessRunning();
         var requestId = Interlocked.Increment(ref _nextRequestId);
         var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!_pending.TryAdd(requestId, completion))
+        if (!_pending.TryAdd(requestId, new PendingRequest(completion, responseObserver)))
         {
             throw new CodexProtocolException("Could not allocate a Codex request identifier.");
         }
@@ -367,11 +384,20 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                     var message = error.TryGetProperty("message", out var messageElement)
                         ? messageElement.GetString() ?? "Codex request failed."
                         : "Codex request failed.";
-                    pending.TrySetException(new CodexProtocolException(_redactor.Redact(message)));
+                    pending.Completion.TrySetException(new CodexProtocolException(_redactor.Redact(message)));
                 }
                 else
                 {
-                    pending.TrySetResult(root.Clone());
+                    var response = root.Clone();
+                    try
+                    {
+                        pending.ResponseObserver?.Invoke(response);
+                        pending.Completion.TrySetResult(response);
+                    }
+                    catch (Exception exception)
+                    {
+                        pending.Completion.TrySetException(exception);
+                    }
                 }
             }
 
@@ -449,7 +475,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     {
         foreach (var pending in _pending.Values)
         {
-            pending.TrySetException(exception);
+            pending.Completion.TrySetException(exception);
         }
 
         foreach (var turn in _turns.Values)
@@ -561,5 +587,69 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
 
         public void Fail(Exception exception) => Completion.TrySetException(exception);
+    }
+
+    private sealed record PendingRequest(
+        TaskCompletionSource<JsonElement> Completion,
+        Action<JsonElement>? ResponseObserver);
+
+    private sealed class TurnCancellationIntent
+    {
+        private readonly object _gate = new();
+        private bool _requested;
+        private bool _invoked;
+        private Action? _boundAction;
+
+        public bool IsRequested
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _requested;
+                }
+            }
+        }
+
+        public void Request()
+        {
+            Action? action;
+            lock (_gate)
+            {
+                _requested = true;
+                action = TakeActionUnsafe();
+            }
+
+            action?.Invoke();
+        }
+
+        public void Bind(Action action)
+        {
+            ArgumentNullException.ThrowIfNull(action);
+            Action? invoke;
+            lock (_gate)
+            {
+                if (_boundAction is not null)
+                {
+                    throw new InvalidOperationException("The Codex turn cancellation intent was already bound.");
+                }
+
+                _boundAction = action;
+                invoke = TakeActionUnsafe();
+            }
+
+            invoke?.Invoke();
+        }
+
+        private Action? TakeActionUnsafe()
+        {
+            if (!_requested || _invoked || _boundAction is null)
+            {
+                return null;
+            }
+
+            _invoked = true;
+            return _boundAction;
+        }
     }
 }
