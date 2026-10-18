@@ -1,7 +1,7 @@
 # P06 — Local models and resource inventory
 
 - Status: BLOCKED (real vision passes; bounded transcription/retrieval quality and concrete adapter contracts pass fixtures; approved real Whisper and embedding models remain absent)
-- Implementation commits: `463bfb6`, `b4aa4c9`, `a160435`, `21001d2`, `a41702b`, `5cdf5ec`, `ed6f001`, `2f71398`, `acc8e62`, `bcfe167`, `70f8dd7`, `abd91c0`, `7829af1`, `8783ed2`
+- Implementation commits: `463bfb6`, `b4aa4c9`, `a160435`, `21001d2`, `a41702b`, `5cdf5ec`, `ed6f001`, `2f71398`, `acc8e62`, `bcfe167`, `70f8dd7`, `abd91c0`, `7829af1`, `8783ed2`, `84de38b`
 - Documentation commit: recorded by the commit containing this file
 
 No model or runtime was downloaded or installed. The real benchmark uses only software and models already present on this Windows machine.
@@ -60,6 +60,7 @@ No file was downloaded, installed, extracted, registered, selected, or executed 
 - A strict schema-v1 manifest loader admits bounded transcription and embedding-retrieval suites. It rejects comments, trailing commas, duplicate/unknown properties, unsupported versions, path traversal, network/absolute WAV paths, reparse chains, duplicate WAV weighting, invalid provenance/license/thresholds and mutable fixture bytes. Transcription WAVs must be unique relative files beneath the manifest directory.
 - A native keyboard/UIA benchmark window displays the exact manifest/backend/suite/policy digests, provenance/license, fixture counts and quality/resource thresholds. Approval is disabled until a compatible approved backend exists, begins unchecked, authorizes one run for 20 minutes, and is revoked by path edits, completion, failure or cancellation. The run reloads and rehashes everything, uses the production Whisper adapter, exposes cancel and focuses the aggregate result. It never changes a production selection.
 - The per-user evidence store atomically replaces only the latest aggregate transcription or embedding result below a non-reparse application-data chain. It retains no manifest/fixture path, fixture/document/query identifier, expected/generated transcript, corpus/query/relevance text or vector. Cancellation preserves the prior completed evidence. Embedding review and execution are wired to the concrete Ollama adapter, but approval and Run truthfully remain unavailable when no approved embedding model is selected.
+- Ollama, Whisper and FFmpeg selection stores plus aggregate benchmark evidence now share one local-storage guard. It rejects filesystem roots, network/device paths, every existing reparse ancestor, linked state/evidence files and settings/evidence directories swapped after open. The directory, destination and temporary file are revalidated before atomic replacement; cleanup will leave an inert temporary file rather than follow an unsafe replacement.
 
 ## Reproduction
 
@@ -71,12 +72,12 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 
 ## Measured result
 
-- Locked Release build: 0 warnings, 0 errors; 2.58 seconds in the current recorded P06 run.
-- P06 exact-namespace local-model tests: passed 88, failed 0, skipped 0; about 2 seconds, with counters parsed from retained TRX.
-- Current full suite: passed 392, failed 0, skipped 0; about 9 seconds under the repository-mandated native Windows PowerShell wrapper.
+- Locked Release build: 0 warnings, 0 errors; 0.94 seconds in the current recorded P06 run.
+- P06 exact-namespace local-model tests: passed 97, failed 0, skipped 0; about 2 seconds, with counters parsed from retained TRX.
+- Current full suite: passed 401, failed 0, skipped 0; about 10 seconds under the repository-mandated native Windows PowerShell wrapper.
 - Vision response: `A blue square and a red circle are displayed above the text "DCX 42".`
-- Production-adapter prompt tokens: 1,100; output tokens: 20; total duration: 20,579,912,700 ns.
-- Separately measured Ollama duration: 14,684,681,100 ns; wall duration: 16,703 ms.
+- Production-adapter prompt tokens: 1,100; output tokens: 20; total duration: 16,515,368,800 ns.
+- Separately measured Ollama duration: 13,572,974,300 ns; wall duration: 15,601 ms.
 - Ollama-reported loaded model and VRAM allocation: 3,527,545,978 bytes each.
 - Exact digest and license binding before/after inference, malformed inventory/digest rejection, duplicate/mutable selection denial, changed-binding denial and changed-license denial passed.
 - Explicit model unload verification by loaded-process digest: passed.
@@ -85,7 +86,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - Native UIA proved the Whisper approval begins unchecked, saving without approval is denied, both complete licenses and all four digests are exposed, action access keys are unique, and no download/install action exists. The UI-persisted binding produced `DCx transcription fixture 42.` through both the production adapter and accessible media viewer. User cancellation killed the fixture and retained no partial text; completion focused the transcript; clearing denied the consumer and removed stale text while retaining all four source files.
 - FFmpeg native UIA proved exact executable/license digest and full-license review, real `NotSigned` status, default-off/save-before-approval denial, unique keyboard access keys, persisted identity, approval reset and clear-without-delete. The real installed candidate measured 148,583,424 bytes, executable SHA-256 `943c5c0623ded76eb02e4b593a7ac1bac043fbbcf6d1d34d673fb8c0369fab52`, GPLv3 license SHA-256 `8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903`, Windows `NotSigned`, and `approved=false`.
 - Seven processor tests passed leased WAV/PNG success and cleanup, input/output signature denial, executable and license tamper denial, cancellation/timeout tree kill, lease release and active input write denial. Native UIA composed the approved fixture FFmpeg and Whisper bindings for MP3 transcription, focused the expected transcript, then proved immediate denial after clearing FFmpeg.
-- A disposable exact-file approval of the real installed FFmpeg candidate processed a generated 440 Hz MP3 through the production processor in 321 ms. The independently parsed output was 32,078 bytes of mono PCM16 at 16 kHz, measured 439.5 Hz with RMS 2,751.15, and its private leased WAV was absent after disposal. The persisted disposable binding was cleared and the inventory still records the host candidate as unapproved.
+- A disposable exact-file approval of the real installed FFmpeg candidate processed a generated 440 Hz MP3 through the production processor in 359 ms. The independently parsed output was 32,078 bytes of mono PCM16 at 16 kHz, measured 439.5 Hz with RMS 2,751.15, and its private leased WAV was absent after disposal. The persisted disposable binding was cleared and the inventory still records the host candidate as unapproved.
 - Bounded read-only discovery found no runnable Whisper CLI or Python Whisper package and no Ollama embedding model. Two pre-existing ADFi PyTorch `.pt` model files were inventoried only by base name/size and explicitly rejected as incompatible with the approved `.bin`/`.gguf` CLI contract; they were neither copied nor executed.
 - Ollama inspection/embed request shape, capability/license parsing, two-vector response and inconsistent-dimension denial passed.
 - Concrete Ollama embedding benchmark fixtures prove exact runtime/backend binding, malformed version/resource denial, preloaded-target refusal, loaded-model/GPU policy observations, explicit unload request, three consecutive absence observations, cancellation cleanup, runtime drift denial and aggregate-only runner composition. They are not real-model quality or resource evidence.
@@ -95,7 +96,8 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - Eight runner tests prove exact approval/suite/policy/backend binding, input-order-stable digests, file write denial under lease, cancellation cleanup, policy/content substitution denial before inference, post-call binding-change denial, 32-input sequential embedding batches, aggregate resource composition, wrong-vector-count denial, result privacy shape and production composition through the pinned fake Whisper process.
 - Seven manifest/evidence tests prove strict transcription and embedding admission, exact digests, duplicate/unknown JSON denial, path traversal and duplicate-WAV denial, fixture mutation detection and latest-only aggregate persistence without content or paths.
 - Native UIA proved benchmark approval starts unchecked, Run is disabled without it, exact digests/thresholds and unique access keys are exposed, the production fake adapter produces a focused aggregate PASS, path edits revoke approval, cancellation preserves prior evidence, and a missing approved backend remains explicitly unavailable. This is automated UIA, not human screen-reader evidence or real speech accuracy.
-- Hardware/TRX/native benchmark evidence: `artifacts/test-results/p06-2c756291fffc49c9bd3d61227e717d95/` (generated from source committed as `8783ed2` and intentionally not committed); P07 UIA fixtures remain `artifacts/test-results/p07-0a3c791833884f67bfa554162c81538a/`.
+- Nine named storage-denial tests prove a linked application root, linked Ollama/Whisper/FFmpeg state, linked aggregate evidence and settings/evidence directories swapped after open all fail with zero writes through the links.
+- Hardware/TRX/native benchmark evidence: `artifacts/test-results/p06-d2a011f41be445ad88c475fe83f8be1d/` (generated from source committed as `84de38b` and intentionally not committed); P07 UIA fixtures remain `artifacts/test-results/p07-0a3c791833884f67bfa554162c81538a/`.
 
 ## Changed files in the latest milestone
 
@@ -113,6 +115,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - Approval-bound leased execution, exact digest preparation, concrete Whisper composition and denial coverage: `src/DCx.Core/LocalModels/LocalModelBenchmarkRunner.cs`, `tests/DCx.Core.Tests/LocalModels/LocalModelBenchmarkRunnerTests.cs`, `docs/architecture/adr/0050-approval-bound-local-model-benchmark-runs.md`.
 - Strict manifests, latest-only aggregate evidence, accessible exact review and native UIA: `src/DCx.Core/LocalModels/LocalModelBenchmarkManifest.cs`, `src/DCx.Desktop/LocalModelBenchmarkWindow.xaml`, `src/DCx.Desktop/LocalModelBenchmarkWindow.xaml.cs`, `tests/DCx.Core.Tests/LocalModels/LocalModelBenchmarkManifestTests.cs`, `scripts/validate-p06-whisper-registration.ps1`, `docs/user/local-model-benchmarks.md`, `docs/architecture/adr/0051-accessible-local-benchmark-review.md`.
 - Concrete exact-runtime Ollama embedding benchmark, resource/unload contracts and missing-model UIA: `src/DCx.Core/LocalModels/OllamaLocalClient.cs`, `src/DCx.Core/LocalModels/LocalModelBenchmarkRunner.cs`, `src/DCx.Desktop/LocalModelBenchmarkWindow.xaml.cs`, `tests/DCx.Core.Tests/LocalModels/OllamaLocalClientTests.cs`, `scripts/validate-p06-whisper-registration.ps1`, `docs/architecture/adr/0052-exact-ollama-embedding-benchmark.md`.
+- Revalidated storage confinement and denial evidence: `src/DCx.Core/LocalModels/LocalModelStoragePathGuard.cs`, all three local-model selection stores, `LocalModelBenchmarkEvidenceStore`, their four test classes, `scripts/validate-p06.ps1`, and `docs/architecture/adr/0054-confined-local-model-state.md`.
 - Decision, development and human-AT records: `docs/architecture/adr/0023-explicit-persisted-local-model-approval.md`, `docs/deployment/DEVELOPMENT.md`, `docs/accessibility/P06_LOCAL_MODELS_CHECKLIST.md`.
 
 ## Blockers and unblock condition
@@ -124,6 +127,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - Automated UIA passed, but the dedicated JAWS/NVDA/Narrator checklist has not been run and cannot be inferred from automation.
 - The registration path proves safe consent and execution for already-installed files, but this host has no approved real Whisper executable/model to select. Install/download of whisper.cpp and a suitable embedding model, with source, version, license and SHA-256 recorded, requires owner approval.
 - The accessible exact-review surface and aggregate evidence boundary pass generated native UIA fixtures, but this host still has no approved real Whisper runtime/model for a real speech suite and no installed Ollama embedding model for real retrieval/resource gates. Ollama's reported loaded-model `size` is not an operating-system peak-working-set measurement; a production acceptance policy must explicitly approve that conservative metric and a quiet-period protocol for the remaining external-client race.
+- Revalidation materially narrows storage redirection but does not eliminate a same-user check/open race. Production ACL and process isolation remain required.
 - A 2026-10-18 read-only follow-up found an LM Studio CUDA ASR engine DLL without a runnable approved CLI/PTE model/license set, plus an 84,106,624-byte bundled Nomic GGUF embedding asset outside Ollama's managed inventory and without co-located approval evidence. Neither was imported, registered, executed or counted as an available DCx backend; one probe-only `lms.exe` helper was terminated after it waited for the desktop service. This does not change either blocker.
 - After approval, run fixed speech accuracy/word-error fixtures and retrieval recall/ranking fixtures, measure CPU/GPU/RAM/VRAM, latency, cancellation and unload under normal and low-resource emulation. P06 remains BLOCKED until those real gates pass.
 - No cloud Ollama endpoint, API key or network model call was used.
