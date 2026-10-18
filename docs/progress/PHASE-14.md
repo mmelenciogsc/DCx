@@ -1,7 +1,7 @@
 # P14 — Pilot and release readiness
 
 - Status: BLOCKED / NO_GO (local readiness controls pass; pilot and production activation are off)
-- Implementation commits through current exact source: `8d47f27`
+- Implementation commits through current exact source: `ad0bd55`
 - Documentation commit: recorded by the commit containing this file
 
 No pilot was started, no telemetry was collected, no user was enrolled, and no production service or payment was activated.
@@ -32,7 +32,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 exact-namespace release/readiness tests: passed 10, failed 0, skipped 0; about 1 second. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
-- Current committed-source expanded full suite: passed 511, failed 0, skipped 0; native Windows, about 9 seconds.
+- Current committed-source expanded full suite: passed 515, failed 0, skipped 0; native Windows, about 9 seconds.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -41,7 +41,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled consent state, blocker list, metric-definition list and refresh action. The validator confirmed that no control named `Activate production` exists.
 - The P11 readiness gate was rerun after schema-v14 exact period-close review/approval binding. The local accounting boundary now denies unapproved/expired/altered close, missing registration, contributor/amount/period substitution, stored allocation or approval-time tamper and concurrent duplicate allocation before provider send, while existing blocked-event review remains non-financial. P11 remains blocking because authenticated production close/adjustment/hold/dispute/tax authority, exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider plus closure/requeue policy, real operator identity/MFA/TLS/secret custody/centralized audit, deployed distributed fencing, external alert delivery/human acknowledgment/escalation and authorized provider acceptance remain absent.
-- Evidence: `artifacts/test-results/p14-e9dbb0eed37e4697955c919e67e097fc/go-no-go.json` with `p14-readiness.trx` beside it, generated from exact committed source `8d47f27` and intentionally not committed. The exact-source full suite passes 511/511 with zero build warnings/errors.
+- Evidence: `artifacts/test-results/p14-f5fee20fb13841e58545fe3a792d7eab/go-no-go.json` with `p14-readiness.trx` beside it, generated from exact committed source `ad0bd55` and intentionally not committed. The exact-source full suite passes 515/515 with zero build warnings/errors.
 
 ## Changed files in the latest milestone
 

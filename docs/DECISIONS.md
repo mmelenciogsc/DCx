@@ -79,5 +79,6 @@
 | [0075](architecture/adr/0075-bind-payout-reservations-to-contributor-liability.md) | Bind payout reservations to available contributor liability | Accepted for the local CARE sandbox ledger; contributor-specific accrual authority and production PayPal acceptance remain blocked | 2026-10-18 |
 | [0076](architecture/adr/0076-bind-payouts-to-registered-care-allocations.md) | Bind payouts to registered CARE allocations | Accepted for the local CARE sandbox ledger; authoritative close approval and production PayPal acceptance remain blocked | 2026-10-18 |
 | [0077](architecture/adr/0077-bind-care-period-close-review-and-approval.md) | Bind CARE period close review and approval | Accepted for the local CARE sandbox ledger; production close authority and PayPal acceptance remain blocked | 2026-10-18 |
+| [0078](architecture/adr/0078-provider-neutral-care-contributor-dashboard.md) | Expose CARE contributor status through a provider-neutral read-only contract | Accepted for generated local validation; authenticated contributor service remains blocked | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
