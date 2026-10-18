@@ -75,5 +75,6 @@
 | [0071](architecture/adr/0071-separate-provider-route-observation-from-transfer-authority.md) | Separate provider-route observation from transfer authority | Accepted for explicit read-only P06 audit; product-session follow-up is 0072 | 2026-10-18 |
 | [0072](architecture/adr/0072-session-bound-exact-provider-route-review.md) | Review exact provider routes in a short-lived user-initiated session | Accepted with live exact-plan enforcement at item and set boundaries; real payload transfer remains owner-gated | 2026-10-18 |
 | [0073](architecture/adr/0073-serialize-shared-global-replica-operations.md) | Serialize operations on one shared global replica | Accepted for the per-user replica; production deployment and malicious same-user isolation remain blocked | 2026-10-18 |
+| [0074](architecture/adr/0074-bind-and-atomically-admit-usage-receipts.md) | Bind and atomically admit qualified usage receipts | Accepted for local contribution simulation; production identity and untrusted-client verification remain blocked | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

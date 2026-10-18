@@ -1,7 +1,7 @@
 # P10 — Contributions, governance and provenance
 
 - Status: BLOCKED (authenticated local-simulation preparation/intake/review and server-side CCB hostile-code policy pass; production publication remains unavailable)
-- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`, `f417f6e`, `0fc2649`, `bbadbca`, `e13246b`, `bdfd922`, `e93cd0d`, `068638c`; read-only environment audit `8b94159`
+- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`, `f417f6e`, `0fc2649`, `bbadbca`, `e13246b`, `bdfd922`, `e93cd0d`, `068638c`, `e02d570`; read-only environment audit `8b94159`
 - Documentation commit: recorded by the commit containing this file
 
 No contribution was sent externally or published to a production catalog.
@@ -18,7 +18,8 @@ No contribution was sent externally or published to a production catalog.
 - SQLite quarantine with unique approval nonces, idempotent submission identity, reviewer transition, and CKB propagation into the signed P09 release chain only after a clean authoritative rescan.
 - Withdrawal publishes a signed deprecation.
 - Derivative credit graph rejects duplicate/invalid weights, allocation above 100% and cycles.
-- Minimal usage-receipt contract excludes prompts, bodies, paths and URLs; HMAC integrity, receipt/nonce replay denial, entitlement/global-resource checks, self-use exclusion, success evidence, time window and daily anomaly cap.
+- Minimal usage-receipt contract excludes prompts, bodies, paths and URLs. The authoritative context now binds the exact expected installation pseudonym and entitlement ID to the bounded HMAC key, actor, active-entitlement flag and UTC evaluation time. Receipt/nonce replay denial, approved-resource checks, self-use exclusion, success evidence, time window and daily anomaly cap remain.
+- Usage qualification now runs HMAC verification before storage work and performs replay lookup, resource lookup, per-installation/resource UTC-day count, decision and exact insert in one immediate SQLite transaction. This serializes service instances: identical concurrent receipts return one qualified plus one replay result, while two distinct receipts competing for slot 100 return one qualified plus one durable `rate_anomaly` result.
 - Server-side Linux sandbox contract and versioned evidence bind artifact, canonical extracted workspace, test suite, policy launcher, Bubblewrap backend, static runtime and output digests.
 - Rootless Bubblewrap policy creates new user, mount, PID, network, IPC, UTS and cgroup namespaces; drops every capability; clears the environment; uses UID/GID 65534; and exposes only a read-only package, read-only request, pinned static BusyBox, minimal `/proc`/`/dev`, and private tmpfs work areas.
 - The empty root is remounted read-only. No host home, repository, system tree, socket, D-Bus endpoint or external network route is mounted.
@@ -65,8 +66,8 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 ## Measured result
 
 - Locked native Release build: 0 warnings, 0 errors; 2.32 seconds in the recorded dedicated run.
-- P10 exact-namespace tests: passed 52, failed 0, skipped 0; about 8 seconds, with exact counters parsed from retained TRX.
-- Current full suite: passed 289, failed 0, skipped 0; about 9 seconds.
+- P10 exact-namespace tests: passed 53, failed 0, skipped 0; about 7 seconds, with exact counters parsed from retained TRX.
+- Current full suite: passed 505, failed 0, skipped 0; about 8 seconds.
 - Eligible CKB item: quarantined, absent from catalog before review, approved into a signed release, synchronized by a client, then withdrawn/deprecated.
 - Secret/PII/dummy item: remained quarantined and reviewer publication failed closed.
 - Receipt: one qualified event; replay, contributor self-use and invalid integrity excluded.
@@ -74,7 +75,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - Native CCB UIA: type selection exposed the package controls; exact schema-v2 text, manifest identity/version and path-clearing status were accessible; the selected full path was absent after admission. The separately approved send placed the exact bytes in `Quarantined`, cleared local bytes/review text, locked candidate identity and reconciled minimized status without a body. No reviewer approval or publication was attempted.
 - WSL-hosted Ubuntu local simulation: Bubblewrap 0.6.1 SHA-256 `bf6cf3d4456665f5d80c14eb79a76e0ce87b39a0883e614a161658b4ec33492c`; static BusyBox SHA-256 `b3c1009e1b5c927e537487c80639cdf404f69e3eb49371d9be5d841672be3ff9`.
 - Benign transformation passed. Host/repository and `/etc`/`/usr` reads, an external network request, root write, inherited secret environment, outside-quarantine workspace, symlink, workspace-digest substitution, timeout and output overflow were denied.
-- Latest combined P10 evidence: `artifacts/test-results/p10-0247c7fdcc5d4e45bcdf2e34680c41d1/`, including `p10-contributions.trx`, `uia-ccb-package.zip` and `sandbox-evidence.json`; server capability evidence: `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` (generated and intentionally not committed).
+- Latest combined P10 evidence: `artifacts/test-results/p10-41e29a28d5eb4ed7896219d21444e337/`, generated from exact committed source `e02d570`, including `p10-contributions.trx`, `uia-ccb-package.zip` and `sandbox-evidence.json`; server capability evidence: `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` (generated and intentionally not committed).
 - Post-run scanning found neither ephemeral bearer token in server diagnostics, application data or retained P10 evidence.
 - Schema-v2 success path executed two declared tests, persisted two passing evidence rows, published the exact artifact into a signed release, synchronized it to a separate global replica and lazily retrieved byte-identical content.
 - Denial coverage includes missing executor, package/digest/metadata mismatch, undeclared files/fields, invalid UTF-8/base64/null input, malicious entrypoint or test-input text, expected-output mismatch and post-intake quarantine tampering.
@@ -91,9 +92,13 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - Missing worker prevented API-path CCB approval. Output mismatch dead-lettered with a stable code and body-free status; reviewer retry was explicit. Malformed review leases/rows failed closed, and a 20-crash attempt limit required remediation before successful review.
 - Persisted scanner codes containing the policy namespace separator (`.`) are now admitted and exposed as codes; credential and PII values remain absent.
 - A real child Kestrel process returned `401` for the first ten missing-credential requests and then a stable `rate_limited` `429` for the eleventh request in the same minute. Deterministic unit coverage also verifies concurrency denial, idempotent release, per-address isolation, window reset and fail-closed non-UTC/regressed time. Captured diagnostics contained neither configured bearer credential.
+- Validly signed receipts that substituted either the installation pseudonym or entitlement ID were stored only as non-qualified `identity_mismatch` decisions. A malformed authoritative key was denied before storage. Across two governance instances, concurrent exact replay produced one qualification and one replay, and two distinct receipts at the daily boundary produced exactly 100 persisted qualifications plus one `rate_anomaly` rather than exceeding the cap.
 
 ## Changed files in the latest milestone
 
+- Exact authoritative identity binding and bounded HMAC/schema verification: `src/DCx.Core/Contributions/UsageReceiptPolicy.cs`, `server/DCx.GlobalService/ContributionGovernanceService.cs`.
+- Cross-instance immediate transaction and hostile substitution/replay/cap tests: `tests/DCx.Core.Tests/Contributions/ContributionPolicyTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionGovernanceTests.cs`.
+- Mandatory validator assertions and decision: `scripts/validate-p10.ps1`, `docs/architecture/adr/0074-bind-and-atomically-admit-usage-receipts.md`.
 - Path-private exact-snapshot admission and owned-byte clearing: `src/DCx.Core/Contributions/ContributionArtifactSelectionService.cs`.
 - Accessible CKB/CCB selection, complete review and exact-byte lifecycle: `src/DCx.Desktop/ContributionsWindow.xaml`, `src/DCx.Desktop/ContributionsWindow.xaml.cs`.
 - Missing/directory/oversize/reparse/malformed/cancellation and zeroing coverage: `tests/DCx.Core.Tests/Contributions/ContributionArtifactSelectionServiceTests.cs`.
@@ -108,7 +113,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - The prototype has no seccomp syscall profile, cgroup-v2 enforcement, immutable OCI/base-image digest, service-account deployment hardening, kernel/LTS policy, production monitoring or independent penetration test. Bubblewrap itself explicitly requires the caller to define a complete policy; this milestone does not claim production-grade hostile isolation.
 - The read-only server audit confirms .NET/ASP.NET 10.0.12, Docker/Compose and Bubblewrap 0.9.0 are installed. Docker daemon access is denied to the authenticated user; its current cgroup is not delegated writable; and the exact nonprivileged Bubblewrap `--unshare-all` network-isolation smoke fails. No Linux child-service run exercised the HTTP-to-CCB-sandbox path and no deployment was attempted. Production publication must remain unavailable until an approved Ubuntu 24.04 deployment preserves network denial, enforces measured cgroup/seccomp bounds, adds production identity, and passes the remaining external security gates.
 - Regex scanners are defense-in-depth, not a guarantee that content lacks secrets/PII or that the contributor owns it. Human/policy review remains mandatory.
-- An HMAC proves receipt integrity/installation association, not that an untrusted customer device reported honest usage. Server anomaly analysis, audit sampling and entitlement/account correlation remain required.
+- The HMAC now binds one exact server-supplied installation and entitlement identity, and the same-database transaction closes replay/cap races across local service instances. It still does not prove that an untrusted customer device reported honest useful execution. Production key provisioning/rotation, authoritative entitlement lookup, cross-account anomaly analysis, audit sampling and approved retention/access policy remain required.
 - Each worker cycle processes at most 100 ready intents. Same-SQLite local processes coordinate with fencing leases and persist retry/dead-letter state, but there is no supported multi-node/network-filesystem deployment, production scheduler, alert transport, operator UI, retention policy, SLO or high-availability evidence.
 - The authenticated API path now claims a durable CCB job before hostile execution. The older direct governance method remains for in-process tests and can bypass that queue, so it must not become a production endpoint. The queue is same-SQLite simulation infrastructure, not a supported distributed broker; its fixed lease depends on the current bounded test profile and has no production heartbeat/alerting evidence.
 - Human JAWS/NVDA/Narrator testing remains unverified; see `docs/accessibility/P10_CONTRIBUTION_CHECKLIST.md`.
