@@ -246,7 +246,8 @@ try {
             $candidate.Current.Name -like "*4 candidates. 9 immutable transfer items.*" -and
             $candidate.Current.Name -like "*1,281,058,770 network bytes. 3,098,988,452 minimum free bytes.*" -and
             $candidate.Current.Name -like "*reloads the authenticated catalog, requires exact-item approval, disables redirects, proxy, cookies and decompression, and rolls back any partial stream*" -and
-            $candidate.Current.Name -like "*not connected to a transfer action in this window*" -and
+            $candidate.Current.Name -like "*private set coordinator rechecks capacity, uses random incoming storage, protects a source-path-free receipt, atomically publishes only a complete plan, and can rehash the completed set*" -and
+            $candidate.Current.Name -like "*Neither boundary is connected to a transfer action in this window*" -and
             $candidate.Current.Name -like "*No transfer approval exists. Nothing was downloaded, installed, extracted, pulled, registered, selected, or executed.*") {
             $candidate
         }

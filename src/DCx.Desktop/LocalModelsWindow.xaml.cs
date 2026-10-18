@@ -1038,7 +1038,7 @@ public partial class LocalModelsWindow : Window
             "The minimum reserves one temporary transfer copy, one retained verified copy, and 536,870,912 workspace bytes. " +
             $"{available} Capacity must be rechecked immediately before any future transfer.\n" +
             $"{itemDetails}\n" +
-            "The inert core transport reloads the authenticated catalog, requires exact-item approval, disables redirects, proxy, cookies and decompression, and rolls back any partial stream unless final URI, status, length and SHA-256 all match. It is not connected to a transfer action in this window.\n" +
+            "The inert core transport reloads the authenticated catalog, requires exact-item approval, disables redirects, proxy, cookies and decompression, and rolls back any partial stream unless final URI, status, length and SHA-256 all match. Its private set coordinator rechecks capacity, uses random incoming storage, protects a source-path-free receipt, atomically publishes only a complete plan, and can rehash the completed set. Neither boundary is connected to a transfer action in this window.\n" +
             "No transfer approval exists. Nothing was downloaded, installed, extracted, pulled, registered, selected, or executed.";
     }
 

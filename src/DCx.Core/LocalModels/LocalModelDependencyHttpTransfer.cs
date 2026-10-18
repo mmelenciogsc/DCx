@@ -56,6 +56,15 @@ public sealed record LocalModelDependencyTransferResult(
     long Bytes,
     string Sha256);
 
+public interface ILocalModelDependencyTransfer
+{
+    Task<LocalModelDependencyTransferResult> TransferAsync(
+        LocalModelDependencyTransferPlan plan,
+        LocalModelDependencyTransferApproval approval,
+        Stream destination,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed class LocalModelDependencyTransferException : Exception
 {
     public LocalModelDependencyTransferException(string code, Exception? innerException = null)
@@ -71,7 +80,7 @@ public sealed class LocalModelDependencyTransferException : Exception
 /// Streams one explicitly approved, digest-bound plan item into an empty rollback-capable stream.
 /// It never chooses a filesystem path, installs, extracts, registers, executes, or persists approval.
 /// </summary>
-public sealed class LocalModelDependencyHttpTransfer : IDisposable
+public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTransfer, IDisposable
 {
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(45);
     private const int BufferBytes = 64 * 1024;
