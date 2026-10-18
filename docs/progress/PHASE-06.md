@@ -1,7 +1,7 @@
 # P06 — Local models and resource inventory
 
 - Status: BLOCKED (real vision passes; bounded transcription/retrieval quality and concrete adapter contracts pass fixtures; approved real Whisper and embedding models remain absent)
-- Implementation commits: `463bfb6`, `b4aa4c9`, `a160435`, `21001d2`, `a41702b`, `5cdf5ec`, `ed6f001`, `2f71398`, `acc8e62`, `bcfe167`, `70f8dd7`, `abd91c0`, `7829af1`, `8783ed2`, `84de38b`, `1bb4d7e`, `efc607c`
+- Implementation commits: `463bfb6`, `b4aa4c9`, `a160435`, `21001d2`, `a41702b`, `5cdf5ec`, `ed6f001`, `2f71398`, `acc8e62`, `bcfe167`, `70f8dd7`, `abd91c0`, `7829af1`, `8783ed2`, `84de38b`, `1bb4d7e`, `efc607c`, `0381f5e`
 - Documentation commit: recorded by the commit containing this file
 
 No model or runtime was downloaded or installed. The real benchmark uses only software and models already present on this Windows machine.
@@ -63,6 +63,7 @@ No file was downloaded, installed, extracted, registered, selected, or executed 
 - Ollama, Whisper and FFmpeg selection stores plus aggregate benchmark evidence now share one local-storage guard. It rejects filesystem roots, network/device paths, every existing reparse ancestor, linked state/evidence files and settings/evidence directories swapped after open. The directory, destination and temporary file are revalidated before atomic replacement; cleanup will leave an inert temporary file rather than follow an unsafe replacement.
 - A compiled schema-v1 dependency catalog binds the four audited candidates to exact HTTPS source, byte count, SHA-256 and license evidence; the Ollama entry additionally binds its exact model/license/parameter layers. Strict parsing rejects duplicate/unknown members, unapproved hosts and inconsistent identities. The offline artifact reviewer takes a no-write/no-delete lease, revalidates the path after opening, and checks exact length, type/signature, semantic Ollama descriptors and digest without downloading, copying, extracting, executing, installing or pulling anything.
 - The native local-model window authenticates and exposes the exact catalog, candidate source/size/digest/license/layers and archive-contained-license warning through keyboard-focusable UIA. It can browse to and verify only an already-staged local artifact. There is no download/install/pull/extract/execute button, no candidate approval or selection action, and no artifact path is retained in evidence.
+- After exact runtime-archive size and SHA-256 admission, a bounded pre-extraction pass fully streams every ZIP member and checks CRC-32. It rejects traversal/ADS/device names, non-normalized or case-colliding Windows paths, links/special entries, encryption, missing or duplicate `whisper-cli.exe`, unsafe expansion ratios/sizes and corrupt content. It reports only aggregate counts, the single CLI path, total license/notice count and at most 32 notice paths; it writes and retains no extracted content.
 
 ## Reproduction
 
@@ -75,11 +76,11 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 ## Measured result
 
 - Locked Release build: 0 warnings, 0 errors; 4.25 seconds in the current recorded P06 run.
-- P06 exact-namespace local-model tests: passed 113, failed 0, skipped 0; about 2 seconds, with counters parsed from retained TRX.
-- Current full suite: passed 417, failed 0, skipped 0; about 10 seconds under the repository-mandated native Windows PowerShell wrapper.
+- P06 exact-namespace local-model tests: passed 122, failed 0, skipped 0; about 2 seconds, with counters parsed from retained TRX.
+- Current full suite: passed 426, failed 0, skipped 0; about 8 seconds under the repository-mandated native Windows PowerShell wrapper.
 - Vision response: `A blue square and a red circle are displayed above the text "DCX 42".`
-- Production-adapter prompt tokens: 1,100; output tokens: 20; total duration: 20,755,823,700 ns.
-- Separately measured Ollama duration: 13,593,395,700 ns; wall duration: 15,624 ms.
+- Production-adapter prompt tokens: 1,100; output tokens: 20; total duration: 15,987,553,800 ns.
+- Separately measured Ollama duration: 14,242,824,900 ns; wall duration: 16,278 ms.
 - Ollama-reported loaded model and VRAM allocation: 3,527,545,978 bytes each.
 - Exact digest and license binding before/after inference, malformed inventory/digest rejection, duplicate/mutable selection denial, changed-binding denial and changed-license denial passed.
 - Explicit model unload verification by loaded-process digest: passed.
@@ -101,7 +102,8 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - Nine named storage-denial tests prove a linked application root, linked Ollama/Whisper/FFmpeg state, linked aggregate evidence and settings/evidence directories swapped after open all fail with zero writes through the links.
 - Sixteen dependency-catalog/reviewer tests pass. Eight named contracts are mandatory in the P06 validator. They prove exact embedded identity, strict digest/schema binding, linked-file/ancestor denial, runtime signature admission, semantic Ollama inventory binding and layer-substitution denial. Evidence records catalog SHA-256 `1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325` and downloads/installs `0`.
 - Native UIA additionally proves the exact catalog hash and four-candidate count, readable source/digest/license limits, unique keyboard access keys, wrong-size staged-artifact denial, rejected-source preservation and absence of download/install/pull/extract/execute actions.
-- Hardware/TRX/native benchmark evidence: `artifacts/test-results/p06-3116d4ef6e104030b06db8474a444827/` (generated from source committed as `efc607c` and intentionally not committed); P07 UIA fixtures remain `artifacts/test-results/p07-0a3c791833884f67bfa554162c81538a/`.
+- Eight mandatory hostile runtime-archive cases prove traversal, case collision, reserved device name, link, missing CLI, compression bomb, CRC corruption and encryption denial. A positive archive streams three files, locates one CLI and one notice; separate coverage proves a 33-notice archive reports the exact total while exposing only the first 32 paths.
+- Hardware/TRX/native benchmark evidence: `artifacts/test-results/p06-dd78598bebd7455bb8b5b21e1e795e53/` (generated from source committed as `0381f5e` and intentionally not committed); P07 UIA fixtures remain `artifacts/test-results/p07-0a3c791833884f67bfa554162c81538a/`.
 
 ## Changed files in the latest milestone
 
@@ -122,6 +124,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - Revalidated storage confinement and denial evidence: `src/DCx.Core/LocalModels/LocalModelStoragePathGuard.cs`, all three local-model selection stores, `LocalModelBenchmarkEvidenceStore`, their four test classes, `scripts/validate-p06.ps1`, and `docs/architecture/adr/0054-confined-local-model-state.md`.
 - Immutable dependency catalog and offline admission: `src/DCx.Core/LocalModels/LocalModelDependencyCatalog.cs`, `src/DCx.Core/Resources/p06-local-dependencies-v1.json`, `tests/DCx.Core.Tests/LocalModels/LocalModelDependencyCatalogTests.cs`, `scripts/validate-p06.ps1`, and `docs/architecture/adr/0055-pinned-offline-local-dependency-admission.md`.
 - Accessible catalog/artifact review: `src/DCx.Desktop/LocalModelsWindow.xaml`, `src/DCx.Desktop/LocalModelsWindow.xaml.cs`, `scripts/validate-p06-whisper-registration.ps1`, and the exact-evidence checks in `scripts/validate-p06.ps1`.
+- Bounded pre-extraction ZIP review: `src/DCx.Core/LocalModels/WhisperRuntimeArchiveInspector.cs`, its integration in `LocalModelDependencyCatalog.cs`, hostile coverage in `LocalModelDependencyCatalogTests.cs`, and `docs/architecture/adr/0056-bounded-whisper-runtime-archive-inspection.md`.
 - Decision, development and human-AT records: `docs/architecture/adr/0023-explicit-persisted-local-model-approval.md`, `docs/deployment/DEVELOPMENT.md`, `docs/accessibility/P06_LOCAL_MODELS_CHECKLIST.md`.
 
 ## Blockers and unblock condition
@@ -133,6 +136,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\ci.ps1
 - Automated UIA passed, but the dedicated JAWS/NVDA/Narrator checklist has not been run and cannot be inferred from automation.
 - The registration path proves safe consent and execution for already-installed files, but this host has no approved real Whisper executable/model to select. Install/download of whisper.cpp and a suitable embedding model, with source, version, license and SHA-256 recorded, requires owner approval.
 - The embedded catalog and offline reviewer make future staging deterministic but grant no retrieval, install, extraction, execution, model-pull, legal or redistribution authority. Runtime-contained notices and every real acceptance gate remain mandatory after explicit authorization.
+- The runtime ZIP inspector is pre-extraction admission only. The actual publisher archive has not been downloaded, so its real member inventory and contained terms have not passed; no extraction design or installation authority exists yet.
 - The accessible exact-review surface and aggregate evidence boundary pass generated native UIA fixtures, but this host still has no approved real Whisper runtime/model for a real speech suite and no installed Ollama embedding model for real retrieval/resource gates. Ollama's reported loaded-model `size` is not an operating-system peak-working-set measurement; a production acceptance policy must explicitly approve that conservative metric and a quiet-period protocol for the remaining external-client race.
 - Revalidation materially narrows storage redirection but does not eliminate a same-user check/open race. Production ACL and process isolation remain required.
 - A 2026-10-18 read-only follow-up found an LM Studio CUDA ASR engine DLL without a runnable approved CLI/PTE model/license set, plus an 84,106,624-byte bundled Nomic GGUF embedding asset outside Ollama's managed inventory and without co-located approval evidence. Neither was imported, registered, executed or counted as an available DCx backend; one probe-only `lms.exe` helper was terminated after it waited for the desktop service. This does not change either blocker.
