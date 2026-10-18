@@ -87,10 +87,13 @@ try {
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.RedirectPolicyMutationDuringTransferRollsBackAuthenticatedBytes",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.InjectedPolicyCannotOverrideReviewedDenyAllAuthority",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.MissingApprovalOrCapacity_DeniesBeforeNetworkAndLeavesDestinationEmpty",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.MutatedPlanApprovalAndNonemptyDestination_FailBeforeNetwork",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.SubstitutedFinalUriEncodingRangeAndChunkedResponsesFailClosed",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.MissingWrongShortAndExtraLengthsRemovePartialOutput",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.CallerCancellationAfterPartialReadTruncatesDestination",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.ReadFailureAfterWrittenChunkTruncatesPartialDestination",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.UnexpectedProgressFailureRollsBackWithoutLeakingDetails",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.UnexpectedRollbackFailureReturnsStableCleanupCode",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.SelfConsistentPlanFromDifferentCatalogIsDeniedBeforeNetwork"
     )
     $requiredDependencyTransferSetContracts = @(

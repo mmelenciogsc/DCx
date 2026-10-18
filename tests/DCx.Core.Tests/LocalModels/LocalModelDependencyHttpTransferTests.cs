@@ -347,8 +347,11 @@ public sealed class LocalModelDependencyHttpTransferTests
             plan with { TransferBytes = plan.TransferBytes + 1 }, approval, new MemoryStream()));
         await AssertCodeAsync("dependency_transfer_approval_invalid", () => transfer.TransferAsync(
             plan, approval with { Sha256 = new string('0', 64) }, new MemoryStream()));
+        using var nonempty = new MemoryStream([1]);
         await AssertCodeAsync("dependency_transfer_destination_invalid", () => transfer.TransferAsync(
-            plan, approval, new MemoryStream([1])));
+            plan, approval, nonempty));
+        Assert.Equal([1], nonempty.ToArray());
+        Assert.Equal(0, nonempty.Position);
         Assert.Equal(0, handler.Requests);
     }
 
@@ -437,6 +440,55 @@ public sealed class LocalModelDependencyHttpTransferTests
         Assert.Equal("dependency_transfer_failed", exception.Code);
         Assert.Equal("dependency_transfer_failed", exception.Message);
         Assert.DoesNotContain("private", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UnexpectedProgressFailureRollsBackWithoutLeakingDetails()
+    {
+        var bytes = "unexpected progress failure fixture"u8.ToArray();
+        var (catalog, plan, item) = Plan(bytes);
+        var handler = new FixtureHandler(request => Response(request, bytes));
+        using var transfer = new LocalModelDependencyHttpTransfer(handler, catalog);
+        using var destination = new MemoryStream();
+
+        var exception = await Assert.ThrowsAsync<LocalModelDependencyTransferException>(() =>
+            transfer.TransferAsync(
+                plan,
+                LocalModelDependencyTransferApproval.Create(plan, item, approved: true),
+                destination,
+                progress: new InlineProgress<LocalModelDependencyItemTransferProgress>(_ =>
+                    throw new ApplicationException("synthetic private callback detail"))));
+
+        Assert.Equal("dependency_transfer_failed", exception.Code);
+        Assert.Equal("dependency_transfer_failed", exception.Message);
+        Assert.DoesNotContain("private", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, destination.Length);
+        Assert.Equal(0, destination.Position);
+        Assert.Equal(1, handler.Requests);
+    }
+
+    [Fact]
+    public async Task UnexpectedRollbackFailureReturnsStableCleanupCode()
+    {
+        var bytes = "unexpected cleanup failure fixture"u8.ToArray();
+        var (catalog, plan, item) = Plan(bytes);
+        var handler = new FixtureHandler(request => Response(request, bytes));
+        using var transfer = new LocalModelDependencyHttpTransfer(handler, catalog);
+        using var destination = new RollbackFailureStream();
+
+        var exception = await Assert.ThrowsAsync<LocalModelDependencyTransferException>(() =>
+            transfer.TransferAsync(
+                plan,
+                LocalModelDependencyTransferApproval.Create(plan, item, approved: true),
+                destination,
+                progress: new InlineProgress<LocalModelDependencyItemTransferProgress>(_ =>
+                    throw new ApplicationException("synthetic private callback detail"))));
+
+        Assert.Equal("dependency_transfer_cleanup_failed", exception.Code);
+        Assert.Equal("dependency_transfer_cleanup_failed", exception.Message);
+        Assert.DoesNotContain("private", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(bytes.LongLength, destination.Length);
+        Assert.Equal(1, handler.Requests);
     }
 
     [Fact]
@@ -697,6 +749,18 @@ public sealed class LocalModelDependencyHttpTransferTests
             if (!first) throw new IOException("synthetic private stream failure");
             first = false;
             return base.ReadAsync(buffer, cancellationToken);
+        }
+    }
+
+    private sealed class RollbackFailureStream : MemoryStream
+    {
+        public override void SetLength(long value)
+        {
+            if (value == 0 && Length != 0)
+            {
+                throw new ApplicationException("synthetic private cleanup detail");
+            }
+            base.SetLength(value);
         }
     }
 

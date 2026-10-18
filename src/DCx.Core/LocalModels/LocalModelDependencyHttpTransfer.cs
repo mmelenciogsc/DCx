@@ -447,6 +447,7 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
         CancellationToken cancellationToken = default,
         IProgress<LocalModelDependencyItemTransferProgress>? progress = null)
     {
+        var destinationAccepted = false;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
         try
@@ -457,6 +458,7 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
             var approvedRedirectPolicy = redirectPolicy.Review;
             LocalModelDependencyRedirectPolicyReview.Validate(approvedRedirectPolicy);
             var item = ValidateRequest(catalog, plan, approval, approvedRedirectPolicy, destination);
+            destinationAccepted = true;
             using var response = await SendWithRedirectPolicyAsync(
                     item,
                     approvedRedirectPolicy,
@@ -487,23 +489,34 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await RollBackAsync(destination).ConfigureAwait(false);
+            if (destinationAccepted)
+            {
+                await RollBackAsync(destination).ConfigureAwait(false);
+            }
             throw;
         }
         catch (OperationCanceledException exception)
         {
-            await RollBackAsync(destination).ConfigureAwait(false);
+            if (destinationAccepted)
+            {
+                await RollBackAsync(destination).ConfigureAwait(false);
+            }
             throw new LocalModelDependencyTransferException("dependency_transfer_timeout", exception);
         }
         catch (LocalModelDependencyTransferException)
         {
-            await RollBackAsync(destination).ConfigureAwait(false);
+            if (destinationAccepted)
+            {
+                await RollBackAsync(destination).ConfigureAwait(false);
+            }
             throw;
         }
-        catch (Exception exception) when (
-            exception is HttpRequestException or IOException or InvalidOperationException or CryptographicException)
+        catch (Exception exception)
         {
-            await RollBackAsync(destination).ConfigureAwait(false);
+            if (destinationAccepted)
+            {
+                await RollBackAsync(destination).ConfigureAwait(false);
+            }
             throw new LocalModelDependencyTransferException("dependency_transfer_failed", exception);
         }
     }
@@ -727,7 +740,7 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
             destination.Position = 0;
             await destination.FlushAsync(CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is IOException or NotSupportedException or ObjectDisposedException)
+        catch (Exception exception)
         {
             throw new LocalModelDependencyTransferException("dependency_transfer_cleanup_failed", exception);
         }

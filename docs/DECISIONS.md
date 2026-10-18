@@ -69,5 +69,6 @@
 | [0065](architecture/adr/0065-accessible-explicit-local-dependency-transfer.md) | Require accessible one-time exact-plan approval for local-dependency transfer | Accepted for the inert acquisition workflow; real acquisition remains blocked | 2026-10-18 |
 | [0066](architecture/adr/0066-deny-by-default-bounded-local-dependency-redirects.md) | Follow local-dependency redirects only through an exact deny-by-default policy | Accepted for the transport framework; provider rules and real acquisition remain blocked | 2026-10-18 |
 | [0067](architecture/adr/0067-bind-dependency-redirect-policy-to-approval.md) | Bind dependency redirect policy to approval and protected receipt | Accepted for the inert acquisition workflow; provider rules and real acquisition remain blocked | 2026-10-18 |
+| [0068](architecture/adr/0068-total-local-dependency-transfer-rollback.md) | Roll back every admitted dependency-transfer failure | Accepted for the inert core transport; real acquisition remains blocked | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
