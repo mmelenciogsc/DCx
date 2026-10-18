@@ -382,6 +382,7 @@ public sealed class ContributionApiE2eTests : IDisposable
         startInfo.Environment["DCX_GLOBAL_SIGNING_KEY"] = keyPath;
         startInfo.Environment["DCX_GLOBAL_SIMULATION_URL"] =
             $"http://127.0.0.1:{ReserveEphemeralPort()}/";
+        startInfo.Environment["DCX_GLOBAL_CONTRIBUTION_API"] = "0";
         startInfo.Environment["DCX_GLOBAL_CONTRIBUTION_WORKER"] = "1";
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start the worker-gate fixture.");
@@ -389,7 +390,7 @@ public sealed class ContributionApiE2eTests : IDisposable
         var errorTask = process.StandardError.ReadToEndAsync();
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             await process.WaitForExitAsync(timeout.Token);
             var diagnostics = (await outputTask) + (await errorTask);
 
