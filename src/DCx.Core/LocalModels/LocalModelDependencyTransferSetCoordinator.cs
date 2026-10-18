@@ -7,18 +7,29 @@ namespace DCx.Core.LocalModels;
 public sealed record LocalModelDependencyTransferSetApproval(
     int SchemaVersion,
     string PlanSha256,
+    string RedirectPolicySha256,
     bool Approved)
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public static LocalModelDependencyTransferSetApproval Create(
         LocalModelDependencyTransferPlan plan,
+        bool approved) => Create(
+            plan,
+            LocalModelDependencyRedirectPolicyReview.DenyAll,
+            approved);
+
+    public static LocalModelDependencyTransferSetApproval Create(
+        LocalModelDependencyTransferPlan plan,
+        LocalModelDependencyRedirectPolicyReview redirectPolicy,
         bool approved)
     {
         LocalModelDependencyTransferPlanner.ValidateForTransfer(plan);
+        LocalModelDependencyRedirectPolicyReview.Validate(redirectPolicy);
         return new LocalModelDependencyTransferSetApproval(
             CurrentSchemaVersion,
             plan.PlanSha256,
+            redirectPolicy.PolicySha256,
             approved);
     }
 }
@@ -34,6 +45,7 @@ public sealed record LocalModelDependencyTransferSetReceipt(
     string CatalogId,
     string CatalogSha256,
     string PlanSha256,
+    string RedirectPolicySha256,
     long TransferBytes,
     IReadOnlyList<LocalModelDependencyTransferredFile> Files);
 
@@ -58,6 +70,8 @@ public sealed record LocalModelDependencyTransferSetProgress(
 
 public interface ILocalModelDependencyTransferSetCoordinator : IDisposable
 {
+    LocalModelDependencyRedirectPolicyReview RedirectPolicyReview { get; }
+
     Task<LocalModelDependencyTransferSetReceipt> TransferAsync(
         LocalModelDependencyTransferPlan plan,
         LocalModelDependencyTransferSetApproval approval,
@@ -78,7 +92,7 @@ public interface ILocalModelDependencyTransferSetCoordinator : IDisposable
 /// </summary>
 public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDependencyTransferSetCoordinator
 {
-    public const int CurrentReceiptSchemaVersion = 1;
+    public const int CurrentReceiptSchemaVersion = 2;
     public const int MaximumReceiptBytes = 64 * 1024;
     internal const string AnchorStateKind = "dependency-transfer-set";
     private const string ReceiptFileName = "receipt.json";
@@ -101,6 +115,8 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
     private readonly bool ownsTransfer;
     private readonly SemaphoreSlim operationGate = new(1, 1);
 
+    public LocalModelDependencyRedirectPolicyReview RedirectPolicyReview => transfer.RedirectPolicyReview;
+
     public LocalModelDependencyTransferSetCoordinator(string applicationDataRoot)
         : this(
             applicationDataRoot,
@@ -121,6 +137,7 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
         this.applicationDataRoot = Path.GetFullPath(
             applicationDataRoot ?? throw new ArgumentNullException(nameof(applicationDataRoot)));
         this.transfer = transfer ?? throw new ArgumentNullException(nameof(transfer));
+        LocalModelDependencyRedirectPolicyReview.Validate(this.transfer.RedirectPolicyReview);
         this.anchors = anchors ?? throw new ArgumentNullException(nameof(anchors));
         this.availableFreeBytes = availableFreeBytes ?? throw new ArgumentNullException(nameof(availableFreeBytes));
         this.ownsTransfer = ownsTransfer;
@@ -149,7 +166,9 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
         CancellationToken cancellationToken,
         IProgress<LocalModelDependencyTransferSetProgress>? progress)
     {
-        ValidateApproval(plan, approval);
+        var approvedRedirectPolicy = transfer.RedirectPolicyReview;
+        LocalModelDependencyRedirectPolicyReview.Validate(approvedRedirectPolicy);
+        ValidateApproval(plan, approval, approvedRedirectPolicy);
         cancellationToken.ThrowIfCancellationRequested();
         Report(progress, LocalModelDependencyTransferSetStage.Preparing, plan, 0, 0, 0, 0);
         var appRoot = LocalModelStoragePathGuard.RequireDirectory(
@@ -186,6 +205,7 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
             for (var index = 0; index < currentPlan.Items.Count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                EnsureCurrentRedirectPolicy(approvedRedirectPolicy.PolicySha256);
                 var item = currentPlan.Items[index];
                 Report(
                     progress,
@@ -209,8 +229,12 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
                     FileOptions.Asynchronous | FileOptions.SequentialScan | FileOptions.WriteThrough))
                 {
                     var result = await transfer.TransferAsync(
-                            currentPlan,
-                            LocalModelDependencyTransferApproval.Create(currentPlan, item, approved: true),
+                        currentPlan,
+                            LocalModelDependencyTransferApproval.Create(
+                                currentPlan,
+                                item,
+                                approvedRedirectPolicy,
+                                approved: true),
                             output,
                             cancellationToken,
                             new InlineProgress<LocalModelDependencyItemTransferProgress>(itemProgress => Report(
@@ -225,10 +249,12 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
                     if (result.Bytes != item.ExpectedBytes ||
                         !string.Equals(result.SourceUri.AbsoluteUri, item.SourceUri.AbsoluteUri, StringComparison.Ordinal) ||
                         !DigestEquals(result.PlanSha256, currentPlan.PlanSha256) ||
+                        !DigestEquals(result.RedirectPolicySha256, approvedRedirectPolicy.PolicySha256) ||
                         !DigestEquals(result.Sha256, item.Sha256))
                     {
                         throw new LocalModelDependencyTransferException("dependency_transfer_result_invalid");
                     }
+                    EnsureCurrentRedirectPolicy(approvedRedirectPolicy.PolicySha256);
                 }
                 LocalModelStoragePathGuard.ValidateFile(path, mustExist: true, "dependency transfer payload");
                 files.Add(new LocalModelDependencyTransferredFile(
@@ -252,6 +278,7 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
                 currentPlan.CatalogId,
                 currentPlan.CatalogSha256,
                 currentPlan.PlanSha256,
+                approvedRedirectPolicy.PolicySha256,
                 currentPlan.TransferBytes,
                 Array.AsReadOnly(files.ToArray()));
             var receiptBytes = JsonSerializer.SerializeToUtf8Bytes(receipt, JsonOptions);
@@ -494,14 +521,26 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
             "dependency transfer root");
     }
 
-    private static void ValidateApproval(
+    private void ValidateApproval(
         LocalModelDependencyTransferPlan plan,
-        LocalModelDependencyTransferSetApproval approval)
+        LocalModelDependencyTransferSetApproval approval,
+        LocalModelDependencyRedirectPolicyReview redirectPolicy)
     {
         LocalModelDependencyTransferPlanner.ValidateForTransfer(plan);
         ArgumentNullException.ThrowIfNull(approval);
         if (approval.SchemaVersion != LocalModelDependencyTransferSetApproval.CurrentSchemaVersion ||
-            !approval.Approved || !DigestEquals(approval.PlanSha256, plan.PlanSha256))
+            !approval.Approved || !DigestEquals(approval.PlanSha256, plan.PlanSha256) ||
+            !DigestEquals(approval.RedirectPolicySha256, redirectPolicy.PolicySha256))
+        {
+            throw new LocalModelDependencyTransferException("dependency_transfer_approval_invalid");
+        }
+    }
+
+    private void EnsureCurrentRedirectPolicy(string expectedSha256)
+    {
+        var current = transfer.RedirectPolicyReview;
+        LocalModelDependencyRedirectPolicyReview.Validate(current);
+        if (!DigestEquals(current.PolicySha256, expectedSha256))
         {
             throw new LocalModelDependencyTransferException("dependency_transfer_approval_invalid");
         }
@@ -536,6 +575,7 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
             !string.Equals(receipt.CatalogId, plan.CatalogId, StringComparison.Ordinal) ||
             !DigestEquals(receipt.CatalogSha256, plan.CatalogSha256) ||
             !DigestEquals(receipt.PlanSha256, plan.PlanSha256) ||
+            !IsSha256(receipt.RedirectPolicySha256) ||
             receipt.Files is null || receipt.Files.Count != plan.Items.Count)
         {
             throw new InvalidOperationException("The dependency transfer receipt identity does not match.");
@@ -553,6 +593,9 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
     }
 
     private static string FileName(int index, string sha256) => $"{index:D2}-{sha256}.payload";
+
+    private static bool IsSha256(string? value) =>
+        value is { Length: 64 } && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static void Report(
         IProgress<LocalModelDependencyTransferSetProgress>? progress,

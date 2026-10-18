@@ -40,6 +40,9 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
 
         Assert.Equal(fixture.Plan.Items.Count, fixture.Transfer.Calls);
         Assert.Equal(fixture.Plan.PlanSha256, receipt.PlanSha256);
+        Assert.Equal(
+            fixture.Coordinator.RedirectPolicyReview.PolicySha256,
+            receipt.RedirectPolicySha256);
         Assert.Equal(fixture.Plan.TransferBytes, receipt.TransferBytes);
         Assert.Equal(fixture.Plan.Items.Count, receipt.Files.Count);
         Assert.All(receipt.Files, file =>
@@ -62,6 +65,7 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
         Assert.Equal(receipt.CatalogId, verified.CatalogId);
         Assert.Equal(receipt.CatalogSha256, verified.CatalogSha256);
         Assert.Equal(receipt.PlanSha256, verified.PlanSha256);
+        Assert.Equal(receipt.RedirectPolicySha256, verified.RedirectPolicySha256);
         Assert.Equal(receipt.TransferBytes, verified.TransferBytes);
         Assert.Equal(receipt.Files, verified.Files);
         Assert.Equal(LocalModelDependencyTransferSetStage.Preparing, progress[0].Stage);
@@ -124,6 +128,27 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
     }
 
     [Fact]
+    public async Task Transfer_RejectsRedirectPolicySubstitutionBeforeStorage()
+    {
+        var fixture = Fixture("redirect-policy-substitution");
+        var reviewedPolicy = fixture.Coordinator.RedirectPolicyReview;
+        var item = fixture.Plan.Items[0];
+        fixture.Transfer.RedirectPolicyReview = ExactPolicyReview(item);
+
+        await AssertCodeAsync("dependency_transfer_approval_invalid", () =>
+            fixture.Coordinator.TransferAsync(
+                fixture.Plan,
+                LocalModelDependencyTransferSetApproval.Create(
+                    fixture.Plan,
+                    reviewedPolicy,
+                    approved: true)));
+
+        Assert.Equal(0, fixture.Transfer.Calls);
+        Assert.False(Directory.Exists(Path.Combine(fixture.Root, "LocalModels")));
+        Assert.Empty(fixture.Anchors.Values);
+    }
+
+    [Fact]
     public async Task CancellationBeforeAndDuringTransferLeavesNoPublishedOrPartialSet()
     {
         var before = Fixture("cancel-before");
@@ -163,6 +188,16 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
         await fixture.Anchors.WriteAsync(anchor);
 
         var completed = CompletedRoot(fixture);
+        var receiptPath = Path.Combine(completed, "receipt.json");
+        var receiptBytes = await File.ReadAllBytesAsync(receiptPath);
+        var changedReceipt = System.Text.Encoding.UTF8.GetString(receiptBytes).Replace(
+            receipt.RedirectPolicySha256,
+            new string('0', 64),
+            StringComparison.Ordinal);
+        await File.WriteAllTextAsync(receiptPath, changedReceipt);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Coordinator.VerifyAsync(fixture.Plan));
+        await File.WriteAllBytesAsync(receiptPath, receiptBytes);
+
         var first = receipt.Files[0];
         var firstPath = Path.Combine(completed, first.FileName);
         var original = await File.ReadAllBytesAsync(firstPath);
@@ -335,6 +370,17 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
     private static string Digest(byte[] value) =>
         Convert.ToHexStringLower(SHA256.HashData(value));
 
+    private static LocalModelDependencyRedirectPolicyReview ExactPolicyReview(
+        LocalModelDependencyTransferItem item) =>
+        new ExactLocalModelDependencyRedirectPolicy(Array.AsReadOnly([
+            new LocalModelDependencyRedirectRule(
+                item.SourceUri,
+                item.ExpectedBytes,
+                item.Sha256,
+                new Uri($"{item.SourceUri.Scheme}://{item.SourceUri.IdnHost}/"),
+                new Uri("https://assets.example.test/releases/"))
+        ])).Review;
+
     private sealed record FixtureState(
         string Root,
         LocalModelDependencyTransferPlan Plan,
@@ -345,6 +391,9 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
     private sealed class MemoryTransfer(IReadOnlyDictionary<string, byte[]> content)
         : ILocalModelDependencyTransfer
     {
+        public LocalModelDependencyRedirectPolicyReview RedirectPolicyReview { get; set; } =
+            LocalModelDependencyRedirectPolicyReview.DenyAll;
+
         public int Calls { get; private set; }
         public int? FailAtCall { get; set; }
         public int? ReturnWrongDigestAtCall { get; set; }
@@ -379,6 +428,7 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
             progress?.Report(new LocalModelDependencyItemTransferProgress(bytes.LongLength, bytes.LongLength));
             return new LocalModelDependencyTransferResult(
                 plan.PlanSha256,
+                RedirectPolicyReview.PolicySha256,
                 approval.SourceUri,
                 bytes.LongLength,
                 ReturnWrongDigestAtCall == Calls ? new string('0', 64) : Digest(bytes));

@@ -90,6 +90,7 @@ try {
         if ($null -ne $candidate -and
             $candidate.Current.Name -like "Transfer preflight only. Plan SHA-256 *" -and
             $candidate.Current.Name -like "*1 candidate. 2 immutable transfer items.*" -and
+            $candidate.Current.Name -like "*Redirect policy SHA-256 *Approved redirect routes: none. The reviewed policy denies every redirect.*" -and
             $candidate.Current.Name -like "*separately approved exact-plan transfer, cancellation, protected verification and abandoned-partial recovery*") { $candidate }
     } "The accessible exact-plan transfer preflight was not exposed."
     if (-not $preflight.Current.IsKeyboardFocusable) {
@@ -102,6 +103,9 @@ try {
     } "Exclusive-lease opening recovery was not announced."
 
     $approval = Find-ById $window "ApproveDependencyTransferBox"
+    if ($approval.Current.Name -notlike "*redirect-policy digest and routes*") {
+        throw "The one-time approval did not expose its redirect-policy binding."
+    }
     $approvalToggle = $approval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
     $start = Find-ById $window "StartDependencyTransferButton"
     $cancel = Find-ById $window "CancelDependencyTransferButton"
@@ -164,6 +168,7 @@ try {
         $status = Find-ById $window "DependencyTransferStatus"
         if ($null -ne $status -and
             $status.Current.Name -like "Transfer complete and reverified.*" -and
+            $status.Current.Name -like "*Redirect policy *" -and
             $status.Current.Name -like "*2 authenticated files.*" -and
             $status.Current.Name -like "*Nothing was extracted, installed, registered, selected, or executed.*") { $status }
     } "The explicitly approved synthetic transfer did not complete and reverify."
@@ -208,6 +213,8 @@ try {
         approval_default_unchecked = $true
         start_without_approval_denied = $true
         keyboard_focusable_unique_access_keys = $true
+        redirect_policy_digest_and_routes_reviewed = $true
+        redirect_policy_bound_to_one_time_approval_and_receipt = $true
         item_and_byte_progress_announced = $true
         cancellation_available = $true
         cancellation_result_focus = $true

@@ -40,6 +40,7 @@ public sealed class LocalModelDependencyHttpTransferTests
 
         Assert.Equal(bytes, destination.ToArray());
         Assert.Equal(plan.PlanSha256, result.PlanSha256);
+        Assert.Equal(transfer.RedirectPolicyReview.PolicySha256, result.RedirectPolicySha256);
         Assert.Equal(item.SourceUri, result.SourceUri);
         Assert.Equal(item.ExpectedBytes, result.Bytes);
         Assert.Equal(item.Sha256, result.Sha256);
@@ -91,11 +92,16 @@ public sealed class LocalModelDependencyHttpTransferTests
 
         var result = await transfer.TransferAsync(
             plan,
-            LocalModelDependencyTransferApproval.Create(plan, item, approved: true),
+            LocalModelDependencyTransferApproval.Create(
+                plan,
+                item,
+                transfer.RedirectPolicyReview,
+                approved: true),
             destination);
 
         Assert.Equal(bytes, destination.ToArray());
         Assert.Equal(item.SourceUri, result.SourceUri);
+        Assert.Equal(transfer.RedirectPolicyReview.PolicySha256, result.RedirectPolicySha256);
         Assert.Equal([item.SourceUri, target], handler.RequestedUris);
         Assert.All(handler.AcceptEncodings, value => Assert.Equal("identity", value));
         Assert.All(handler.NoStoreValues, Assert.True);
@@ -126,7 +132,7 @@ public sealed class LocalModelDependencyHttpTransferTests
             using var transfer = new LocalModelDependencyHttpTransfer(
                 handler,
                 catalog,
-                redirectPolicy: new AllowAllRedirectPolicy());
+                redirectPolicy: new ReviewOnlyRedirectPolicy());
             using var destination = new MemoryStream();
 
             await AssertCodeAsync("dependency_transfer_redirect_invalid", () => transfer.TransferAsync(
@@ -167,7 +173,11 @@ public sealed class LocalModelDependencyHttpTransferTests
             await DeniedAndEmptyAsync(
                 loopTransfer,
                 plan,
-                LocalModelDependencyTransferApproval.Create(plan, item, approved: true),
+                LocalModelDependencyTransferApproval.Create(
+                    plan,
+                    item,
+                    loopTransfer.RedirectPolicyReview,
+                    approved: true),
                 "dependency_transfer_redirect_invalid");
             Assert.Equal(2, loopHandler.Requests);
         }
@@ -184,7 +194,11 @@ public sealed class LocalModelDependencyHttpTransferTests
         await DeniedAndEmptyAsync(
             hopTransfer,
             plan,
-            LocalModelDependencyTransferApproval.Create(plan, item, approved: true),
+            LocalModelDependencyTransferApproval.Create(
+                plan,
+                item,
+                hopTransfer.RedirectPolicyReview,
+                approved: true),
             "dependency_transfer_redirect_limit");
         Assert.Equal(4, hopHandler.Requests);
     }
@@ -207,6 +221,98 @@ public sealed class LocalModelDependencyHttpTransferTests
             item,
             (from, new Uri("https://assets.example.test"))));
         Assert.Throws<ArgumentException>(() => ExactPolicy(item, (from, prefix), (from, prefix)));
+    }
+
+    [Fact]
+    public void RedirectPolicyReview_IsCanonicalAndRejectsMalformedReview()
+    {
+        var (_, _, item) = Plan("canonical redirect policy fixture"u8.ToArray());
+        var first = (new Uri("https://github.com/"), new Uri("https://one.example.test/files/"));
+        var second = (new Uri("https://one.example.test/"), new Uri("https://two.example.test/files/"));
+        var forward = ExactPolicy(item, first, second).Review;
+        var reverse = ExactPolicy(item, second, first).Review;
+
+        Assert.Equal(forward.PolicySha256, reverse.PolicySha256);
+        Assert.Equal(forward.Routes, reverse.Routes);
+        Assert.True(forward.AllowsRedirects);
+        Assert.NotEqual(LocalModelDependencyRedirectPolicyReview.DenyAll.PolicySha256, forward.PolicySha256);
+        Assert.Throws<InvalidOperationException>(() =>
+            LocalModelDependencyRedirectPolicyReview.Validate(
+                forward with { PolicySha256 = new string('0', 64) }));
+        Assert.Throws<InvalidOperationException>(() =>
+            LocalModelDependencyRedirectPolicyReview.Validate(
+                forward with { Routes = Array.AsReadOnly(forward.Routes.Reverse().ToArray()) }));
+    }
+
+    [Fact]
+    public async Task RedirectPolicyApprovalSubstitutionFailsBeforeNetwork()
+    {
+        var bytes = "redirect approval binding fixture"u8.ToArray();
+        var (catalog, plan, item) = Plan(bytes);
+        var policy = ExactPolicy(
+            item,
+            (new Uri("https://github.com/"), new Uri("https://assets.example.test/releases/")));
+        var handler = new FixtureHandler(request => Response(request, bytes));
+        using var transfer = new LocalModelDependencyHttpTransfer(handler, catalog, redirectPolicy: policy);
+
+        await AssertCodeAsync("dependency_transfer_approval_invalid", () => transfer.TransferAsync(
+            plan,
+            LocalModelDependencyTransferApproval.Create(plan, item, approved: true),
+            new MemoryStream()));
+
+        Assert.Equal(0, handler.Requests);
+    }
+
+    [Fact]
+    public async Task RedirectPolicyMutationDuringTransferRollsBackAuthenticatedBytes()
+    {
+        var bytes = "redirect mutation fixture"u8.ToArray();
+        var (catalog, plan, item) = Plan(bytes);
+        var mutablePolicy = new MutableRedirectPolicy(ExactPolicy(
+            item,
+            (new Uri("https://github.com/"), new Uri("https://assets.example.test/releases/"))).Review);
+        var handler = new FixtureHandler(request =>
+        {
+            mutablePolicy.Review = LocalModelDependencyRedirectPolicyReview.DenyAll;
+            return Response(request, bytes);
+        });
+        using var transfer = new LocalModelDependencyHttpTransfer(
+            handler,
+            catalog,
+            redirectPolicy: mutablePolicy);
+        using var destination = new MemoryStream();
+        var approval = LocalModelDependencyTransferApproval.Create(
+            plan,
+            item,
+            transfer.RedirectPolicyReview,
+            approved: true);
+
+        await AssertCodeAsync("dependency_transfer_approval_invalid", () =>
+            transfer.TransferAsync(plan, approval, destination));
+
+        Assert.Equal(1, handler.Requests);
+        Assert.Equal(0, destination.Length);
+        Assert.Equal(0, destination.Position);
+    }
+
+    [Fact]
+    public async Task InjectedPolicyCannotOverrideReviewedDenyAllAuthority()
+    {
+        var bytes = "review authority fixture"u8.ToArray();
+        var (catalog, plan, item) = Plan(bytes);
+        var target = new Uri("https://assets.example.test/releases/dependency.bin");
+        var handler = new FixtureHandler(request => Redirect(request, target));
+        using var transfer = new LocalModelDependencyHttpTransfer(
+            handler,
+            catalog,
+            redirectPolicy: new ReviewOnlyRedirectPolicy());
+
+        await AssertCodeAsync("dependency_transfer_redirect_denied", () => transfer.TransferAsync(
+            plan,
+            LocalModelDependencyTransferApproval.Create(plan, item, approved: true),
+            new MemoryStream()));
+
+        Assert.Equal(1, handler.Requests);
     }
 
     [Fact]
@@ -548,13 +654,16 @@ public sealed class LocalModelDependencyHttpTransferTests
         }
     }
 
-    private sealed class AllowAllRedirectPolicy : ILocalModelDependencyRedirectPolicy
+    private sealed class ReviewOnlyRedirectPolicy : ILocalModelDependencyRedirectPolicy
     {
-        public bool IsAllowed(
-            LocalModelDependencyTransferItem item,
-            Uri previousUri,
-            Uri targetUri,
-            int redirectNumber) => true;
+        public LocalModelDependencyRedirectPolicyReview Review =>
+            LocalModelDependencyRedirectPolicyReview.DenyAll;
+    }
+
+    private sealed class MutableRedirectPolicy(LocalModelDependencyRedirectPolicyReview review)
+        : ILocalModelDependencyRedirectPolicy
+    {
+        public LocalModelDependencyRedirectPolicyReview Review { get; set; } = review;
     }
 
     private sealed class CancelAfterFirstReadStream(

@@ -110,7 +110,7 @@
                                  Text="Transfer preflight is unavailable until the catalog is authenticated."
                                  AutomationProperties.AutomationId="DependencyTransferPreflight"
                                  AutomationProperties.Name="Transfer preflight is unavailable until the catalog is authenticated."
-                                 AutomationProperties.HelpText="Read-only exact transfer-set digest, source identities, byte totals, conservative storage requirement, and observed capacity. It grants no transfer approval." />
+                                 AutomationProperties.HelpText="Read-only exact transfer-set digest, source identities, byte totals, conservative storage requirement, observed capacity, and redirect-policy digest and routes. It grants no transfer approval." />
                         <GroupBox Margin="0,12,0,0" Header="Approved dependency transfer — inert storage only">
                             <StackPanel Margin="12,8">
                                 <TextBlock TextWrapping="Wrap"
@@ -119,10 +119,10 @@
                                           Margin="0,10,0,0"
                                           FontWeight="SemiBold"
                                           IsEnabled="False"
-                                          Content="I reviewed the exact plan, sources, byte totals, and storage requirement and _approve this provider transfer"
+                                          Content="I reviewed the exact plan, sources, byte totals, storage requirement, and redirect-policy digest and routes and _approve this provider transfer"
                                           AutomationProperties.AutomationId="ApproveDependencyTransferBox"
-                                          AutomationProperties.Name="I reviewed the exact plan, sources, byte totals, and storage requirement and approve this provider transfer"
-                                          AutomationProperties.HelpText="Unchecked by default. Approval applies once to the exact displayed plan digest. It permits provider contact and inert transfer only."
+                                          AutomationProperties.Name="I reviewed the exact plan, sources, byte totals, storage requirement, and redirect-policy digest and routes and approve this provider transfer"
+                                          AutomationProperties.HelpText="Unchecked by default. Approval applies once to the exact displayed plan and redirect-policy digests. It permits only the displayed provider contact and inert transfer."
                                           Checked="OnDependencyTransferApprovalChanged"
                                           Unchecked="OnDependencyTransferApprovalChanged" />
                                 <WrapPanel Margin="0,10,0,0">

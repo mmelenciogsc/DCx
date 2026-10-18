@@ -8,20 +8,32 @@ namespace DCx.Core.LocalModels;
 public sealed record LocalModelDependencyTransferApproval(
     int SchemaVersion,
     string PlanSha256,
+    string RedirectPolicySha256,
     Uri SourceUri,
     long ExpectedBytes,
     string Sha256,
     bool Approved)
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public static LocalModelDependencyTransferApproval Create(
         LocalModelDependencyTransferPlan plan,
         LocalModelDependencyTransferItem item,
+        bool approved) => Create(
+            plan,
+            item,
+            LocalModelDependencyRedirectPolicyReview.DenyAll,
+            approved);
+
+    public static LocalModelDependencyTransferApproval Create(
+        LocalModelDependencyTransferPlan plan,
+        LocalModelDependencyTransferItem item,
+        LocalModelDependencyRedirectPolicyReview redirectPolicy,
         bool approved)
     {
         LocalModelDependencyTransferPlanner.ValidateForTransfer(plan);
         ArgumentNullException.ThrowIfNull(item);
+        LocalModelDependencyRedirectPolicyReview.Validate(redirectPolicy);
         if (!plan.Items.Any(candidate => SameIdentity(candidate, item)))
         {
             throw new InvalidOperationException("The dependency transfer approval item is not in the authenticated plan.");
@@ -29,6 +41,7 @@ public sealed record LocalModelDependencyTransferApproval(
         return new LocalModelDependencyTransferApproval(
             CurrentSchemaVersion,
             plan.PlanSha256,
+            redirectPolicy.PolicySha256,
             item.SourceUri,
             item.ExpectedBytes,
             item.Sha256,
@@ -52,6 +65,7 @@ public sealed record LocalModelDependencyTransferApproval(
 
 public sealed record LocalModelDependencyTransferResult(
     string PlanSha256,
+    string RedirectPolicySha256,
     Uri SourceUri,
     long Bytes,
     string Sha256);
@@ -62,6 +76,8 @@ public sealed record LocalModelDependencyItemTransferProgress(
 
 public interface ILocalModelDependencyTransfer
 {
+    LocalModelDependencyRedirectPolicyReview RedirectPolicyReview { get; }
+
     Task<LocalModelDependencyTransferResult> TransferAsync(
         LocalModelDependencyTransferPlan plan,
         LocalModelDependencyTransferApproval approval,
@@ -70,13 +86,190 @@ public interface ILocalModelDependencyTransfer
         IProgress<LocalModelDependencyItemTransferProgress>? progress = null);
 }
 
-internal interface ILocalModelDependencyRedirectPolicy
+public sealed record LocalModelDependencyRedirectRouteReview(
+    Uri ItemSourceUri,
+    long ExpectedBytes,
+    string Sha256,
+    Uri FromOrigin,
+    Uri TargetUriPrefix);
+
+public sealed record LocalModelDependencyRedirectPolicyReview(
+    int SchemaVersion,
+    string PolicySha256,
+    bool AllowsRedirects,
+    IReadOnlyList<LocalModelDependencyRedirectRouteReview> Routes)
 {
-    bool IsAllowed(
+    public const int CurrentSchemaVersion = 1;
+    private const int MaximumRules = 16;
+    private const string DigestDomain = "DCx.local-model-dependency-redirect-policy.v1";
+
+    public static LocalModelDependencyRedirectPolicyReview DenyAll { get; } = Create([]);
+
+    internal static LocalModelDependencyRedirectPolicyReview Create(
+        IReadOnlyList<LocalModelDependencyRedirectRouteReview> routes)
+    {
+        ArgumentNullException.ThrowIfNull(routes);
+        if (routes.Count > MaximumRules)
+        {
+            throw new ArgumentOutOfRangeException(nameof(routes));
+        }
+        var identities = new HashSet<string>(StringComparer.Ordinal);
+        var ordered = new List<(string Identity, LocalModelDependencyRedirectRouteReview Route)>(routes.Count);
+        foreach (var route in routes)
+        {
+            ValidateRoute(route);
+            var identity = RouteIdentity(route);
+            if (!identities.Add(identity))
+            {
+                throw new ArgumentException("The redirect policy contains a duplicate rule.", nameof(routes));
+            }
+            ordered.Add((identity, route));
+        }
+        ordered.Sort((left, right) => StringComparer.Ordinal.Compare(left.Identity, right.Identity));
+        var immutable = Array.AsReadOnly(ordered.Select(value => value.Route).ToArray());
+        return new LocalModelDependencyRedirectPolicyReview(
+            CurrentSchemaVersion,
+            ComputeDigest(immutable),
+            immutable.Count != 0,
+            immutable);
+    }
+
+    internal static void Validate(LocalModelDependencyRedirectPolicyReview review)
+    {
+        ArgumentNullException.ThrowIfNull(review);
+        if (review.SchemaVersion != CurrentSchemaVersion || review.Routes is null ||
+            review.Routes.Count > MaximumRules || review.AllowsRedirects != (review.Routes.Count != 0))
+        {
+            throw new InvalidOperationException("The dependency redirect policy review is invalid.");
+        }
+        var expected = Create(review.Routes);
+        if (!DigestEquals(expected.PolicySha256, review.PolicySha256) ||
+            !expected.Routes.SequenceEqual(review.Routes))
+        {
+            throw new InvalidOperationException("The dependency redirect policy review digest is invalid.");
+        }
+    }
+
+    internal bool IsAllowed(
         LocalModelDependencyTransferItem item,
         Uri previousUri,
         Uri targetUri,
-        int redirectNumber);
+        int redirectNumber)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(previousUri);
+        ArgumentNullException.ThrowIfNull(targetUri);
+        if (redirectNumber <= 0)
+        {
+            return false;
+        }
+
+        return Routes.Any(route =>
+            route.ExpectedBytes == item.ExpectedBytes &&
+            DigestEquals(route.Sha256, item.Sha256) &&
+            string.Equals(
+                route.ItemSourceUri.AbsoluteUri,
+                item.SourceUri.AbsoluteUri,
+                StringComparison.Ordinal) &&
+            SameOrigin(route.FromOrigin, previousUri) &&
+            SameOrigin(route.TargetUriPrefix, targetUri) &&
+            targetUri.AbsolutePath.StartsWith(
+                route.TargetUriPrefix.AbsolutePath,
+                StringComparison.Ordinal));
+    }
+
+    internal static void ValidateOrigin(Uri uri, string parameterName)
+    {
+        ValidateRedirectUri(uri);
+        if (!string.Equals(uri.AbsolutePath, "/", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("A redirect origin must have a root path.", parameterName);
+        }
+    }
+
+    internal static void ValidateTargetPrefix(Uri uri)
+    {
+        ValidateRedirectUri(uri);
+        if (string.Equals(uri.AbsolutePath, "/", StringComparison.Ordinal) ||
+            !uri.AbsolutePath.EndsWith("/", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("A redirect target prefix must be non-root and end with a slash.", nameof(uri));
+        }
+    }
+
+    private static void ValidateRoute(LocalModelDependencyRedirectRouteReview route)
+    {
+        ArgumentNullException.ThrowIfNull(route);
+        LocalModelDependencyCatalogLoader.ValidateUri(route.ItemSourceUri, "redirect item source");
+        if (route.ExpectedBytes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(route));
+        }
+        LocalModelDependencyCatalogLoader.ValidateSha256(route.Sha256, "redirect item");
+        ValidateOrigin(route.FromOrigin, nameof(route.FromOrigin));
+        ValidateTargetPrefix(route.TargetUriPrefix);
+    }
+
+    private static void ValidateRedirectUri(Uri uri)
+    {
+        ArgumentNullException.ThrowIfNull(uri);
+        if (!uri.IsAbsoluteUri || uri.Scheme != Uri.UriSchemeHttps || !uri.IsDefaultPort ||
+            Uri.CheckHostName(uri.IdnHost) != UriHostNameType.Dns ||
+            !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment) ||
+            uri.AbsolutePath.Contains("//", StringComparison.Ordinal) ||
+            uri.OriginalString.Contains('\\', StringComparison.Ordinal) ||
+            uri.OriginalString.Any(char.IsControl) || uri.AbsoluteUri.Length > 4096)
+        {
+            throw new ArgumentException("The redirect policy URI is invalid.", nameof(uri));
+        }
+    }
+
+    private static string RouteIdentity(LocalModelDependencyRedirectRouteReview route) => string.Join('\n',
+        route.ItemSourceUri.AbsoluteUri,
+        route.ExpectedBytes.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        route.Sha256,
+        route.FromOrigin.AbsoluteUri,
+        route.TargetUriPrefix.AbsoluteUri);
+
+    private static bool SameOrigin(Uri expected, Uri actual) =>
+        expected.Scheme == actual.Scheme &&
+        expected.Port == actual.Port &&
+        string.Equals(expected.IdnHost, actual.IdnHost, StringComparison.Ordinal);
+
+    private static string ComputeDigest(IReadOnlyList<LocalModelDependencyRedirectRouteReview> routes)
+    {
+        var canonical = string.Join('\n', routes.Select(RouteIdentity).Prepend(DigestDomain));
+        var bytes = Encoding.UTF8.GetBytes(canonical);
+        try
+        {
+            return Convert.ToHexStringLower(SHA256.HashData(bytes));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
+
+    private static bool DigestEquals(string left, string right)
+    {
+        var leftBytes = Encoding.ASCII.GetBytes(left ?? string.Empty);
+        var rightBytes = Encoding.ASCII.GetBytes(right ?? string.Empty);
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(leftBytes);
+            CryptographicOperations.ZeroMemory(rightBytes);
+        }
+    }
+}
+
+internal interface ILocalModelDependencyRedirectPolicy
+{
+    LocalModelDependencyRedirectPolicyReview Review { get; }
 }
 
 internal sealed class DenyAllLocalModelDependencyRedirectPolicy : ILocalModelDependencyRedirectPolicy
@@ -87,11 +280,8 @@ internal sealed class DenyAllLocalModelDependencyRedirectPolicy : ILocalModelDep
     {
     }
 
-    public bool IsAllowed(
-        LocalModelDependencyTransferItem item,
-        Uri previousUri,
-        Uri targetUri,
-        int redirectNumber) => false;
+    public LocalModelDependencyRedirectPolicyReview Review =>
+        LocalModelDependencyRedirectPolicyReview.DenyAll;
 }
 
 internal sealed record LocalModelDependencyRedirectRule(
@@ -109,7 +299,7 @@ internal sealed record LocalModelDependencyRedirectRule(
 internal sealed class ExactLocalModelDependencyRedirectPolicy : ILocalModelDependencyRedirectPolicy
 {
     private const int MaximumRules = 16;
-    private readonly IReadOnlyList<LocalModelDependencyRedirectRule> rules;
+    public LocalModelDependencyRedirectPolicyReview Review { get; }
 
     public ExactLocalModelDependencyRedirectPolicy(
         IReadOnlyList<LocalModelDependencyRedirectRule> rules)
@@ -131,8 +321,8 @@ internal sealed class ExactLocalModelDependencyRedirectPolicy : ILocalModelDepen
                 throw new ArgumentOutOfRangeException(nameof(rules));
             }
             LocalModelDependencyCatalogLoader.ValidateSha256(rule.Sha256, "redirect item");
-            ValidateOrigin(rule.FromOrigin, nameof(rule.FromOrigin));
-            ValidateTargetPrefix(rule.TargetUriPrefix);
+            LocalModelDependencyRedirectPolicyReview.ValidateOrigin(rule.FromOrigin, nameof(rule.FromOrigin));
+            LocalModelDependencyRedirectPolicyReview.ValidateTargetPrefix(rule.TargetUriPrefix);
             var identity = string.Join('\n',
                 rule.ItemSourceUri.AbsoluteUri,
                 rule.ExpectedBytes.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -145,7 +335,16 @@ internal sealed class ExactLocalModelDependencyRedirectPolicy : ILocalModelDepen
             }
             validated.Add(rule);
         }
-        this.rules = validated.AsReadOnly();
+        validated.Sort((left, right) => StringComparer.Ordinal.Compare(
+            RuleIdentity(left),
+            RuleIdentity(right)));
+        Review = LocalModelDependencyRedirectPolicyReview.Create(Array.AsReadOnly(
+            validated.Select(rule => new LocalModelDependencyRedirectRouteReview(
+                rule.ItemSourceUri,
+                rule.ExpectedBytes,
+                rule.Sha256,
+                rule.FromOrigin,
+                rule.TargetUriPrefix)).ToArray()));
     }
 
     public bool IsAllowed(
@@ -154,76 +353,16 @@ internal sealed class ExactLocalModelDependencyRedirectPolicy : ILocalModelDepen
         Uri targetUri,
         int redirectNumber)
     {
-        ArgumentNullException.ThrowIfNull(item);
-        ArgumentNullException.ThrowIfNull(previousUri);
-        ArgumentNullException.ThrowIfNull(targetUri);
-        if (redirectNumber <= 0)
-        {
-            return false;
-        }
-
-        return rules.Any(rule =>
-            rule.ExpectedBytes == item.ExpectedBytes &&
-            DigestEquals(rule.Sha256, item.Sha256) &&
-            string.Equals(rule.ItemSourceUri.AbsoluteUri, item.SourceUri.AbsoluteUri, StringComparison.Ordinal) &&
-            SameOrigin(rule.FromOrigin, previousUri) &&
-            SameOrigin(rule.TargetUriPrefix, targetUri) &&
-            targetUri.AbsolutePath.StartsWith(rule.TargetUriPrefix.AbsolutePath, StringComparison.Ordinal));
+        return Review.IsAllowed(item, previousUri, targetUri, redirectNumber);
     }
 
-    private static void ValidateOrigin(Uri uri, string parameterName)
-    {
-        ValidateRedirectUri(uri, allowQuery: false);
-        if (!string.Equals(uri.AbsolutePath, "/", StringComparison.Ordinal))
-        {
-            throw new ArgumentException("A redirect origin must have a root path.", parameterName);
-        }
-    }
+    private static string RuleIdentity(LocalModelDependencyRedirectRule rule) => string.Join('\n',
+        rule.ItemSourceUri.AbsoluteUri,
+        rule.ExpectedBytes.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        rule.Sha256,
+        rule.FromOrigin.AbsoluteUri,
+        rule.TargetUriPrefix.AbsoluteUri);
 
-    private static void ValidateTargetPrefix(Uri uri)
-    {
-        ValidateRedirectUri(uri, allowQuery: false);
-        if (string.Equals(uri.AbsolutePath, "/", StringComparison.Ordinal) ||
-            !uri.AbsolutePath.EndsWith("/", StringComparison.Ordinal))
-        {
-            throw new ArgumentException("A redirect target prefix must end with a slash.", nameof(uri));
-        }
-    }
-
-    private static void ValidateRedirectUri(Uri uri, bool allowQuery)
-    {
-        ArgumentNullException.ThrowIfNull(uri);
-        if (!uri.IsAbsoluteUri || uri.Scheme != Uri.UriSchemeHttps || !uri.IsDefaultPort ||
-            Uri.CheckHostName(uri.IdnHost) != UriHostNameType.Dns ||
-            !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Fragment) ||
-            (!allowQuery && !string.IsNullOrEmpty(uri.Query)) ||
-            uri.AbsolutePath.Contains("//", StringComparison.Ordinal) ||
-            uri.OriginalString.Contains('\\', StringComparison.Ordinal) ||
-            uri.OriginalString.Any(char.IsControl) || uri.AbsoluteUri.Length > 4096)
-        {
-            throw new ArgumentException("The redirect URI is invalid.", nameof(uri));
-        }
-    }
-
-    private static bool SameOrigin(Uri expected, Uri actual) =>
-        expected.Scheme == actual.Scheme &&
-        expected.Port == actual.Port &&
-        string.Equals(expected.IdnHost, actual.IdnHost, StringComparison.Ordinal);
-
-    private static bool DigestEquals(string left, string right)
-    {
-        var leftBytes = Encoding.ASCII.GetBytes(left);
-        var rightBytes = Encoding.ASCII.GetBytes(right);
-        try
-        {
-            return CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(leftBytes);
-            CryptographicOperations.ZeroMemory(rightBytes);
-        }
-    }
 }
 
 public sealed class LocalModelDependencyTransferException : Exception
@@ -251,6 +390,8 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
     private readonly TimeSpan timeout;
     private readonly LocalModelDependencyCatalogReview? trustedCatalog;
     private readonly ILocalModelDependencyRedirectPolicy redirectPolicy;
+
+    public LocalModelDependencyRedirectPolicyReview RedirectPolicyReview => redirectPolicy.Review;
 
     public LocalModelDependencyHttpTransfer()
         : this(
@@ -296,6 +437,7 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
             ? trustedCatalog ?? throw new ArgumentNullException(nameof(trustedCatalog))
             : null;
         this.redirectPolicy = redirectPolicy ?? throw new ArgumentNullException(nameof(redirectPolicy));
+        LocalModelDependencyRedirectPolicyReview.Validate(this.redirectPolicy.Review);
     }
 
     public async Task<LocalModelDependencyTransferResult> TransferAsync(
@@ -312,8 +454,13 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
             var catalog = trustedCatalog ??
                 await new LocalModelDependencyCatalogLoader().LoadEmbeddedAsync(deadline.Token)
                     .ConfigureAwait(false);
-            var item = ValidateRequest(catalog, plan, approval, destination);
-            using var response = await SendWithRedirectPolicyAsync(item, deadline.Token)
+            var approvedRedirectPolicy = redirectPolicy.Review;
+            LocalModelDependencyRedirectPolicyReview.Validate(approvedRedirectPolicy);
+            var item = ValidateRequest(catalog, plan, approval, approvedRedirectPolicy, destination);
+            using var response = await SendWithRedirectPolicyAsync(
+                    item,
+                    approvedRedirectPolicy,
+                    deadline.Token)
                 .ConfigureAwait(false);
 
             await using var input = await response.Content.ReadAsStreamAsync(deadline.Token)
@@ -329,9 +476,11 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
                 digest,
                 item.Sha256,
                 "transferred dependency");
+            EnsureCurrentRedirectPolicy(approvedRedirectPolicy.PolicySha256);
             await destination.FlushAsync(deadline.Token).ConfigureAwait(false);
             return new LocalModelDependencyTransferResult(
                 plan.PlanSha256,
+                approvedRedirectPolicy.PolicySha256,
                 item.SourceUri,
                 item.ExpectedBytes,
                 digest);
@@ -375,6 +524,7 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
 
     private async Task<HttpResponseMessage> SendWithRedirectPolicyAsync(
         LocalModelDependencyTransferItem item,
+        LocalModelDependencyRedirectPolicyReview approvedRedirectPolicy,
         CancellationToken cancellationToken)
     {
         var currentUri = item.SourceUri;
@@ -407,10 +557,11 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
                 {
                     throw new LocalModelDependencyTransferException("dependency_transfer_redirect_invalid");
                 }
-                if (!redirectPolicy.IsAllowed(item, currentUri, targetUri, redirectNumber))
+                if (!approvedRedirectPolicy.IsAllowed(item, currentUri, targetUri, redirectNumber))
                 {
                     throw new LocalModelDependencyTransferException("dependency_transfer_redirect_denied");
                 }
+                EnsureCurrentRedirectPolicy(approvedRedirectPolicy.PolicySha256);
                 currentUri = targetUri;
             }
             catch
@@ -463,10 +614,11 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
         }
     }
 
-    private static LocalModelDependencyTransferItem ValidateRequest(
+    private LocalModelDependencyTransferItem ValidateRequest(
         LocalModelDependencyCatalogReview trustedCatalog,
         LocalModelDependencyTransferPlan plan,
         LocalModelDependencyTransferApproval approval,
+        LocalModelDependencyRedirectPolicyReview redirectPolicyReview,
         Stream destination)
     {
         LocalModelDependencyTransferPlanner.ValidateForTransfer(plan);
@@ -487,7 +639,8 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
         }
         if (approval.SchemaVersion != LocalModelDependencyTransferApproval.CurrentSchemaVersion ||
             !approval.Approved ||
-            !DigestEquals(approval.PlanSha256, plan.PlanSha256))
+            !DigestEquals(approval.PlanSha256, plan.PlanSha256) ||
+            !DigestEquals(approval.RedirectPolicySha256, redirectPolicyReview.PolicySha256))
         {
             throw new LocalModelDependencyTransferException("dependency_transfer_approval_invalid");
         }
@@ -502,6 +655,16 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
             throw new LocalModelDependencyTransferException("dependency_transfer_destination_invalid");
         }
         return item;
+    }
+
+    private void EnsureCurrentRedirectPolicy(string expectedSha256)
+    {
+        var current = redirectPolicy.Review;
+        LocalModelDependencyRedirectPolicyReview.Validate(current);
+        if (!DigestEquals(current.PolicySha256, expectedSha256))
+        {
+            throw new LocalModelDependencyTransferException("dependency_transfer_approval_invalid");
+        }
     }
 
     private static void ValidateFinalResponse(

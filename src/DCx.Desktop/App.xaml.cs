@@ -494,6 +494,9 @@ public partial class App : Application
         private int transferAttempts;
         private bool firstRecovery = true;
 
+        public LocalModelDependencyRedirectPolicyReview RedirectPolicyReview =>
+            LocalModelDependencyRedirectPolicyReview.DenyAll;
+
         public async Task<LocalModelDependencyTransferSetReceipt> TransferAsync(
             LocalModelDependencyTransferPlan plan,
             LocalModelDependencyTransferSetApproval approval,
@@ -502,7 +505,11 @@ public partial class App : Application
         {
             if (approval.SchemaVersion != LocalModelDependencyTransferSetApproval.CurrentSchemaVersion ||
                 !approval.Approved ||
-                !string.Equals(approval.PlanSha256, plan.PlanSha256, StringComparison.Ordinal))
+                !string.Equals(approval.PlanSha256, plan.PlanSha256, StringComparison.Ordinal) ||
+                !string.Equals(
+                    approval.RedirectPolicySha256,
+                    RedirectPolicyReview.PolicySha256,
+                    StringComparison.Ordinal))
             {
                 throw new LocalModelDependencyTransferException("dependency_transfer_approval_invalid");
             }
@@ -552,6 +559,7 @@ public partial class App : Application
                 plan.CatalogId,
                 plan.CatalogSha256,
                 plan.PlanSha256,
+                RedirectPolicyReview.PolicySha256,
                 plan.TransferBytes,
                 Array.AsReadOnly(plan.Items.Select((item, index) =>
                     new LocalModelDependencyTransferredFile(

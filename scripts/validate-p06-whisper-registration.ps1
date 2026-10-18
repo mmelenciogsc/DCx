@@ -245,8 +245,10 @@ try {
             $candidate.Current.Name -like "Transfer preflight only. Plan SHA-256 a0d997c6298fdf5f592241928c6fd9564c6de0c3e023c9eb69bd1df96406c286.*" -and
             $candidate.Current.Name -like "*4 candidates. 9 immutable transfer items.*" -and
             $candidate.Current.Name -like "*1,281,058,770 network bytes. 3,098,988,452 minimum free bytes.*" -and
+            $candidate.Current.Name -like "*Redirect policy SHA-256 *Approved redirect routes: none. The reviewed policy denies every redirect.*" -and
             $candidate.Current.Name -like "*reloads the authenticated catalog, requires exact-item approval, disables automatic redirects, proxy, credentials, preauthentication, cookies and decompression, and rolls back any partial stream*" -and
-            $candidate.Current.Name -like "*bounded manual redirect policy defaults to deny-all; no real provider rule is configured*" -and
+            $candidate.Current.Name -like "*bounded manual redirect policy is bound to the displayed digest and routes*" -and
+            $candidate.Current.Name -like "*current policy has no routes; no real provider redirect is authorized*" -and
             $candidate.Current.Name -like "*private set coordinator serializes transfer, verification and cleanup*rechecks capacity*uses random incoming storage*protects a source-path-free receipt*atomically publishes only a complete plan*can rehash the completed set*" -and
             $candidate.Current.Name -like "*separately approved exact-plan transfer, cancellation, protected verification and abandoned-partial recovery*" -and
             $candidate.Current.Name -like "*Current provider redirects remain denied*" -and
@@ -258,6 +260,9 @@ try {
         throw "The exact dependency transfer preflight is not keyboard focusable."
     }
     $dependencyTransferApproval = Find-ById $localModelsWindow "ApproveDependencyTransferBox"
+    if ($dependencyTransferApproval.Current.Name -notlike "*redirect-policy digest and routes*") {
+        throw "The dependency transfer approval did not name the reviewed redirect-policy authority."
+    }
     $dependencyTransferToggle = $dependencyTransferApproval.GetCurrentPattern(
         [System.Windows.Automation.TogglePattern]::Pattern)
     $dependencyTransferStart = Find-ById $localModelsWindow "StartDependencyTransferButton"
@@ -819,6 +824,7 @@ try {
             if ($null -ne $candidate -and
                 $candidate.Current.Name -like "Transfer preflight only. Plan SHA-256 *" -and
                 $candidate.Current.Name -like "*1 candidate. 2 immutable transfer items.*" -and
+                $candidate.Current.Name -like "*Redirect policy SHA-256 *Approved redirect routes: none. The reviewed policy denies every redirect.*" -and
                 $candidate.Current.Name -like "*These boundaries are not connected to a transfer action in this validation window.*" -and
                 $candidate.Current.Name -like "*No transfer approval exists. Nothing was downloaded, installed, extracted, pulled, registered, selected, or executed.*") {
                 $candidate

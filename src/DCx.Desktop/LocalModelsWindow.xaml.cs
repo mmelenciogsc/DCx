@@ -33,6 +33,7 @@ public partial class LocalModelsWindow : Window
     private LocalModelDependencyArtifactReview? reviewedDependencyArtifact;
     private LocalHardwareProfile? hardwareProfile;
     private LocalModelDependencyTransferPlan? dependencyTransferPlan;
+    private LocalModelDependencyRedirectPolicyReview? dependencyRedirectPolicyReview;
     private CancellationTokenSource? dependencyTransferCancellation;
     private Task? dependencyTransferOperation;
     private bool dependencyTransferRunning;
@@ -137,6 +138,7 @@ public partial class LocalModelsWindow : Window
     private async Task LoadDependencyCatalogAsync()
     {
         dependencyTransferPlan = null;
+        dependencyRedirectPolicyReview = null;
         DependencyTransferApprovalBox.IsChecked = false;
         SetDependencyControlsEnabled(false);
         SetDependencyCatalogSummary(dependencyCatalogFixture is null
@@ -153,7 +155,10 @@ public partial class LocalModelsWindow : Window
             var transferPlan = new LocalModelDependencyTransferPlanner().CreateForAll(
                 catalog,
                 LocalModelDependencyTransferPlanner.TryGetAvailableFreeBytes(applicationDataRoot));
+            var redirectPolicyReview = this.dependencyTransferCoordinator?.RedirectPolicyReview ??
+                LocalModelDependencyRedirectPolicyReview.DenyAll;
             dependencyTransferPlan = transferPlan;
+            dependencyRedirectPolicyReview = redirectPolicyReview;
             DependencyCandidatesList.ItemsSource = rows;
             SetDependencyCatalogSummary(dependencyCatalogFixture is null
                 ? this.dependencyTransferCoordinator is null
@@ -165,6 +170,7 @@ public partial class LocalModelsWindow : Window
                   $"{rows.Length} generated candidate. Network, download, install, pull, execution, registration, and selection are unavailable.");
             SetDependencyTransferPreflight(FormatDependencyTransferPlan(
                 transferPlan,
+                redirectPolicyReview,
                 this.dependencyTransferCoordinator is not null));
             if (this.dependencyTransferCoordinator is not null)
             {
@@ -182,6 +188,7 @@ public partial class LocalModelsWindow : Window
         {
             DependencyCandidatesList.ItemsSource = null;
             dependencyTransferPlan = null;
+            dependencyRedirectPolicyReview = null;
             DependencyTransferApprovalBox.IsChecked = false;
             SetDependencyCatalogSummary(
                 "The built-in dependency catalog failed authentication and no candidate is available. No external action occurred.");
@@ -202,6 +209,7 @@ public partial class LocalModelsWindow : Window
     private async void OnStartDependencyTransferClick(object sender, RoutedEventArgs e)
     {
         if (dependencyTransferCoordinator is null || dependencyTransferPlan is null ||
+            dependencyRedirectPolicyReview is null ||
             !dependencyTransferPlan.CapacitySufficient ||
             DependencyTransferApprovalBox.IsChecked != true || dependencyTransferRunning)
         {
@@ -211,11 +219,15 @@ public partial class LocalModelsWindow : Window
             return;
         }
 
-        dependencyTransferOperation = RunDependencyTransferAsync(dependencyTransferPlan);
+        dependencyTransferOperation = RunDependencyTransferAsync(
+            dependencyTransferPlan,
+            dependencyRedirectPolicyReview);
         await dependencyTransferOperation;
     }
 
-    private async Task RunDependencyTransferAsync(LocalModelDependencyTransferPlan plan)
+    private async Task RunDependencyTransferAsync(
+        LocalModelDependencyTransferPlan plan,
+        LocalModelDependencyRedirectPolicyReview redirectPolicyReview)
     {
         dependencyTransferRunning = true;
         lastAnnouncedTransferStage = null;
@@ -234,7 +246,10 @@ public partial class LocalModelsWindow : Window
             var progress = new Progress<LocalModelDependencyTransferSetProgress>(SetDependencyTransferProgress);
             var receipt = await dependencyTransferCoordinator!.TransferAsync(
                 plan,
-                LocalModelDependencyTransferSetApproval.Create(plan, approved: true),
+                LocalModelDependencyTransferSetApproval.Create(
+                    plan,
+                    redirectPolicyReview,
+                    approved: true),
                 dependencyTransferCancellation.Token,
                 progress);
             var verified = await dependencyTransferCoordinator.VerifyAsync(
@@ -242,6 +257,14 @@ public partial class LocalModelsWindow : Window
                 dependencyTransferCancellation.Token,
                 progress);
             if (!string.Equals(receipt.PlanSha256, verified.PlanSha256, StringComparison.Ordinal) ||
+                !string.Equals(
+                    receipt.RedirectPolicySha256,
+                    redirectPolicyReview.PolicySha256,
+                    StringComparison.Ordinal) ||
+                !string.Equals(
+                    receipt.RedirectPolicySha256,
+                    verified.RedirectPolicySha256,
+                    StringComparison.Ordinal) ||
                 receipt.TransferBytes != verified.TransferBytes || receipt.Files.Count != verified.Files.Count)
             {
                 throw new InvalidOperationException("The completed dependency transfer receipt changed.");
@@ -250,7 +273,7 @@ public partial class LocalModelsWindow : Window
             DependencyTransferProgress.IsIndeterminate = false;
             DependencyTransferProgress.Value = 100;
             SetDependencyTransferStatus(
-                $"Transfer complete and reverified. Plan {verified.PlanSha256}. {verified.Files.Count:N0} authenticated files. {verified.TransferBytes:N0} bytes. The protected set is inert. Nothing was extracted, installed, registered, selected, or executed.");
+                $"Transfer complete and reverified. Plan {verified.PlanSha256}. Redirect policy {verified.RedirectPolicySha256}. {verified.Files.Count:N0} authenticated files. {verified.TransferBytes:N0} bytes. The protected set is inert. Nothing was extracted, installed, registered, selected, or executed.");
             SetStatus(
                 "The approved dependency set is complete and protected. Separate exact review is still required before any staging, registration, selection, or execution.");
             DependencyTransferStatus.Focus();
@@ -326,7 +349,7 @@ public partial class LocalModelsWindow : Window
                 dependencyTransferCancellation.Token,
                 progress);
             SetDependencyTransferStatus(
-                $"Completed set verified. Plan {receipt.PlanSha256}. {receipt.Files.Count:N0} authenticated files. {receipt.TransferBytes:N0} bytes. Nothing was executed.");
+                $"Completed set verified. Plan {receipt.PlanSha256}. Redirect policy {receipt.RedirectPolicySha256}. {receipt.Files.Count:N0} authenticated files. {receipt.TransferBytes:N0} bytes. Nothing was executed.");
             DependencyTransferStatus.Focus();
         }
         catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
@@ -1331,6 +1354,7 @@ public partial class LocalModelsWindow : Window
 
     private static string FormatDependencyTransferPlan(
         LocalModelDependencyTransferPlan plan,
+        LocalModelDependencyRedirectPolicyReview redirectPolicy,
         bool transferActionAvailable)
     {
         static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
@@ -1342,6 +1366,15 @@ public partial class LocalModelsWindow : Window
             "\n",
             plan.Items.Select(item =>
                 $"{item.SourceUri}; {Number(item.ExpectedBytes)} bytes; SHA-256 {item.Sha256}; roles {string.Join(", ", item.Roles)}."));
+        var redirectDetails = redirectPolicy.Routes.Count == 0
+            ? "Approved redirect routes: none. The reviewed policy denies every redirect."
+            : string.Join(
+                "\n",
+                redirectPolicy.Routes.Select((route, index) =>
+                    $"Approved redirect route {index + 1}: exact item {route.ItemSourceUri}; {Number(route.ExpectedBytes)} bytes; SHA-256 {route.Sha256}; from origin {route.FromOrigin}; to HTTPS prefix {route.TargetUriPrefix}."));
+        var redirectPolicyState = redirectPolicy.Routes.Count == 0
+            ? "The current policy has no routes; no real provider redirect is authorized."
+            : "Only the exact displayed redirect routes are authorized.";
         var candidateWord = plan.CandidateIds.Count == 1 ? "candidate" : "candidates";
         var itemWord = plan.Items.Count == 1 ? "item" : "items";
         return
@@ -1351,9 +1384,14 @@ public partial class LocalModelsWindow : Window
             "The minimum reserves one temporary transfer copy, one retained verified copy, and 536,870,912 workspace bytes. " +
             $"{available} Capacity must be rechecked immediately before any future transfer.\n" +
             $"{itemDetails}\n" +
-            "The inert core transport reloads the authenticated catalog, requires exact-item approval, disables automatic redirects, proxy, credentials, preauthentication, cookies and decompression, and rolls back any partial stream unless the requested URI, final status, length and SHA-256 all match. Its bounded manual redirect policy defaults to deny-all; no real provider rule is configured. Its private set coordinator serializes transfer, verification and cleanup; rechecks capacity; uses random incoming storage; protects a source-path-free receipt; atomically publishes only a complete plan; and can rehash the completed set. " +
+            $"Redirect policy SHA-256 {redirectPolicy.PolicySha256}. {redirectDetails}\n" +
+            "The inert core transport reloads the authenticated catalog, requires exact-item approval, disables automatic redirects, proxy, credentials, preauthentication, cookies and decompression, and rolls back any partial stream unless the requested URI, final status, length and SHA-256 all match. Its bounded manual redirect policy is bound to the displayed digest and routes. " +
+            $"{redirectPolicyState} Its private set coordinator serializes transfer, verification and cleanup; rechecks capacity; uses random incoming storage; protects a source-path-free receipt; atomically publishes only a complete plan; and can rehash the completed set. " +
             (transferActionAvailable
-                ? "This window exposes one separately approved exact-plan transfer, cancellation, protected verification and abandoned-partial recovery. Current provider redirects remain denied."
+                ? "This window exposes one separately approved exact-plan transfer, cancellation, protected verification and abandoned-partial recovery. " +
+                  (redirectPolicy.Routes.Count == 0
+                      ? "Current provider redirects remain denied."
+                      : "Only the displayed redirect routes can be followed.")
                 : "These boundaries are not connected to a transfer action in this validation window.") + "\n" +
             "No transfer approval exists. Nothing was downloaded, installed, extracted, pulled, registered, selected, or executed.";
     }

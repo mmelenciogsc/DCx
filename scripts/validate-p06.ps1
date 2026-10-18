@@ -82,6 +82,10 @@ try {
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.UnsafeRedirectTargetsFailBeforeSecondRequest",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.RedirectLoopAndHopLimitFailClosed",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.ExactPolicy_DeniesChangedItemTransitionAndBroadOrDuplicateRules",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.RedirectPolicyReview_IsCanonicalAndRejectsMalformedReview",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.RedirectPolicyApprovalSubstitutionFailsBeforeNetwork",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.RedirectPolicyMutationDuringTransferRollsBackAuthenticatedBytes",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.InjectedPolicyCannotOverrideReviewedDenyAllAuthority",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.MissingApprovalOrCapacity_DeniesBeforeNetworkAndLeavesDestinationEmpty",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.SubstitutedFinalUriEncodingRangeAndChunkedResponsesFailClosed",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.MissingWrongShortAndExtraLengthsRemovePartialOutput",
@@ -92,6 +96,7 @@ try {
     $requiredDependencyTransferSetContracts = @(
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Transfer_RequiresExplicitApprovalAndFreshCapacityBeforeCreatingStorage",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Transfer_StreamsEveryItemProtectsReceiptAndAtomicallyPublishesVerifiableSet",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Transfer_RejectsRedirectPolicySubstitutionBeforeStorage",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.TransferFailureAndProtectedWriteFailureLeaveNoPublishedOrPartialSet",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.CancellationBeforeAndDuringTransferLeavesNoPublishedOrPartialSet",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Verify_DeniesMissingProtectionTamperedPayloadAndUnexpectedFile",
@@ -384,6 +389,12 @@ if ($dependencyTransferPlan.PlanSha256 -cne "a0d997c6298fdf5f592241928c6fd9564c6
     $dependencyTransferPlan.CapacitySufficient -ne $true) {
     throw "The exact P06 dependency transfer footprint or current storage-capacity preflight failed."
 }
+$dependencyRedirectPolicy = [DCx.Core.LocalModels.LocalModelDependencyRedirectPolicyReview]::DenyAll
+if ($dependencyRedirectPolicy.AllowsRedirects -or
+    $dependencyRedirectPolicy.Routes.Count -ne 0 -or
+    $dependencyRedirectPolicy.PolicySha256 -cnotmatch '^[0-9a-f]{64}$') {
+    throw "The production dependency redirect policy is not a canonical deny-all review."
+}
 $client = [DCx.Core.LocalModels.OllamaLocalClient]::new(
     [Uri]"http://localhost:11434/", [TimeSpan]::FromMinutes(3))
 try {
@@ -673,6 +684,9 @@ $manifest = [ordered]@{
     dependency_transfer_minimum_free_bytes = [long]$dependencyTransferPlan.MinimumFreeBytes
     dependency_transfer_observed_free_bytes = [long]$dependencyTransferPlan.ObservedAvailableFreeBytes
     dependency_transfer_capacity_sufficient = [bool]$dependencyTransferPlan.CapacitySufficient
+    dependency_redirect_policy_sha256 = [string]$dependencyRedirectPolicy.PolicySha256
+    dependency_redirect_policy_routes = [int]$dependencyRedirectPolicy.Routes.Count
+    dependency_redirect_policy_bound_to_approval_and_receipt = $true
     dependency_transfer_authority_granted = $false
     dependency_transfer_native_uia = "pass"
     dependency_transfer_ui_evidence = $dependencyTransferUiEvidencePath
@@ -720,6 +734,7 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Dependency transfer preflight contracts=PASS ($($manifest.dependency_transfer_contract_tests)/$($manifest.dependency_transfer_contract_tests)); plan SHA-256=$($manifest.dependency_transfer_plan_sha256); network bytes=$($manifest.dependency_transfer_bytes); minimum free bytes=$($manifest.dependency_transfer_minimum_free_bytes); observed free bytes=$($manifest.dependency_transfer_observed_free_bytes); authority granted=False"
 "Dependency HTTP transfer contracts=PASS ($($manifest.dependency_http_transfer_contract_tests)/$($manifest.dependency_http_transfer_contract_tests)); production transfer actions=0"
 "Dependency transfer-set coordinator contracts=PASS ($($manifest.dependency_transfer_set_contract_tests)/$($manifest.dependency_transfer_set_contract_tests)); production transfer actions=0"
+"Dependency redirect policy binding=PASS; SHA-256=$($manifest.dependency_redirect_policy_sha256); approved routes=$($manifest.dependency_redirect_policy_routes); approval and protected receipt bound=True"
 "Accessible default-off transfer progress/cancellation/reverification/recovery UIA=PASS; provider requests/downloads/installs/executions=0"
 "Whisper runtime traversal, collision, device, link, missing-CLI, compression-bomb, CRC and encryption denials=PASS ($($manifest.dependency_runtime_archive_denials)/$($manifest.dependency_runtime_archive_denials))"
 "Model unload verified=PASS"
