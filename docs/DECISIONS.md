@@ -87,5 +87,6 @@
 | [0083](architecture/adr/0083-bind-codex-cancellation-in-response-reader.md) | Bind Codex cancellation intent in the protocol response reader | Accepted for the local app-server boundary; real provider acceptance remains blocked | 2026-10-18 |
 | [0084](architecture/adr/0084-serialize-per-user-ollama-inference.md) | Serialize per-user Ollama inference | Accepted for cooperative DCx local-model operations; external-client isolation remains blocked | 2026-10-19 |
 | [0085](architecture/adr/0085-bind-codex-cancellation-from-turn-notifications.md) | Bind Codex cancellation from exact turn notifications | Accepted for the local app-server boundary; real provider acceptance remains blocked | 2026-10-19 |
+| [0086](architecture/adr/0086-admit-local-models-from-live-resources-and-verify-unload.md) | Admit local models from live resources and verify unload | Accepted for NVIDIA-backed local inference; other GPU telemetry and external-client isolation remain blocked | 2026-10-19 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

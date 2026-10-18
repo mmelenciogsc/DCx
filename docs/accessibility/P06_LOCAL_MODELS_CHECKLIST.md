@@ -2,7 +2,7 @@
 
 Status: NOT RUN. Automated UIA evidence does not satisfy this checklist.
 
-Automated evidence proves that cooperating DCx processes serialize Ollama work and that queued acquisition is cancellable and recoverable. It does not prove the screen-reader wording, wait-state discoverability or cancellation experience when another DCx operation owns the model.
+Automated evidence proves that cooperating DCx processes serialize Ollama work, recapture current resource availability, verify ordinary model unload, and make queued acquisition cancellable and recoverable. It does not prove the screen-reader wording, resource-denial discoverability, wait-state discoverability or cancellation experience when another DCx operation owns the model.
 
 Run separately with the installed JAWS, NVDA and Narrator versions. Use only an already-installed nonprivate fixture model and the gated synthetic transfer fixture; do not perform a real provider transfer, install, retag or upload anything.
 
@@ -39,5 +39,7 @@ Run separately with the installed JAWS, NVDA and Narrator versions. Use only an 
 31. Invoke **Verify completed set** and **Recover abandoned partials** by keyboard. Confirm each concise result receives focus. Confirm recovery explains that links are refused and no completed set was changed.
 32. Repeat the synthetic workflow at 200% scaling and High Contrast. Check `Alt+O`, `Alt+K`, `Alt+B`, `Alt+C`, `Alt+V` and `Alt+R` for conflicts with each screen reader. Record verbosity, delayed announcements, cancellation latency and any focus loss. Do not infer this human result from automated UIA.
 33. With a disposable validation profile, start one long local-model operation and initiate a second operation from another DCx process. Confirm the waiting state does not claim progress or completion, cancellation remains discoverable, cancellation produces a concise announcement, and a later retry works after the first process releases or exits. Do not use real user media and do not start an unrelated Ollama client during the resource-attribution check.
+34. On an NVIDIA host, review the hardware summary. Confirm the adapter's reported total memory, current free memory and `NVIDIA NVML free memory` source are distinguishable and understandable without character-by-character review. On a host without supported live GPU telemetry, confirm the unavailable GPU-admission explanation is concise and does not imply that registry-reported capacity is currently usable.
+35. Using only a generated resource-denial fixture, confirm that a model which becomes ineligible before inference produces one concise status, retains focus and does not claim that processing started. After a successful generated vision or embedding operation, confirm the completion status is not announced until exact-model unload has been verified; an unconfirmed cleanup fixture must announce failure rather than the otherwise usable answer.
 
 P06 remains blocked until this human gate and the separate real Whisper/embedding gates pass.

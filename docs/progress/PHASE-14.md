@@ -1,7 +1,7 @@
 # P14 — Pilot and release readiness
 
 - Status: BLOCKED / NO_GO (local readiness controls pass; pilot and production activation are off)
-- Implementation commits through current exact source: `5614991`
+- Implementation commits through current exact source: `94a0f6b`
 - Documentation commit: recorded by the commit containing this file
 
 No pilot was started, no telemetry was collected, no user was enrolled, and no production service or payment was activated.
@@ -25,14 +25,14 @@ No pilot was started, no telemetry was collected, no user was enrolled, and no p
 
 ```bash
 cd /mnt/d/DCx
-pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14.ps1
 ```
 
 ## Measured result
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 exact-namespace release/readiness tests: passed 10, failed 0, skipped 0; about 1 second. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
-- Current committed-source expanded full suite: passed 557, failed 0, skipped 0; native Windows with zero build warnings/errors.
+- Current implementation-source expanded full suite: passed 561, failed 0, skipped 0; native Windows with zero build warnings/errors.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -41,7 +41,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p14.ps
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled consent state, blocker list, metric-definition list and refresh action. The validator confirmed that no control named `Activate production` exists.
 - The P11 readiness gate was rerun after composing the default-off contributor process transport with the native dashboard under a separate validation-only startup gate. It proves a read-only digest-authenticated token-to-subject mapping, operator/contributor role separation, hardened literal-loopback transport, real ledger projection and native focus/keyboard behavior. P11 remains blocking because this is not production contributor identity, MFA/TLS/credential rotation/multi-subject authorization/deployment, and production close/adjustment/hold/dispute/tax authority, exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider plus closure/requeue policy, centralized audit, deployed distributed fencing, external alert delivery/human acknowledgment/escalation and authorized provider acceptance remain absent.
-- Evidence: `artifacts/test-results/p14-a3408cbf97d541359340a5ffccc80ecb/go-no-go.json` with `p14-readiness.trx` beside it, generated from exact implementation source `5614991` and intentionally not committed. The exact-source full suite passes 557/557 with zero build warnings/errors.
+- Evidence: `artifacts/test-results/p14-e482fdde25e141f3ac7ee4efbb21d09e/go-no-go.json` with `p14-readiness.trx` beside it, generated from exact implementation source `94a0f6b` and intentionally not committed. The exact-source full suite passes 561/561 with zero build warnings/errors.
 
 ## Changed files in the latest milestone
 

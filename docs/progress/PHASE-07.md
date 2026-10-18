@@ -1,7 +1,7 @@
 # P07 — Files, documents, accessibility and media
 
 - Status: Complete (automated native gate; human assistive-technology pass unverified)
-- Implementation commits: `e21c654`, `4e8ee1f`, `c47edf9`, `c618254`, `10e07d5`, `ed6f001`, `acc8e62`, `040fb4e`, `1a3b28e`, `15a6061`, `73c154d`, `ac6debc`, `c12606d`, `a7cbd89`, `5873218`; validator hardening `02d0564`; shared local-inference sequencing `2713413`
+- Implementation commits: `e21c654`, `4e8ee1f`, `c47edf9`, `c618254`, `10e07d5`, `ed6f001`, `acc8e62`, `040fb4e`, `1a3b28e`, `15a6061`, `73c154d`, `ac6debc`, `c12606d`, `a7cbd89`, `5873218`; validator hardening `02d0564`; shared local-inference sequencing `2713413`; live resource admission and verified cleanup `94a0f6b`
 - Documentation commit: recorded by the commit containing this file
 
 ## Implemented
@@ -30,7 +30,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 ## Measured result
 
 - Locked native Release build: 0 warnings, 0 errors.
-- Original P07 content tests: passed 74, failed 0, skipped 0. Bounded-question policy tests: passed 5, failed 0, skipped 0. Current exact-source full native suite at `5614991`: passed 557, failed 0, skipped 0.
+- Original P07 content tests: passed 74, failed 0, skipped 0. Bounded-question policy tests: passed 5, failed 0, skipped 0. Current exact-source full native suite at `94a0f6b`: passed 561, failed 0, skipped 0.
 - Real generated H.264 MP4: initial pause and Play/Pause passed.
 - Local frame description identified the fixture's solid blue content; video remained paused; explicit user resume passed.
 - Shared-viewport generated HTML5 video Q&A answered `Blue`; the video remained paused after narration and explicit same-page resume passed.
@@ -39,14 +39,14 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 - Windows OCR recognized the golden `DCX`/`42` content and returned normalized geometry.
 - Semantic repair, HTML export, real OPC DOCX export and DOCX viewer round-trip passed.
 - Native UIA script result: `P07 content viewer UIA validation=PASS`.
-- Latest passing evidence directory: `artifacts/test-results/p07-18a94bb42c434811a54a9e499706cda9/` (generated during the exact-source P12 aggregate at `5614991` and intentionally not committed). The disposable profile explicitly registered the real installed FFmpeg candidate, proved the local blue-frame result through that exact binding and the native hardware-policy-selected 4B vision identity, and did not retain approval. Its vision call uses the same current-user cross-process Ollama lease as all other production DCx vision, embedding and benchmark work. It clears all disposable Ollama, Whisper and FFmpeg state, coordination handles and protected anchors after the app closes.
+- Latest passing evidence directory: `artifacts/test-results/p07-e49eeefc0ae1405b9bda757259e17659/` (generated during the exact-source P12 aggregate at `94a0f6b` and intentionally not committed). The disposable profile explicitly registered the real installed FFmpeg candidate, proved the local blue-frame result through that exact binding and the native hardware-policy-selected 4B vision identity, and did not retain approval. Its vision call uses the same current-user cross-process Ollama lease as all other production DCx vision, embedding and benchmark work, recaptures live resource availability immediately before the model operation, and requires explicit unload plus three exact-model absence observations before returning the description. It clears all disposable Ollama, Whisper and FFmpeg state, coordination handles and protected anchors after the app closes.
 - One earlier committed-source run transiently failed to observe the current vision-model UIA name after the persisted-save status. No orphan DCx process remained; the immediate rerun and a later independent rerun both passed. The passing runs are the accepted gate evidence, while the isolated timing observation remains documented rather than being represented as a zero-flake claim.
 - The first P12 aggregate at this milestone stopped when the P07 validator dereferenced a UIA lookup before the control appeared. An immediate unmodified standalone retry passed, identifying validator timing rather than a product assertion. The first wait-hardening attempt then looked for conditional media controls before opening video and correctly failed `media Play action not exposed`. Commit `02d0564` moved that wait after video admission and applies bounded `Require-ById` waits to required controls. The final standalone gate and the complete exact-source P12 aggregate both passed. Neither failed run is represented as product acceptance.
 
 ## Security, accessibility and limitations
 
 - ZIP/XML parsing caps entry count and expanded bytes; DTD processing and external XML resolution are disabled.
-- FFmpeg requires a separately approved exact executable/license binding, with per-run digest verification, leased input/executable, typed arguments, a scrubbed environment, bounded execution and signature-validated leased output removed after use. Web capture is restricted to the visible video rectangle in the current tab. Ollama is loopback-only, exact approved model identity is revalidated, owned decoded frame bytes are zeroed and the model is unloaded.
+- FFmpeg requires a separately approved exact executable/license binding, with per-run digest verification, leased input/executable, typed arguments, a scrubbed environment, bounded execution and signature-validated leased output removed after use. Web capture is restricted to the visible video rectangle in the current tab. Ollama is loopback-only, exact approved model identity is revalidated, current resource admission is rechecked under the shared lease, owned decoded frame bytes are zeroed, and exact-model unload is confirmed by three absence observations.
 - Folder presentation is bounded and does not expose absolute paths in item labels.
 - Human JAWS, NVDA and Narrator results remain `UNVERIFIED`; see `docs/accessibility/P07_CONTENT_CHECKLIST.md`.
 - YouTube playback/provider limitations are reported in `docs/media/YOUTUBE_LIMITATIONS.md`. The gate proves safe URL admission/handoff and provider-neutral Q&A against a deterministic loopback HTML5 video. It does not prove live, authenticated, embedded, protected or universal YouTube frame Q&A.
