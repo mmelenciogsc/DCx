@@ -21,6 +21,7 @@ The owner's Ubuntu server is not a development scratch host. Deployment requires
 - **Inference router:** current provider capabilities discovered from official APIs/docs plus benchmarked local inference.
 - **Storage:** SQLite metadata, content-addressed artifacts, private vector index, separate signed global replica with replica-scoped cross-process operation serialization, append-only local event journal.
 - **Media/document services:** safe parsers, OCR, export validators, FFmpeg, PDF rendering, local transcription, image/video-frame analysis.
+- **Owned local-inference host:** separately protected approval for an already-installed signed Ollama tree/model root, random PID-proven loopback process, one exact digest-bound resident model, serialized requests and job-bound teardown on failure, revocation or app exit. It is not isolation from malicious same-user code.
 
 ## Dependency direction
 
