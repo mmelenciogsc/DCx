@@ -1,7 +1,7 @@
 # P04 — OpenAI identity and local Codex integration
 
 - Status: Complete (offline/native mock gate; external account invocation unverified)
-- Implementation commits: `8ba629c`, `e559975`, `5873218`
+- Implementation commits: `8ba629c`, `e559975`, `5873218`, `c200e8f`
 
 Commercial ChatGPT sign-in for DCx distribution is a strict eligibility blocker. API-key mode remains independent.
 
@@ -56,6 +56,7 @@ Native Windows 11 build/test after final hardening:
 - P04 UIA E2E passed: blocked ChatGPT state/reason, isolated test runtime, JSONL connection, one selected model, streamed response and explicit disconnect.
 - Active-turn cancellation waits for the exact in-flight turn before requesting interruption, then proves the turn is removed. A later expanded-suite run exposed the remaining notification-before-response race; the fixture now forces that ordering, and the two P04 process tests passed six consecutive focused runs after identity retention was hardened. The current committed-source native validator is recorded with the encompassing milestone evidence.
 - The first expanded pre-commit run after the P06 observer change passed 494/495: `Client_CancellationInterruptsOnlyActiveTurn` received `TaskCanceledException` while waiting for `turn/start`. The deterministic delayed-response fixture reproduced that ordering. After `5873218`, the exact-commit full suite passed 495/495 and `validate-p04.ps1` passed its native offline UIA flow. This non-zero observation remains part of the record.
+- A later expanded run at the P12 milestone passed 550/551: `Client_CancellationInterruptsOnlyActiveTurn` observed a completed turn. The reader had completed the correlated response task, but its awaiting continuation could still be overtaken by the following terminal notification. Commit `c200e8f` binds the pre-registered cancellation intent synchronously in the protocol response reader before later notifications are read. Both focused process tests then passed together, followed by eight consecutive no-build focused runs, the native P04 UIA gate and the exact-source full suite at `02d0564` (551/551). This second non-zero observation remains recorded; ADR 0083 supersedes only the incomplete scheduling assumption, not ADR 0070's identity-retention rule.
 - Secret-pattern filename scan found no matches outside ignored build/test artifacts.
 
 ## Changed files
@@ -64,7 +65,7 @@ Native Windows 11 build/test after final hardening:
 - Native runtime discovery and accessible provider UI: `src/DCx.Desktop/OpenAI`, `src/DCx.Desktop/OpenAiControlWindow.xaml*`, shell entry controls.
 - Offline process fixture: `tests/DCx.FakeCodexAppServer`.
 - Unit/integration tests: `tests/DCx.Core.Tests/OpenAI`, `tests/DCx.Core.Tests/Security`.
-- Turn-identity cancellation ordering: `src/DCx.Core/OpenAI/CodexAppServerClient.cs`, the delayed-response fixture/test above, and `docs/architecture/adr/0070-retain-codex-turn-identity-through-cancellation.md`.
+- Turn-identity cancellation ordering: `src/DCx.Core/OpenAI/CodexAppServerClient.cs`, the delayed-response fixture/test above, `docs/architecture/adr/0070-retain-codex-turn-identity-through-cancellation.md`, and the response-reader binding in ADR 0083.
 - Native UIA test: `scripts/validate-p04.ps1`.
 - Human checklist: `docs/accessibility/P04_OPENAI_CHECKLIST.md`.
 

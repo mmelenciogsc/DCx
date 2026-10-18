@@ -207,6 +207,16 @@ User files and prompts; browser sessions; API/OAuth/PayPal credentials; private 
 - Only `investigation_requested` and `retained_blocked` can be appended. Neither changes the blocked event, accounting or provider state. Free-form notes, replay/requeue, rejection, closure and financial commands are structurally absent.
 - Binding and audit rows are immutable/append-only under triggers and a sequence-bound SHA-256 chain. These controls do not resist a privileged database administrator, provide production identity/MFA/TLS, deliver an external investigation notification, or define accounting-approved closure/requeue policy.
 
+## P12 assisted Facebook current-post boundary
+
+The authenticated site, its DOM and every extracted string are untrusted. Production admission is limited to exact Facebook HTTPS hosts and supported direct post/video/permalink address shapes. The result is bound to the current WebView2 navigation generation and address; search links, canonical/Open Graph metadata, hidden fields and cross-navigation results cannot nominate a post. Query/fragment tracking is removed, host output is normalized, text/media counts and lengths are bounded, and control plus bidi-formatting characters are removed before presentation.
+
+The user retains the shared viewport for login, MFA, consent and candidate selection, then explicitly hands control back. DCx does not read password values, cookies, local/session storage or another browser profile. Login, checkpoint, challenge, block, error, search-results and no-post states fail closed, clear the prior result and return no address. A controlled test surface is admitted only by an explicit environment flag plus a literal-loopback HTTP root; it is default off and disclosed as not Facebook. Navigation is rechecked after inspection to prevent stale page data from being paired with a changed address. Live provider compatibility and human acceptance remain blocked.
+
+## P04 response-reader cancellation ordering
+
+Codex protocol messages may arrive in an order where an identity-bearing response is immediately followed by a terminal notification before an awaiting task continuation runs. User cancellation intent is registered before `turn/start`, then synchronously bound by the protocol reader to the exact correlated thread/turn response before that reader handles later notifications. Exact identity checks, bounded request timeout and app-server lifetime cancellation remain in force. DCx never interrupts an inferred "latest" turn. This closes the observed local scheduling race but does not establish real-provider behavior.
+
 ## Security gate policy
 
 Security tests must cover denial paths as well as successful paths. A mock or sandbox pass proves only that path. Production OpenAI/PayPal eligibility, code signing, legal review, external penetration testing, and the Ubuntu production deployment remain explicit blockers until separately evidenced.
