@@ -1,7 +1,7 @@
 # P07 — Files, documents, accessibility and media
 
 - Status: Complete (automated native gate; human assistive-technology pass unverified)
-- Implementation commits: `e21c654`, `4e8ee1f`, `c47edf9`, `c618254`, `10e07d5`, `ed6f001`, `acc8e62`, `040fb4e`, `1a3b28e`, `15a6061`, `73c154d`, `ac6debc`, `c12606d`
+- Implementation commits: `e21c654`, `4e8ee1f`, `c47edf9`, `c618254`, `10e07d5`, `ed6f001`, `acc8e62`, `040fb4e`, `1a3b28e`, `15a6061`, `73c154d`, `ac6debc`, `c12606d`, `a7cbd89`
 - Documentation commit: recorded by the commit containing this file
 
 ## Implemented
@@ -39,7 +39,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 - Windows OCR recognized the golden `DCX`/`42` content and returned normalized geometry.
 - Semantic repair, HTML export, real OPC DOCX export and DOCX viewer round-trip passed.
 - Native UIA script result: `P07 content viewer UIA validation=PASS`.
-- Latest passing evidence directory: `artifacts/test-results/p07-89be968c381b4a58a7f76032427dd12e/` (generated from committed source `c12606d` and intentionally not committed). The disposable profile explicitly registered the real installed FFmpeg candidate, proved the local blue-frame result through that exact binding and the native hardware-policy-selected 4B vision identity, and did not retain approval. It clears all disposable Ollama, Whisper and FFmpeg state and protected anchors after the app closes. Composed P06 evidence at `artifacts/test-results/p06-2fc55e183ed843f0b8d291493e937b52/` contains the default-off policy-digest/route review, approval/receipt-bound deny-all policy, inert item/set transfer contracts, native hardware/resource selection, exact transfer preflight, protected approval-state warnings, WAV/MP3 transcription, deterministic audio extraction and FFmpeg-registration/clear-denial evidence. The full native suite passes 492/492.
+- Latest passing evidence directory: `artifacts/test-results/p07-9cd060d9fc2a477bb5e79e0302460a3c/` (generated from committed source `a7cbd89` and intentionally not committed). The disposable profile explicitly registered the real installed FFmpeg candidate, proved the local blue-frame result through that exact binding and the native hardware-policy-selected 4B vision identity, and did not retain approval. It clears all disposable Ollama, Whisper and FFmpeg state and protected anchors after the app closes. Composed P06 evidence at `artifacts/test-results/p06-2024d2c9c39e4a82a4bb9556442321b3/` contains the default-off policy-digest/route review, approval/receipt-bound deny-all policy, total admitted-transfer rollback contracts, inert item/set transfer contracts, native hardware/resource selection, exact transfer preflight, protected approval-state warnings, WAV/MP3 transcription, deterministic audio extraction and FFmpeg-registration/clear-denial evidence. The full native suite passes 494/494.
 - One earlier committed-source run transiently failed to observe the current vision-model UIA name after the persisted-save status. No orphan DCx process remained; the immediate rerun and a later independent rerun both passed. The passing runs are the accepted gate evidence, while the isolated timing observation remains documented rather than being represented as a zero-flake claim.
 
 ## Security, accessibility and limitations
