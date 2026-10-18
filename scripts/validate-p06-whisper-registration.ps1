@@ -25,6 +25,7 @@ $model = Join-Path $runRoot "fixture-model.bin"
 $runtimeLicense = Join-Path $runRoot "runtime-license.txt"
 $modelLicense = Join-Path $runRoot "model-license.md"
 $ffmpegLicense = Join-Path $runRoot "ffmpeg-license.txt"
+$invalidDependencyArchive = Join-Path $runRoot "invalid-runtime.zip"
 $audio = Join-Path $runRoot "fixture.wav"
 $timeoutAudio = Join-Path $runRoot "timeout.wav"
 $mp3Audio = Join-Path $runRoot "fixture.mp3"
@@ -83,6 +84,7 @@ New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 [IO.File]::WriteAllText($runtimeLicense, "Fixture runtime license.`r`nComplete second line.")
 [IO.File]::WriteAllText($modelLicense, "Fixture model license.`nComplete second line.")
 [IO.File]::WriteAllText($ffmpegLicense, "Fixture FFmpeg license.`nComplete second line.")
+[IO.File]::WriteAllBytes($invalidDependencyArchive, [byte[]]@(0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4))
 [IO.File]::WriteAllBytes($audio, [byte[]]@(
     [byte][char]'R', [byte][char]'I', [byte][char]'F', [byte][char]'F', 4, 0, 0, 0,
     [byte][char]'W', [byte][char]'A', [byte][char]'V', [byte][char]'E'))
@@ -144,6 +146,7 @@ $modelDigest = (Get-FileHash -LiteralPath $model -Algorithm SHA256).Hash.ToLower
 $runtimeLicenseDigest = (Get-FileHash -LiteralPath $runtimeLicense -Algorithm SHA256).Hash.ToLowerInvariant()
 $modelLicenseDigest = (Get-FileHash -LiteralPath $modelLicense -Algorithm SHA256).Hash.ToLowerInvariant()
 $ffmpegLicenseDigest = (Get-FileHash -LiteralPath $ffmpegLicense -Algorithm SHA256).Hash.ToLowerInvariant()
+$invalidDependencyDigest = (Get-FileHash -LiteralPath $invalidDependencyArchive -Algorithm SHA256).Hash.ToLowerInvariant()
 $benchmarkManifestDigest = (Get-FileHash -LiteralPath $benchmarkManifest -Algorithm SHA256).Hash.ToLowerInvariant()
 
 $env:DCX_DATA_ROOT = $dataRoot
@@ -184,6 +187,82 @@ try {
     $currentFfmpeg = Find-ById $localModelsWindow "CurrentFfmpegBackend"
     if ($null -eq $currentFfmpeg -or $currentFfmpeg.Current.Name -ne "Media processor: none selected.") {
         throw "The initial empty FFmpeg registration was not exposed accessibly."
+    }
+
+    $dependencyCatalog = Wait-For {
+        $candidate = Find-ById $localModelsWindow "DependencyCatalogSummary"
+        if ($null -ne $candidate -and
+            $candidate.Current.Name -like "Catalog dcx-p06-dependencies-2026-10-18.*" -and
+            $candidate.Current.Name -like "*SHA-256 1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325*" -and
+            $candidate.Current.Name -like "*4 immutable candidates*" -and
+            $candidate.Current.Name -like "*download, install, pull, extraction, execution, approval, and selection actions are absent*") {
+            $candidate
+        }
+    } "The immutable dependency catalog identity and no-authority notice were not exposed."
+    $dependencyList = Find-ById $localModelsWindow "DependencyCandidatesList"
+    if ($null -eq $dependencyList -or -not $dependencyList.Current.IsKeyboardFocusable) {
+        throw "The audited dependency candidate list is not keyboard focusable."
+    }
+    $dependencyItems = $dependencyList.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::ListItem))
+    $runtimeCandidate = @($dependencyItems | Where-Object {
+        $_.Current.Name -like "whisper.cpp b5454 Windows CUDA 11.8 x64 runtime.*"
+    }) | Select-Object -First 1
+    if ($null -eq $runtimeCandidate) {
+        $observedDependencyItems = @($dependencyItems | ForEach-Object { $_.Current.Name }) -join " | "
+        throw "The pinned Whisper runtime candidate was not exposed. Observed: $observedDependencyItems"
+    }
+    $runtimeCandidate.GetCurrentPattern(
+        [System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    $dependencyDetails = Wait-For {
+        $candidate = Find-ById $localModelsWindow "DependencyCandidateDetails"
+        if ($null -eq $candidate) { return $null }
+        $value = $candidate.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+        if ($value -like "*Candidate whisper-cuda-runtime-b5454*" -and
+            $value -like "*github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-win-cuda-11.8.0-x64.zip*" -and
+            $value -like "*Expected bytes: 284,761,231*" -and
+            $value -like "*SHA-256: e81c86c542be6e3d7b7245392d4e1c52ab6e5c61dbe38721754bc0ab59d4d027*" -and
+            $value -like "*Archive-contained licenses and notices require separate review after staging*" -and
+            $value -like "*grants no network, download, extraction, install, pull, execution, legal, approval, or selection authority*") {
+            $candidate
+        }
+    } "The pinned dependency source, size, digest, license limit, and no-authority notice were not exposed."
+    Set-Value $localModelsWindow "DependencyArtifactPath" $invalidDependencyArchive
+    $dependencyActionIds = @("BrowseDependencyArtifactButton", "ReviewDependencyArtifactButton")
+    $dependencyAccessKeys = @()
+    foreach ($automationId in $dependencyActionIds) {
+        $action = Find-ById $localModelsWindow $automationId
+        if ($null -eq $action -or -not $action.Current.IsKeyboardFocusable -or
+            [string]::IsNullOrWhiteSpace($action.Current.AccessKey)) {
+            throw "The $automationId action lacks a keyboard-focusable access key."
+        }
+        $dependencyAccessKeys += $action.Current.AccessKey
+    }
+    if (@($dependencyAccessKeys | Sort-Object -Unique).Count -ne $dependencyAccessKeys.Count) {
+        throw "Dependency-review actions expose duplicate access keys."
+    }
+    Invoke-ById $localModelsWindow "ReviewDependencyArtifactButton" | Out-Null
+    $null = Wait-For {
+        $candidate = Find-ById $localModelsWindow "DependencyArtifactResult"
+        if ($null -ne $candidate -and $candidate.Current.Name -like "Verification failed closed.*") { $candidate }
+    } "A wrong-size staged dependency artifact did not fail closed."
+    if ((Get-FileHash -LiteralPath $invalidDependencyArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne
+        $invalidDependencyDigest) {
+        throw "Rejected staged dependency content was changed."
+    }
+    $allButtons = $localModelsWindow.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button))
+    $forbiddenDependencyActions = @($allButtons | Where-Object {
+        $_.Current.Name -match "(?i)\b(download|install|pull|extract|execute)\b"
+    })
+    if ($forbiddenDependencyActions.Count -ne 0) {
+        throw "The local-model window exposed a dependency download/install/pull/extract/execute action."
     }
 
     Set-Value $localModelsWindow "WhisperExecutablePath" $fakeWhisper
@@ -618,6 +697,12 @@ try {
         complete_runtime_license_exposed = $true
         complete_model_license_exposed = $true
         exact_file_digests_exposed = $true
+        dependency_catalog_native_uia = "pass"
+        dependency_catalog_sha256 = "1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325"
+        dependency_candidate_count = 4
+        dependency_staged_mismatch_denied = $true
+        dependency_rejected_source_preserved = $true
+        dependency_external_actions_exposed = $false
         keyboard_focusable_unique_access_keys = $true
         benchmark_native_uia = "pass"
         benchmark_approval_default_unchecked = $true
@@ -659,6 +744,7 @@ try {
     "Whisper save without approval denied=PASS"
     "Complete runtime/model licenses UIA=PASS"
     "Exact four-file digest review UIA=PASS"
+    "Immutable dependency catalog and staged-mismatch denial UIA=PASS"
     "UI-approved production adapter transcript=$($transcription.Text)"
     "Approval-bound aggregate benchmark review and execution UIA=PASS"
     "Benchmark cancellation and evidence preservation UIA=PASS"

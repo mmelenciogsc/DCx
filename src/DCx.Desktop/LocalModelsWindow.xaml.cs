@@ -17,11 +17,14 @@ public partial class LocalModelsWindow : Window
     private readonly WhisperBackendReviewer whisperReviewer = new();
     private readonly FfmpegBackendSelectionStore ffmpegStore;
     private readonly FfmpegBackendReviewer ffmpegReviewer = new();
+    private readonly LocalModelDependencyCatalogLoader dependencyCatalogLoader = new();
+    private readonly LocalModelDependencyArtifactReviewer dependencyArtifactReviewer = new();
     private readonly CancellationTokenSource lifetime = new();
     private CandidateRow? reviewedCandidate;
     private string? reviewedLicenseSha256;
     private WhisperBackendReview? reviewedWhisperBackend;
     private FfmpegBackendReview? reviewedFfmpegBackend;
+    private DependencyCandidateRow? selectedDependencyCandidate;
 
     public LocalModelsWindow(
         LocalModelSelectionStore store,
@@ -32,7 +35,11 @@ public partial class LocalModelsWindow : Window
         this.whisperStore = whisperStore ?? throw new ArgumentNullException(nameof(whisperStore));
         this.ffmpegStore = ffmpegStore ?? throw new ArgumentNullException(nameof(ffmpegStore));
         InitializeComponent();
-        Loaded += async (_, _) => await RefreshAsync();
+        Loaded += async (_, _) =>
+        {
+            await LoadDependencyCatalogAsync();
+            await RefreshAsync();
+        };
         Closed += (_, _) => lifetime.Cancel();
     }
 
@@ -45,6 +52,122 @@ public partial class LocalModelsWindow : Window
             Owner = this,
         };
         window.Show();
+    }
+
+    private async Task LoadDependencyCatalogAsync()
+    {
+        SetDependencyControlsEnabled(false);
+        SetDependencyCatalogSummary("Loading and authenticating the built-in dependency catalog.");
+        try
+        {
+            var catalog = await dependencyCatalogLoader.LoadEmbeddedAsync(lifetime.Token);
+            var rows = catalog.Candidates
+                .OrderBy(candidate => candidate.Id, StringComparer.Ordinal)
+                .Select(candidate => new DependencyCandidateRow(candidate))
+                .ToArray();
+            DependencyCandidatesList.ItemsSource = rows;
+            SetDependencyCatalogSummary(
+                $"Catalog {catalog.CatalogId}. SHA-256 {catalog.CatalogSha256}. " +
+                $"{rows.Length} immutable candidates. Review only; network, download, install, pull, extraction, execution, approval, and selection actions are absent.");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            DependencyCandidatesList.ItemsSource = null;
+            SetDependencyCatalogSummary(
+                "The built-in dependency catalog failed authentication and no candidate is available. No external action occurred.");
+        }
+        finally
+        {
+            SetDependencyControlsEnabled(true);
+        }
+    }
+
+    private void OnDependencyCandidateSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        selectedDependencyCandidate = DependencyCandidatesList.SelectedItem as DependencyCandidateRow;
+        DependencyArtifactPath.Clear();
+        SetDependencyArtifactResult("No staged artifact has been verified.");
+        if (selectedDependencyCandidate is null)
+        {
+            SetDependencyCandidateDetails("Select a candidate to review its immutable identity.");
+            SetDependencyControlsEnabled(true);
+            return;
+        }
+
+        SetDependencyCandidateDetails(FormatDependencyCandidate(selectedDependencyCandidate.Candidate));
+        SetDependencyControlsEnabled(true);
+    }
+
+    private void OnDependencyArtifactPathChanged(object sender, TextChangedEventArgs e)
+    {
+        SetDependencyArtifactResult("No staged artifact has been verified.");
+        if (ReviewDependencyArtifactButton is not null)
+        {
+            ReviewDependencyArtifactButton.IsEnabled =
+                selectedDependencyCandidate is not null &&
+                !string.IsNullOrWhiteSpace(DependencyArtifactPath.Text);
+        }
+    }
+
+    private void OnBrowseDependencyArtifactClick(object sender, RoutedEventArgs e)
+    {
+        if (selectedDependencyCandidate is null)
+        {
+            SetStatus("Select an audited dependency candidate before choosing an already-staged local artifact.");
+            DependencyCandidatesList.Focus();
+            return;
+        }
+
+        var filter = selectedDependencyCandidate.Candidate.Kind switch
+        {
+            LocalModelDependencyKind.WhisperRuntimeArchive => "ZIP archives (*.zip)|*.zip",
+            LocalModelDependencyKind.WhisperModel => "Whisper models (*.bin)|*.bin",
+            LocalModelDependencyKind.OllamaManifest => "JSON manifests (*.json)|*.json",
+            _ => "All files (*.*)|*.*",
+        };
+        BrowseInto(
+            DependencyArtifactPath,
+            filter,
+            $"Select an already-staged artifact for {selectedDependencyCandidate.Candidate.DisplayName}");
+    }
+
+    private async void OnReviewDependencyArtifactClick(object sender, RoutedEventArgs e)
+    {
+        if (selectedDependencyCandidate is null || string.IsNullOrWhiteSpace(DependencyArtifactPath.Text))
+        {
+            SetStatus("Select an audited candidate and one already-staged local artifact before verification.");
+            return;
+        }
+
+        var candidate = selectedDependencyCandidate.Candidate;
+        var path = DependencyArtifactPath.Text;
+        SetDependencyControlsEnabled(false);
+        SetDependencyArtifactResult("Verifying the staged artifact under a read-only lease.");
+        SetStatus("Verifying exact staged-artifact type, length, SHA-256, and managed metadata. Nothing is downloaded, extracted, installed, pulled, or executed.");
+        try
+        {
+            var review = await dependencyArtifactReviewer.ReviewAsync(candidate, path, lifetime.Token);
+            SetDependencyArtifactResult(
+                $"Verified {review.CandidateId}. {review.Bytes:N0} bytes. SHA-256 {review.Sha256}. " +
+                $"Reviewed {review.ReviewedUtc:u}. No installation, extraction, model pull, execution, approval, or selection occurred.");
+            SetStatus("The already-staged dependency artifact matches the immutable catalog identity. This integrity result is not installation, execution, legal, or production approval.");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            SetDependencyArtifactResult(
+                "Verification failed closed. The file did not match the selected immutable identity or its path could not be reviewed safely. No external action or model-state change occurred.");
+            SetStatus("The staged dependency artifact was rejected. Nothing was downloaded, extracted, installed, pulled, executed, approved, or selected.");
+        }
+        finally
+        {
+            SetDependencyControlsEnabled(true);
+        }
     }
 
     private async void OnModelSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -524,6 +647,16 @@ public partial class LocalModelsWindow : Window
         ClearFfmpegBackendButton.IsEnabled = enabled;
     }
 
+    private void SetDependencyControlsEnabled(bool enabled)
+    {
+        DependencyCandidatesList.IsEnabled = enabled;
+        DependencyArtifactPath.IsEnabled = enabled && selectedDependencyCandidate is not null;
+        BrowseDependencyArtifactButton.IsEnabled = enabled && selectedDependencyCandidate is not null;
+        ReviewDependencyArtifactButton.IsEnabled =
+            enabled && selectedDependencyCandidate is not null &&
+            !string.IsNullOrWhiteSpace(DependencyArtifactPath.Text);
+    }
+
     private void BrowseInto(TextBox target, string filter, string title)
     {
         var dialog = new OpenFileDialog
@@ -623,6 +756,45 @@ public partial class LocalModelsWindow : Window
 
     private void SetLicense(string value) => ModelLicenseText.Text = value;
 
+    private void SetDependencyCatalogSummary(string value)
+    {
+        DependencyCatalogSummary.Text = value;
+        AutomationProperties.SetName(DependencyCatalogSummary, value);
+    }
+
+    private void SetDependencyCandidateDetails(string value)
+    {
+        DependencyCandidateDetails.Text = value;
+        AutomationProperties.SetName(DependencyCandidateDetails, value);
+    }
+
+    private void SetDependencyArtifactResult(string value)
+    {
+        DependencyArtifactResult.Text = value;
+        AutomationProperties.SetName(DependencyArtifactResult, value);
+    }
+
+    private static string FormatDependencyCandidate(PinnedLocalModelDependencyCandidate candidate)
+    {
+        var containedReview = candidate.License.RequiresContainedReview
+            ? "Archive-contained licenses and notices require separate review after staging."
+            : "No archive-contained license review is declared for this candidate.";
+        var layers = candidate.ManagedLayers.Count == 0
+            ? "Managed layers: none."
+            : "Managed layers:\n" + string.Join(
+                "\n",
+                candidate.ManagedLayers.Select(layer =>
+                    $"{layer.MediaType}; {layer.ExpectedBytes:N0} bytes; SHA-256 {layer.Sha256}."));
+        return
+            $"Candidate {candidate.Id}. {candidate.DisplayName}. Kind {candidate.Kind}.\n" +
+            $"Source: {candidate.SourceUri}.\n" +
+            $"Expected bytes: {candidate.ExpectedBytes:N0}. SHA-256: {candidate.Sha256}.\n" +
+            $"License: {candidate.License.Identifier}. Source: {candidate.License.SourceUri}. " +
+            $"Expected bytes: {candidate.License.ExpectedBytes:N0}. SHA-256: {candidate.License.Sha256}.\n" +
+            $"{containedReview}\n{layers}\n" +
+            "This read-only inventory grants no network, download, extraction, install, pull, execution, legal, approval, or selection authority.";
+    }
+
     private static string Sha256(string value) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
@@ -637,5 +809,15 @@ public partial class LocalModelsWindow : Window
             $"Capabilities: {(Descriptor.SupportsVision ? "vision " : string.Empty)}" +
             $"{(Descriptor.SupportsEmbeddings ? "embedding " : string.Empty)}" +
             $"{(EligibleVision || EligibleEmbedding ? "Eligible." : "Not eligible.")}";
+
+        public override string ToString() => Display;
+    }
+
+    private sealed record DependencyCandidateRow(PinnedLocalModelDependencyCandidate Candidate)
+    {
+        public string Display =>
+            $"{Candidate.DisplayName}. {Candidate.ExpectedBytes:N0} bytes. SHA-256 {Candidate.Sha256}.";
+
+        public override string ToString() => Display;
     }
 }

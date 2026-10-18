@@ -96,6 +96,12 @@ try {
         $whisperRegistrationEvidence.benchmark_cancellation_preserved_evidence -ne $true -or
         $whisperRegistrationEvidence.benchmark_missing_backend_unavailable -ne $true -or
         $whisperRegistrationEvidence.embedding_benchmark_missing_model_unavailable -ne $true -or
+        $whisperRegistrationEvidence.dependency_catalog_native_uia -ne "pass" -or
+        $whisperRegistrationEvidence.dependency_catalog_sha256 -ne "1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325" -or
+        $whisperRegistrationEvidence.dependency_candidate_count -ne 4 -or
+        $whisperRegistrationEvidence.dependency_staged_mismatch_denied -ne $true -or
+        $whisperRegistrationEvidence.dependency_rejected_source_preserved -ne $true -or
+        $whisperRegistrationEvidence.dependency_external_actions_exposed -ne $false -or
         $whisperRegistrationEvidence.accessible_viewer_cancellation -ne $true -or
         $whisperRegistrationEvidence.canceled_partial_transcript_retained -ne $false -or
         $whisperRegistrationEvidence.cleared_backend_consumer_denied -ne $true -or

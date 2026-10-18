@@ -72,6 +72,80 @@
                         AutomationProperties.HelpText="Reviews bounded local fixtures and exact quality thresholds. It never installs a model or changes a production selection."
                         Click="OnOpenBenchmarkReviewClick" />
 
+                <GroupBox Margin="0,20,0,0" Header="Audited dependency candidates — no download">
+                    <StackPanel Margin="12,8">
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="Review the immutable runtime and model candidates audited for P06. This inventory is informational. DCx does not download, install, pull, extract, execute, approve, or select anything here." />
+                        <TextBlock x:Name="DependencyCatalogSummary"
+                                   Margin="0,10,0,0"
+                                   Text="Loading the built-in dependency catalog."
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="DependencyCatalogSummary"
+                                   AutomationProperties.Name="Loading the built-in dependency catalog." />
+                        <ListBox x:Name="DependencyCandidatesList"
+                                 MinHeight="120"
+                                 Margin="0,10,0,0"
+                                 DisplayMemberPath="Display"
+                                 AutomationProperties.AutomationId="DependencyCandidatesList"
+                                 AutomationProperties.Name="Audited dependency candidates"
+                                 AutomationProperties.HelpText="Select a candidate to review its exact source, size, digest, license evidence, and managed layers."
+                                 SelectionChanged="OnDependencyCandidateSelectionChanged" />
+                        <TextBox x:Name="DependencyCandidateDetails"
+                                 MinHeight="120"
+                                 MaxHeight="220"
+                                 Margin="0,10,0,0"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="Select a candidate to review its immutable identity."
+                                 AutomationProperties.AutomationId="DependencyCandidateDetails"
+                                 AutomationProperties.Name="Audited dependency candidate details"
+                                 AutomationProperties.HelpText="Read-only exact source, byte count, SHA-256, license evidence, and managed-layer identity." />
+                        <Label Margin="0,10,0,0"
+                               Padding="0,0,0,4"
+                               Target="{Binding ElementName=DependencyArtifactPath}"
+                               Content="Optional already-staged artifact _path" />
+                        <DockPanel LastChildFill="True">
+                            <Button x:Name="BrowseDependencyArtifactButton"
+                                    DockPanel.Dock="Right"
+                                    MinWidth="150"
+                                    MinHeight="34"
+                                    Margin="8,0,0,0"
+                                    Content="_9 Browse staged artifact..."
+                                    AutomationProperties.AutomationId="BrowseDependencyArtifactButton"
+                                    AutomationProperties.Name="Browse for an already-staged dependency artifact"
+                                    AutomationProperties.HelpText="Chooses one existing local file. It never downloads, extracts, installs, pulls, or executes it."
+                                    Click="OnBrowseDependencyArtifactClick" />
+                            <TextBox x:Name="DependencyArtifactPath"
+                                     MinHeight="34"
+                                     Padding="6"
+                                     AutomationProperties.AutomationId="DependencyArtifactPath"
+                                     AutomationProperties.Name="Already-staged dependency artifact path"
+                                     TextChanged="OnDependencyArtifactPathChanged" />
+                        </DockPanel>
+                        <Button x:Name="ReviewDependencyArtifactButton"
+                                Width="250"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="_0 Verify staged artifact"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="ReviewDependencyArtifactButton"
+                                AutomationProperties.Name="Verify the already-staged dependency artifact"
+                                AutomationProperties.HelpText="Takes a read-only lease and verifies exact type, bytes, digest, and managed-layer metadata. It never extracts, installs, pulls, or executes the file."
+                                Click="OnReviewDependencyArtifactClick" />
+                        <TextBlock x:Name="DependencyArtifactResult"
+                                   Margin="0,10,0,0"
+                                   Text="No staged artifact has been verified."
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="DependencyArtifactResult"
+                                   AutomationProperties.Name="No staged artifact has been verified."
+                                   AutomationProperties.LiveSetting="Assertive" />
+                    </StackPanel>
+                </GroupBox>
+
                 <Button x:Name="RefreshButton"
                         Width="180"
                         MinHeight="36"
