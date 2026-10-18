@@ -22,6 +22,9 @@ Updated/checkpointed: 2026-10-17. The Codex agent must open the URLs, capture da
 - https://learn.microsoft.com/en-us/windows/dev-environment/wsl-interop — Windows/WSL subprocess and filesystem interoperability.
 - https://learn.microsoft.com/en-us/windows/wsl/interop — prefer native Windows filesystem for Windows builds; WSL filesystem for Linux builds.
 - https://learn.microsoft.com/en-us/windows/msix/ — MSIX deployment/signing.
+- https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-createdxgifactory1 — create a DXGI 1.x factory without search-path DLL discovery.
+- https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_4/nf-dxgi1_4-idxgiadapter3-queryvideomemoryinfo — query the current per-adapter process memory budget and usage.
+- https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_4/ns-dxgi1_4-dxgi_query_video_memory_info — exact budget/current-usage structure returned by DXGI.
 - https://www.w3.org/TR/wai-aria-1.2/ — WAI-ARIA semantics.
 - https://www.w3.org/WAI/WCAG22/quickref/ — WCAG 2.2 quick reference.
 

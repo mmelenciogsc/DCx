@@ -1,6 +1,6 @@
 # ADR 0062: Profile local-model resources through bounded native Windows evidence
 
-- Status: Accepted for product inventory and selection prefilter; benchmark acceptance remains required
+- Status: Accepted for base inventory; static selection superseded by ADR 0086 and DXGI inventory extended by ADR 0088
 - Date: 2026-10-18
 
 ## Context
@@ -13,7 +13,7 @@ Add a native Windows hardware source inside DCx.Core. It reads physical/availabl
 
 The profiler validates bounded text and plausible capacities, rejects available values above totals, requires graphics-memory values to name their exact registry source, removes exact duplicate adapter records and orders adapters deterministically. The UI deliberately labels these values `registry-reported graphics memory`; it does not misrepresent integrated aperture/shared values as dedicated VRAM. Stable PCI/device identifiers and registry paths are not returned or displayed.
 
-The local-model resource selector consumes the largest reported graphics-memory value for its existing 70% vision limit and physical RAM for its 25% embedding limit. The desktop marks only those deterministic selected identities eligible. It recaptures the hardware profile, rereads the Ollama inventory and recomputes the exact model choice immediately before persisting approval. Missing or malformed hardware evidence leaves every model ineligible.
+The original decision used the largest reported graphics-memory value for the 70% vision prefilter and physical RAM for its 25% embedding limit. ADR 0086 supersedes that static rule with current NVIDIA free-memory and current available-system-memory admission. ADR 0088 adds bounded DXGI process-budget inventory but explicitly keeps DXGI-only observations ineligible until their compute backend is separately validated. The desktop rereads the profile and inventory before approval, and production execution recaptures eligible resources under the inference lease.
 
 ## Consequences
 

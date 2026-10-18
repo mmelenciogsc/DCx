@@ -1,6 +1,6 @@
 # ADR 0086: Admit local models from live resources and verify unload
 
-- Status: Accepted for NVIDIA-backed local inference; other GPU telemetry and external-client isolation remain blocked
+- Status: Accepted for NVIDIA-backed local inference; DXGI inventory is added by ADR 0088 while other compute admission and external-client isolation remain blocked
 - Date: 2026-10-19
 
 ## Context
@@ -18,7 +18,7 @@ Ordinary vision and embedding calls explicitly unload the exact model, then requ
 ## Consequences
 
 - Selection and execution are bounded by currently reported usable memory rather than installed capacity alone.
-- NVIDIA telemetry comes from the already-installed driver and is not bundled with DCx. Intel and AMD graphics remain in the privacy-bounded inventory but cannot support GPU admission until an equally trusted live-availability adapter exists.
+- NVIDIA telemetry comes from the already-installed driver and is not bundled with DCx. ADR 0088 adds System32 DXGI process-budget inventory for other adapters, but marks DXGI-only observations ineligible. Intel/AMD GPU admission still requires a separately validated compute backend and real execution/resource/unload evidence.
 - Live free memory is a point observation, not a reservation. Another process can consume memory after capture, and an unrelated Ollama client can ignore DCx's cooperative lease. Real acceptance still needs a controlled quiet period or stronger runtime isolation and measured peak use.
 - Normal inference cannot report success while exact-model unload remains unconfirmed. This favors resource cleanup and deterministic attribution over returning a response after cleanup failure.
 - Evidence may retain adapter name, driver, total/free byte counts and the nonidentifying source label. It retains no prompt, media, PCI address, serial number or NVML device handle.

@@ -14,7 +14,7 @@ Authoritative inputs: `DCx_Codex_Handoff_Kit/README.md`, `DCX_PRODUCT_ARCHITECTU
 | P03 | Restricted PowerShell/process/UIA broker and keyboard-operable native-app handoff | [PHASE-03.md](PHASE-03.md) | Automated native gate achieved; elevation/install authority remains absent by design. |
 | P04 | Per-user Codex app-server, API-key path, cancellation/reconnect, eligible ChatGPT sign-in only | [PHASE-04.md](PHASE-04.md) | Offline/native mock gate achieved, including notification- and response-bound exact-turn cancellation after three recorded race findings. Real provider invocation and commercial ChatGPT sign-in eligibility remain blocked. |
 | P05 | BOSS task graph, eight roles, deterministic-first routing, budgets, checkpoints and measured benchmark | [PHASE-05.md](PHASE-05.md) | Deterministic benchmark gate achieved; fixture metrics make no production cost-savings claim. |
-| P06 | Hardware-selected Ollama/Whisper/embedding stack with approved payloads, licenses and real quality/resource benchmarks | [PHASE-06.md](PHASE-06.md) | Partial. Live NVIDIA/available-RAM admission, exact review/staging boundaries, cross-process sequencing, verified ordinary inference unload and the real installed vision benchmark pass. Non-NVIDIA live GPU telemetry, external-client isolation, owner-approved transfer and Whisper/embedding installation and acceptance remain blocked. |
+| P06 | Hardware-selected Ollama/Whisper/embedding stack with approved payloads, licenses and real quality/resource benchmarks | [PHASE-06.md](PHASE-06.md) | Partial. Live NVIDIA/available-RAM admission, bounded cross-vendor DXGI inventory, exact review/staging boundaries, cross-process sequencing, verified ordinary inference unload and the real installed vision benchmark pass. DXGI-only compute admission, external-client isolation, owner-approved transfer and Whisper/embedding installation and acceptance remain blocked. |
 | P07 | Files/documents/media viewers, scanned-PDF wizard/export, visual Q&A and accessibility evidence | [PHASE-07.md](PHASE-07.md) | Automated native gate achieved. Human AT, real speech accuracy and live/authenticated/protected YouTube acceptance remain unverified. |
 | P08 | Private isolated CKB/CCB, vector/metadata/artifact stores, provenance and hostile artifact denial | [PHASE-08.md](PHASE-08.md) | Automated local/native gate achieved. |
 | P09 | Authoritative global service plus signed incremental two-client synchronization and local replica separation | [PHASE-09.md](PHASE-09.md) | Partial. Signed loopback service/client and hostile storage gates pass. Approved Docker/Compose deployment, production key custody and stronger same-user isolation remain blocked. |
@@ -34,12 +34,12 @@ Authoritative inputs: `DCx_Codex_Handoff_Kit/README.md`, `DCX_PRODUCT_ARCHITECTU
 
 ## Current exact-source checkpoint
 
-- Product implementation: `9745e33`; current evidence-retention/validation source: `7f6e707`.
-- Full Windows suite: 562 passed, 0 failed, 0 skipped; zero build warnings/errors.
-- P06: `artifacts/test-results/p06-2929e1512eb74c9090579f5975e9cdf3/`; 206/206, six hardware contracts, five mandatory sequencing contracts, three runtime-resource/unload contracts, real installed-GPU vision and verified unload, with no dependency transfer/install.
+- Product implementation through `3435450`; current validation source: `0e31254`.
+- Full Windows suite: 564 passed, 0 failed, 0 skipped; zero build warnings/errors.
+- P06: `artifacts/test-results/p06-c3693b75faf343c59e4c2b0aabac6482/`; 208/208, eight hardware contracts, five mandatory sequencing contracts, three runtime-resource/unload contracts, one inventory-only Intel DXGI budget, real installed-GPU vision and verified unload, with no dependency transfer/install.
 - P11: `artifacts/test-results/p11-0d4a701ca5614522af687bd42a8064a5/`; 122/122 plus generated and authenticated-ledger native UIA.
 - P12: `artifacts/test-results/p12-1ac53524cc9644e294d7d660736b2025/`; nine composed fixtures and zero production actions. Focused Facebook/XLSX evidence: `p12-integrations-294bb5ae0fee4aafa9e23af092de14fb/`; 17/17 selected tests, including 15 Facebook policy cases, plus native UIA.
-- P13: `artifacts/test-results/p13-127f9d78c5a5497db550645ebbac38ce/`; 23/23 reliability, 21/21 trust, Defender clean, NuGet advisories 0 and unsigned trust denied.
-- P14: `artifacts/test-results/p14-b82cf85071ef4d4ba449b44e2f20a91a/`; 11/11 plus retained native local consent enable/withdrawal/focus/access-key UIA evidence, zero event sources/transfers, seven blockers, `NO_GO`, activation false.
+- P13: `artifacts/test-results/p13-d986634e0f2a43e2a370a0dd295a4887/`; 23/23 reliability, 21/21 trust, Defender clean, NuGet advisories 0 and unsigned trust denied.
+- P14: `artifacts/test-results/p14-cd072d437c1840f28733f4dc951f33bd/`; 11/11 plus retained native local consent enable/withdrawal/focus/access-key UIA evidence, zero event sources/transfers, seven blockers, `NO_GO`, activation false.
 
 Evidence directories are ignored build artifacts and are intentionally not committed. The phase records are the durable reproduction index.

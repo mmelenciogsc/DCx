@@ -1,7 +1,7 @@
 # P10 — Contributions, governance and provenance
 
 - Status: BLOCKED (authenticated local-simulation preparation/intake/review and server-side CCB hostile-code policy pass; production publication remains unavailable)
-- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`, `f417f6e`, `0fc2649`, `bbadbca`, `e13246b`, `bdfd922`, `e93cd0d`, `068638c`, `e02d570`; read-only environment audit `8b94159`
+- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`, `f417f6e`, `0fc2649`, `bbadbca`, `e13246b`, `bdfd922`, `e93cd0d`, `068638c`, `e02d570`; read-only environment audit `8b94159`; disabled-worker validation stabilization `0e31254`
 - Documentation commit: recorded by the commit containing this file
 
 No contribution was sent externally or published to a production catalog.
@@ -67,7 +67,8 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 - Locked native Release build: 0 warnings, 0 errors; 2.32 seconds in the recorded dedicated run.
 - P10 exact-namespace tests: passed 53, failed 0, skipped 0; about 7 seconds, with exact counters parsed from retained TRX.
-- Current full suite: passed 505, failed 0, skipped 0; about 8 seconds.
+- Current full suite at `0e31254`: passed 564, failed 0, skipped 0; zero build warnings/errors.
+- One preceding full-suite run timed out after 30 seconds while launching the disabled-worker child fixture, despite the product gate being before service construction. The fixture now explicitly sets `DCX_GLOBAL_CONTRIBUTION_API=0` instead of depending on an inherited absence, retains `DCX_GLOBAL_CONTRIBUTION_WORKER=1`, and allows a bounded 60-second Windows startup window. Ten consecutive focused repetitions and the final full suite passed. The timeout is not represented as acceptance.
 - Eligible CKB item: quarantined, absent from catalog before review, approved into a signed release, synchronized by a client, then withdrawn/deprecated.
 - Secret/PII/dummy item: remained quarantined and reviewer publication failed closed.
 - Receipt: one qualified event; replay, contributor self-use and invalid integrity excluded.
@@ -96,6 +97,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 ## Changed files in the latest milestone
 
+- Deterministic disabled-worker startup validation: `tests/DCx.Core.Tests/Contributions/ContributionApiE2eTests.cs` (`0e31254`).
 - Exact authoritative identity binding and bounded HMAC/schema verification: `src/DCx.Core/Contributions/UsageReceiptPolicy.cs`, `server/DCx.GlobalService/ContributionGovernanceService.cs`.
 - Cross-instance immediate transaction and hostile substitution/replay/cap tests: `tests/DCx.Core.Tests/Contributions/ContributionPolicyTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionGovernanceTests.cs`.
 - Mandatory validator assertions and decision: `scripts/validate-p10.ps1`, `docs/architecture/adr/0074-bind-and-atomically-admit-usage-receipts.md`.
