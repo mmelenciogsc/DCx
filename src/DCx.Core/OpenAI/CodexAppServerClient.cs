@@ -17,6 +17,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     private readonly CodexAppServerOptions _options;
     private readonly ConcurrentDictionary<long, PendingRequest> _pending = new();
     private readonly ConcurrentDictionary<string, TurnState> _turns = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, TurnCancellationIntent> _pendingTurnStarts = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly object _diagnosticLock = new();
     private readonly StringBuilder _diagnostics = new();
@@ -163,9 +164,9 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         var threadId = ReadNestedRequiredString(threadResponse, "result", "thread", "id");
 
         cancellationToken.ThrowIfCancellationRequested();
-        // Once turn/start is sent, its bounded response supplies the only turn identity that can
-        // be interrupted safely. Bind cancellation in the protocol-reader response observer,
-        // before later turn/completed notifications can overtake a delayed task continuation.
+        // The exact ephemeral thread is already known. Register its one pending turn before
+        // dispatch so an identity-bearing turn notification can bind cancellation even when the
+        // correlated response is delayed. The response must later report the same turn identity.
         var cancellationIntent = new TurnCancellationIntent();
         using var cancellationRegistration = cancellationToken.Register(cancellationIntent.Request);
         if (cancellationIntent.IsRequested)
@@ -173,28 +174,34 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
         }
 
-        TurnState? state = null;
-        string? turnId = null;
-        var turnResponse = await SendRequestAsync(
-            "turn/start",
-            new { threadId, input = new[] { new { type = "text", text = prompt } } },
-            CancellationToken.None,
-            response =>
-            {
-                turnId = ReadNestedRequiredString(response, "result", "turn", "id");
-                state = _turns.GetOrAdd(turnId, _ => new TurnState(threadId, turnId));
-                cancellationIntent.Bind(() => _ = InterruptForCancellationAsync(threadId, turnId, state));
-            });
-        turnId ??= ReadNestedRequiredString(turnResponse, "result", "turn", "id");
-        state ??= _turns.GetOrAdd(turnId, _ => new TurnState(threadId, turnId));
-
+        if (!_pendingTurnStarts.TryAdd(threadId, cancellationIntent))
+        {
+            throw new CodexProtocolException("Codex reused an active ephemeral thread identifier.");
+        }
         try
         {
+            TurnState? state = null;
+            string? turnId = null;
+            var turnResponse = await SendRequestAsync(
+                "turn/start",
+                new { threadId, input = new[] { new { type = "text", text = prompt } } },
+                CancellationToken.None,
+                response =>
+                {
+                    turnId = ReadNestedRequiredString(response, "result", "turn", "id");
+                    state = BindTurnIdentity(threadId, turnId);
+                });
+            turnId ??= ReadNestedRequiredString(turnResponse, "result", "turn", "id");
+            state ??= BindTurnIdentity(threadId, turnId);
             return await state.Completion.Task.WaitAsync(_lifetime?.Token ?? CancellationToken.None);
         }
         finally
         {
-            _turns.TryRemove(turnId, out _);
+            _pendingTurnStarts.TryRemove(threadId, out _);
+            if (cancellationIntent.BoundTurnId is { } boundTurnId)
+            {
+                _turns.TryRemove(boundTurnId, out _);
+            }
         }
     }
 
@@ -412,22 +419,51 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
         switch (methodElement.GetString())
         {
+            case "turn/started":
+                var startedTurn = parameters.GetProperty("turn");
+                var startedThreadId = ReadRequiredString(parameters, "threadId");
+                var startedTurnId = ReadRequiredString(startedTurn, "id");
+                _ = BindTurnIdentity(startedThreadId, startedTurnId);
+                break;
             case "item/agentMessage/delta":
                 var deltaTurnId = ReadRequiredString(parameters, "turnId");
+                var deltaThreadId = ReadRequiredString(parameters, "threadId");
                 var delta = ReadRequiredString(parameters, "delta");
-                _turns.GetOrAdd(deltaTurnId, id => new TurnState(ReadRequiredString(parameters, "threadId"), id))
-                    .Append(delta);
+                BindTurnIdentity(deltaThreadId, deltaTurnId).Append(delta);
                 break;
             case "turn/completed":
                 var turn = parameters.GetProperty("turn");
+                var completedThreadId = ReadRequiredString(parameters, "threadId");
                 var completedTurnId = ReadRequiredString(turn, "id");
                 var status = ReadRequiredString(turn, "status");
-                _turns.GetOrAdd(
-                        completedTurnId,
-                        id => new TurnState(ReadRequiredString(parameters, "threadId"), id))
-                    .Complete(status);
+                BindTurnIdentity(completedThreadId, completedTurnId).Complete(status);
                 break;
         }
+    }
+
+    private TurnState BindTurnIdentity(string threadId, string turnId)
+    {
+        _pendingTurnStarts.TryGetValue(threadId, out var cancellationIntent);
+        if (cancellationIntent?.BoundTurnId is { } boundTurnId &&
+            !string.Equals(boundTurnId, turnId, StringComparison.Ordinal))
+        {
+            throw new CodexProtocolException(
+                "Codex returned conflicting turn identities for one ephemeral thread.");
+        }
+
+        var state = _turns.GetOrAdd(turnId, id => new TurnState(threadId, id));
+        if (!string.Equals(state.ThreadId, threadId, StringComparison.Ordinal))
+        {
+            throw new CodexProtocolException("Codex reused a turn identifier across ephemeral threads.");
+        }
+
+        if (cancellationIntent is not null)
+        {
+            cancellationIntent.Bind(
+                turnId,
+                () => _ = InterruptForCancellationAsync(threadId, turnId, state));
+        }
+        return state;
     }
 
     private async Task ReadDiagnosticsAsync(StreamReader reader, CancellationToken cancellationToken)
@@ -567,6 +603,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         public TaskCompletionSource<CodexTurnResult> Completion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public string ThreadId => threadId;
+
         public void Append(string delta)
         {
             lock (_gate)
@@ -598,6 +636,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         private readonly object _gate = new();
         private bool _requested;
         private bool _invoked;
+        private string? _boundTurnId;
         private Action? _boundAction;
 
         public bool IsRequested
@@ -607,6 +646,17 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                 lock (_gate)
                 {
                     return _requested;
+                }
+            }
+        }
+
+        public string? BoundTurnId
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _boundTurnId;
                 }
             }
         }
@@ -623,17 +673,24 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             action?.Invoke();
         }
 
-        public void Bind(Action action)
+        public void Bind(string turnId, Action action)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(turnId);
             ArgumentNullException.ThrowIfNull(action);
             Action? invoke;
             lock (_gate)
             {
                 if (_boundAction is not null)
                 {
-                    throw new InvalidOperationException("The Codex turn cancellation intent was already bound.");
+                    if (!string.Equals(_boundTurnId, turnId, StringComparison.Ordinal))
+                    {
+                        throw new CodexProtocolException(
+                            "Codex returned conflicting turn identities for one ephemeral thread.");
+                    }
+                    return;
                 }
 
+                _boundTurnId = turnId;
                 _boundAction = action;
                 invoke = TakeActionUnsafe();
             }

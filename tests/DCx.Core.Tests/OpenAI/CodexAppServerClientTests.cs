@@ -55,7 +55,25 @@ public sealed class CodexAppServerClientTests
         Assert.Equal(0, client.ActiveTurnCount);
     }
 
-    private static CodexAppServerClient CreateClient(bool delayTurnStartResponse = false)
+    [Fact]
+    public async Task Client_RejectsResponseIdentityThatConflictsWithExactTurnNotification()
+    {
+        await using var client = CreateClient(
+            delayTurnStartResponse: true,
+            mismatchTurnStartResponse: true);
+        await client.StartAsync();
+
+        var error = await Assert.ThrowsAsync<CodexProtocolException>(() => client.RunTurnAsync(
+            "fixture-model",
+            "Reject a conflicting turn identity."));
+
+        Assert.Contains("conflicting turn identities", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, client.ActiveTurnCount);
+    }
+
+    private static CodexAppServerClient CreateClient(
+        bool delayTurnStartResponse = false,
+        bool mismatchTurnStartResponse = false)
     {
         var repositoryRoot = FindRepositoryRoot();
         var executable = Path.Combine(
@@ -73,7 +91,8 @@ public sealed class CodexAppServerClientTests
             new Dictionary<string, string?>
             {
                 ["DCX_FAKE_SECRET"] = FixtureSecret,
-                ["DCX_FAKE_TURN_RESPONSE_DELAY_MS"] = delayTurnStartResponse ? "250" : null,
+                ["DCX_FAKE_TURN_RESPONSE_DELAY_MS"] = delayTurnStartResponse ? "750" : null,
+                ["DCX_FAKE_TURN_RESPONSE_MISMATCH"] = mismatchTurnStartResponse ? "1" : null,
             },
             ["DCX_FAKE_SECRET"],
             TimeSpan.FromSeconds(5)));

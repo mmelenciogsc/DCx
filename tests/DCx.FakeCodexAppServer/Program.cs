@@ -5,6 +5,10 @@ var outputGate = new SemaphoreSlim(1, 1);
 var activeTurns = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.Ordinal);
 var configuredSecret = Environment.GetEnvironmentVariable("DCX_FAKE_SECRET");
 var configuredTurnResponseDelay = Environment.GetEnvironmentVariable("DCX_FAKE_TURN_RESPONSE_DELAY_MS");
+var mismatchTurnResponse = string.Equals(
+    Environment.GetEnvironmentVariable("DCX_FAKE_TURN_RESPONSE_MISMATCH"),
+    "1",
+    StringComparison.Ordinal);
 var turnResponseDelayMilliseconds = int.TryParse(configuredTurnResponseDelay, out var parsedTurnResponseDelay) &&
     parsedTurnResponseDelay is >= 1 and <= 1_000
         ? parsedTurnResponseDelay
@@ -54,6 +58,17 @@ async Task RunTurnAsync(string threadId, string turnId, CancellationTokenSource 
         activeTurns.TryRemove(turnId, out _);
         turnCancellation.Dispose();
     }
+}
+
+async Task WriteDelayedTurnStartResponseAsync(long requestId, string turnId)
+{
+    await Task.Delay(turnResponseDelayMilliseconds);
+    var responseTurnId = mismatchTurnResponse ? $"turn-{Guid.NewGuid():N}" : turnId;
+    await WriteAsync(new
+    {
+        id = requestId,
+        result = new { turn = new { id = responseTurnId, status = "inProgress" } },
+    });
 }
 
 string? line;
@@ -106,8 +121,7 @@ while ((line = await Console.In.ReadLineAsync()) is not null)
             if (turnResponseDelayMilliseconds > 0)
             {
                 _ = RunTurnAsync(threadId, turnId, cancellation);
-                await Task.Delay(turnResponseDelayMilliseconds);
-                await WriteAsync(new { id = id.GetInt64(), result = new { turn = new { id = turnId, status = "inProgress" } } });
+                _ = WriteDelayedTurnStartResponseAsync(id.GetInt64(), turnId);
                 break;
             }
             await WriteAsync(new { id = id.GetInt64(), result = new { turn = new { id = turnId, status = "inProgress" } } });
