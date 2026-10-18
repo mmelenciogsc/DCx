@@ -597,8 +597,16 @@ public partial class LocalModelsWindow : Window
             ModelsList.ItemsSource = rows;
             await UpdateCurrentSelectionsAsync();
             var eligible = rows.Count(row => row.EligibleVision || row.EligibleEmbedding);
-            SetStatus(
-                $"Found {rows.Length} installed model records. {eligible} unique digest-bound records are eligible. Nothing was downloaded or uploaded.");
+            if (store.RequiresReapproval || whisperStore.RequiresReapproval || ffmpegStore.RequiresReapproval)
+            {
+                SetStatus(
+                    "One or more stored local-model approvals did not match protected per-user anchors. They are unavailable until reviewed and explicitly approved again. Nothing was downloaded or executed.");
+            }
+            else
+            {
+                SetStatus(
+                    $"Found {rows.Length} installed model records. {eligible} unique digest-bound records are eligible. Nothing was downloaded or uploaded.");
+            }
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
         {
@@ -688,6 +696,16 @@ public partial class LocalModelsWindow : Window
     private async Task UpdateCurrentSelectionsAsync()
     {
         var state = await store.GetStateAsync(lifetime.Token);
+        if (store.RequiresReapproval)
+        {
+            const string warning =
+                "Stored local-model approvals did not match their protected per-user anchor. Vision and embedding are unavailable until reviewed and explicitly approved again.";
+            CurrentVisionText.Text = warning;
+            CurrentEmbeddingText.Text = warning;
+            AutomationProperties.SetName(CurrentVisionText, warning);
+            AutomationProperties.SetName(CurrentEmbeddingText, warning);
+            return;
+        }
         SetCurrent(CurrentVisionText, "Vision", state.Vision);
         SetCurrent(CurrentEmbeddingText, "Embedding", state.Embedding);
     }
@@ -696,7 +714,9 @@ public partial class LocalModelsWindow : Window
     {
         var state = await whisperStore.GetStateAsync(lifetime.Token);
         var binding = state.Backend;
-        var value = binding is null
+        var value = whisperStore.RequiresReapproval
+            ? "Transcription: a stored approval did not match its protected per-user anchor and is unavailable until reviewed and explicitly approved again."
+            : binding is null
             ? "Transcription: none selected."
             : $"Transcription: {System.IO.Path.GetFileName(binding.ExecutablePath)} with {System.IO.Path.GetFileName(binding.ModelPath)}. " +
               $"Executable digest {binding.ExecutableSha256}. Model digest {binding.ModelSha256}. " +
@@ -708,7 +728,9 @@ public partial class LocalModelsWindow : Window
     private async Task UpdateFfmpegSelectionAsync()
     {
         var binding = (await ffmpegStore.GetStateAsync(lifetime.Token)).Backend;
-        var value = binding is null
+        var value = ffmpegStore.RequiresReapproval
+            ? "Media processor: a stored approval did not match its protected per-user anchor and is unavailable until reviewed and explicitly approved again."
+            : binding is null
             ? "Media processor: none selected."
             : $"Media processor: {System.IO.Path.GetFileName(binding.ExecutablePath)}. Executable digest {binding.ExecutableSha256}. " +
               $"License digest {binding.LicenseSha256}. Windows signature status {binding.AuthenticodeStatus}. Approved {binding.ApprovedUtc:u}.";

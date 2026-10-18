@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -18,6 +19,7 @@ public sealed class LocalModelSelectionStore
 {
     public const int CurrentSchemaVersion = 1;
     public const int MaximumStateBytes = 16 * 1024;
+    private const string ProtectedStateKind = "ollama-selection";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -30,25 +32,43 @@ public sealed class LocalModelSelectionStore
 
     private readonly string statePath;
     private readonly string localModelsRoot;
+    private readonly string storageId;
+    private readonly ILocalModelApprovalStateAnchorStore anchorStore;
     private readonly SemaphoreSlim mutationLock = new(1, 1);
 
-    private LocalModelSelectionStore(string localModelsRoot)
+    private LocalModelSelectionStore(
+        string localModelsRoot,
+        ILocalModelApprovalStateAnchorStore anchorStore)
     {
         this.localModelsRoot = localModelsRoot;
+        this.anchorStore = anchorStore;
         statePath = Path.Combine(localModelsRoot, "selection.json");
+        storageId = LocalModelApprovalStateProtector.StorageId(statePath);
     }
+
+    public bool RequiresReapproval { get; private set; }
 
     public static async Task<LocalModelSelectionStore> OpenAsync(
         string applicationDataRoot,
+        CancellationToken cancellationToken = default) =>
+        await OpenWithAnchorAsync(
+            applicationDataRoot,
+            new WindowsLocalModelApprovalStateAnchorStore(),
+            cancellationToken).ConfigureAwait(false);
+
+    public static async Task<LocalModelSelectionStore> OpenWithAnchorAsync(
+        string applicationDataRoot,
+        ILocalModelApprovalStateAnchorStore anchorStore,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(anchorStore);
         var applicationRoot = LocalModelStoragePathGuard.EnsureDirectory(
             applicationDataRoot,
             "local-model application-data");
         var localModelsRoot = LocalModelStoragePathGuard.EnsureDirectory(
             Path.Combine(applicationRoot, "local-models"),
             "local-model settings");
-        var store = new LocalModelSelectionStore(localModelsRoot);
+        var store = new LocalModelSelectionStore(localModelsRoot, anchorStore);
         store.ValidateStatePathIfPresent();
 
         _ = await store.ReadUnsafeAsync(cancellationToken).ConfigureAwait(false);
@@ -167,18 +187,20 @@ public sealed class LocalModelSelectionStore
             throw new InvalidOperationException("The local-model selection file is outside its size limit.");
         }
 
+        var content = new byte[checked((int)file.Length)];
         try
         {
-            await using var stream = new FileStream(
-                statePath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                4096,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
-            var state = await JsonSerializer.DeserializeAsync<LocalModelSelectionState>(
-                    stream, JsonOptions, cancellationToken)
-                .ConfigureAwait(false);
+            await using (var stream = new FileStream(
+                             statePath,
+                             FileMode.Open,
+                             FileAccess.Read,
+                             FileShare.Read,
+                             4096,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await stream.ReadExactlyAsync(content, cancellationToken).ConfigureAwait(false);
+            }
+            var state = JsonSerializer.Deserialize<LocalModelSelectionState>(content, JsonOptions);
             if (state is null || state.SchemaVersion != CurrentSchemaVersion)
             {
                 throw new InvalidOperationException("The local-model selection schema is unsupported.");
@@ -186,11 +208,29 @@ public sealed class LocalModelSelectionStore
 
             if (state.Vision is not null) ValidateBinding(state.Vision);
             if (state.Embedding is not null) ValidateBinding(state.Embedding);
+            if (state.Vision is not null || state.Embedding is not null)
+            {
+                if (!await LocalModelApprovalStateProtector.MatchesAsync(
+                        ProtectedStateKind,
+                        storageId,
+                        content,
+                        anchorStore,
+                        cancellationToken).ConfigureAwait(false))
+                {
+                    RequiresReapproval = true;
+                    return new LocalModelSelectionState(CurrentSchemaVersion, null, null);
+                }
+            }
+            RequiresReapproval = false;
             return state;
         }
         catch (JsonException)
         {
             throw new InvalidOperationException("The local-model selection file is malformed.");
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(content);
         }
     }
 
@@ -206,8 +246,16 @@ public sealed class LocalModelSelectionStore
 
         var directory = Path.GetDirectoryName(statePath)
             ?? throw new InvalidOperationException("The local-model selection path has no parent directory.");
+        var removesAllAuthority = state.Vision is null && state.Embedding is null;
         LocalModelStoragePathGuard.RequireDirectory(directory, "local-model settings");
         ValidateStatePathIfPresent();
+        if (removesAllAuthority)
+        {
+            await anchorStore.DeleteAsync(
+                ProtectedStateKind,
+                storageId,
+                cancellationToken).ConfigureAwait(false);
+        }
         var temporary = Path.Combine(directory, $".selection.{Guid.NewGuid():N}.tmp");
         try
         {
@@ -227,9 +275,20 @@ public sealed class LocalModelSelectionStore
             LocalModelStoragePathGuard.ValidateFile(temporary, mustExist: true, "local-model temporary selection");
             ValidateStatePathIfPresent();
             File.Move(temporary, statePath, overwrite: true);
+            if (!removesAllAuthority)
+            {
+                await LocalModelApprovalStateProtector.ProtectAsync(
+                    ProtectedStateKind,
+                    storageId,
+                    content,
+                    anchorStore,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            RequiresReapproval = false;
         }
         finally
         {
+            CryptographicOperations.ZeroMemory(content);
             LocalModelStoragePathGuard.TryDeleteTemporary(
                 directory,
                 temporary,

@@ -1,6 +1,6 @@
 # ADR 0054: Confine local-model state to revalidated non-reparse storage
 
-- Status: Accepted for per-user local-model controls
+- Status: Accepted for storage confinement; approval-replay limit superseded by 0060
 - Date: 2026-10-18
 
 ## Context
@@ -19,3 +19,4 @@ Revalidate the directory, destination and newly written temporary file immediate
 - Ollama, Whisper and FFmpeg approvals retain their existing schema and accessible consent behavior.
 - The latest aggregate benchmark evidence retains its content-minimized schema and atomic replacement behavior.
 - Filesystem checks narrow path redirection but cannot eliminate a same-user check/open race. Production ACLs and process isolation remain required; an unsafe cleanup path can leave an inert temporary file in the detached original directory rather than risk deleting through a replacement.
+- ADR 0060 separately protects nonempty approval-state byte identity in Windows Credential Manager. This ADR continues to govern filesystem confinement.

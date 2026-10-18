@@ -22,6 +22,7 @@ $webServerProcess = $null
 $webServerOutputTask = $null
 $webServerErrorTask = $null
 $process = $null
+$cleanupFailure = $null
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -112,7 +113,8 @@ $null = Wait-For {
 } "The local web-video fixture server did not become healthy."
 
 $env:DCX_REPO_ROOT = $repoRoot
-$env:DCX_DATA_ROOT = Join-Path $runRoot "data"
+$dataRoot = Join-Path $runRoot "data"
+$env:DCX_DATA_ROOT = $dataRoot
 $env:DCX_EXPORT_ROOT = $exportRoot
 $visionDigest = "ef33995bb2ac37689e49c1a15cd627354d05a3c21d1f4bdcd6a5c83825349c1f"
 $visionModel = "llamacpp:$visionDigest"
@@ -435,6 +437,27 @@ finally {
         $null = $process.CloseMainWindow()
         if (-not $process.WaitForExit(5000)) { $process.Kill() }
     }
+    try {
+        $coreAssembly = Join-Path $repoRoot "src\DCx.Core\bin\Release\net10.0\DCx.Core.dll"
+        [void][Reflection.Assembly]::LoadFrom($coreAssembly)
+        $localModelStore = [DCx.Core.LocalModels.LocalModelSelectionStore]::OpenAsync(
+            $dataRoot, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $null = $localModelStore.ClearVisionAsync(
+            [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $null = $localModelStore.ClearEmbeddingAsync(
+            [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $whisperStore = [DCx.Core.LocalModels.WhisperBackendSelectionStore]::OpenAsync(
+            $dataRoot, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $null = $whisperStore.ClearAsync(
+            [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $ffmpegStore = [DCx.Core.LocalModels.FfmpegBackendSelectionStore]::OpenAsync(
+            $dataRoot, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $null = $ffmpegStore.ClearAsync(
+            [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    }
+    catch {
+        $cleanupFailure = $_
+    }
     $env:DCX_REPO_ROOT = $previousRepoRoot
     $env:DCX_DATA_ROOT = $previousDataRoot
     $env:DCX_EXPORT_ROOT = $previousExportRoot
@@ -445,5 +468,8 @@ finally {
     if ($null -ne $webServerOutputTask -and $null -ne $webServerErrorTask) {
         $null = $webServerOutputTask.GetAwaiter().GetResult()
         $null = $webServerErrorTask.GetAwaiter().GetResult()
+    }
+    if ($null -ne $cleanupFailure) {
+        throw "P07 could not revoke its disposable local-model approval state: $($cleanupFailure.Exception.GetType().Name)."
     }
 }

@@ -6,6 +6,7 @@ namespace DCx.Core.Tests.LocalModels;
 
 public sealed class FfmpegBackendRegistrationTests : IDisposable
 {
+    private readonly MemoryLocalModelApprovalStateAnchorStore anchors = new();
     private readonly string root = Path.Combine(Path.GetTempPath(), $"dcx-ffmpeg-registration-{Guid.NewGuid():N}");
     private readonly DateTimeOffset now = DateTimeOffset.Parse("2026-10-17T00:00:00Z");
 
@@ -32,11 +33,11 @@ public sealed class FfmpegBackendRegistrationTests : IDisposable
         var review = await new FfmpegBackendReviewer(new SignatureProbe("NotSigned", null, null))
             .ReviewAsync(fixture.Executable, fixture.License, now);
         var dataRoot = Path.Combine(root, "data");
-        var store = await FfmpegBackendSelectionStore.OpenAsync(dataRoot);
+        var store = await FfmpegBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.SetAsync(review.Binding, false));
         await store.SetAsync(review.Binding, true);
-        var reopened = await FfmpegBackendSelectionStore.OpenAsync(dataRoot);
+        var reopened = await FfmpegBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors);
         var stored = Assert.IsType<ApprovedFfmpegBinding>((await reopened.GetStateAsync()).Backend);
         Assert.True(review.Binding.HasSameIdentity(stored));
 
@@ -53,7 +54,7 @@ public sealed class FfmpegBackendRegistrationTests : IDisposable
         var certificate = new string('a', 64);
         var review = await new FfmpegBackendReviewer(new SignatureProbe("Valid", "CN=Fixture", certificate))
             .ReviewAsync(fixture.Executable, fixture.License, now);
-        var store = await FfmpegBackendSelectionStore.OpenAsync(Path.Combine(root, "data"));
+        var store = await FfmpegBackendSelectionStore.OpenWithAnchorAsync(Path.Combine(root, "data"), anchors);
 
         await store.SetAsync(review.Binding, true);
 
@@ -68,7 +69,7 @@ public sealed class FfmpegBackendRegistrationTests : IDisposable
         var fixture = await CreateFixtureAsync();
         var review = await new FfmpegBackendReviewer(new SignatureProbe("NotSigned", null, null))
             .ReviewAsync(fixture.Executable, fixture.License, now);
-        var store = await FfmpegBackendSelectionStore.OpenAsync(Path.Combine(root, "data"));
+        var store = await FfmpegBackendSelectionStore.OpenWithAnchorAsync(Path.Combine(root, "data"), anchors);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.SetAsync(
             review.Binding with { ExecutablePath = @"\\server\share\ffmpeg.exe" }, true));
@@ -87,7 +88,7 @@ public sealed class FfmpegBackendRegistrationTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(directory, "ffmpeg.json"), json);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            FfmpegBackendSelectionStore.OpenAsync(Path.Combine(root, "data")));
+            FfmpegBackendSelectionStore.OpenWithAnchorAsync(Path.Combine(root, "data"), anchors));
     }
 
     [Fact]
@@ -97,7 +98,7 @@ public sealed class FfmpegBackendRegistrationTests : IDisposable
         var review = await new FfmpegBackendReviewer(new SignatureProbe("NotSigned", null, null))
             .ReviewAsync(fixture.Executable, fixture.License, now);
         var dataRoot = Path.Combine(root, "data");
-        var store = await FfmpegBackendSelectionStore.OpenAsync(dataRoot);
+        var store = await FfmpegBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors);
         var settings = Path.Combine(dataRoot, "local-models");
         Directory.Move(settings, settings + "-original");
         var outside = Path.Combine(root, "outside");
@@ -120,9 +121,32 @@ public sealed class FfmpegBackendRegistrationTests : IDisposable
         File.CreateSymbolicLink(Path.Combine(settings, "ffmpeg.json"), outside);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            FfmpegBackendSelectionStore.OpenAsync(dataRoot));
+            FfmpegBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors));
 
         Assert.Equal("{}", await File.ReadAllTextAsync(outside));
+    }
+
+    [Fact]
+    public async Task ProtectedApproval_RejectsRollbackAndAllowsExplicitReapproval()
+    {
+        var fixture = await CreateFixtureAsync();
+        var review = await new FfmpegBackendReviewer(new SignatureProbe("NotSigned", null, null))
+            .ReviewAsync(fixture.Executable, fixture.License, now);
+        var dataRoot = Path.Combine(root, "data");
+        var store = await FfmpegBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors);
+        await store.SetAsync(review.Binding, true);
+        var statePath = Path.Combine(dataRoot, "local-models", "ffmpeg.json");
+        var firstState = await File.ReadAllBytesAsync(statePath);
+        await store.SetAsync(review.Binding with { ApprovedUtc = now.AddMinutes(1) }, true);
+
+        await File.WriteAllBytesAsync(statePath, firstState);
+        var replayed = await FfmpegBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors);
+
+        Assert.True(replayed.RequiresReapproval);
+        Assert.Null((await replayed.GetStateAsync()).Backend);
+        await replayed.SetAsync(review.Binding with { ApprovedUtc = now.AddMinutes(2) }, true);
+        Assert.False(replayed.RequiresReapproval);
+        Assert.Equal(now.AddMinutes(2), (await replayed.GetStateAsync()).Backend?.ApprovedUtc);
     }
 
     public void Dispose() => TestDirectory.DeleteIfExists(root);

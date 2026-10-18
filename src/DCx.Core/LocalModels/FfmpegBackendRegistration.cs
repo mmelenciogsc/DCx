@@ -176,6 +176,7 @@ public sealed class FfmpegBackendSelectionStore
 {
     public const int CurrentSchemaVersion = 1;
     public const int MaximumStateBytes = 24 * 1024;
+    private const string ProtectedStateKind = "ffmpeg-selection";
     private static readonly HashSet<string> AllowedStatuses = new(StringComparer.Ordinal)
     {
         "Valid", "UnknownError", "NotSigned", "HashMismatch", "NotTrusted", "NotSupported", "Incompatible",
@@ -190,23 +191,43 @@ public sealed class FfmpegBackendSelectionStore
     };
     private readonly string root;
     private readonly string statePath;
+    private readonly string storageId;
+    private readonly ILocalModelApprovalStateAnchorStore anchorStore;
     private readonly SemaphoreSlim mutationLock = new(1, 1);
 
-    private FfmpegBackendSelectionStore(string root)
+    private FfmpegBackendSelectionStore(
+        string root,
+        ILocalModelApprovalStateAnchorStore anchorStore)
     {
         this.root = root;
+        this.anchorStore = anchorStore;
         statePath = Path.Combine(root, "ffmpeg.json");
+        storageId = LocalModelApprovalStateProtector.StorageId(statePath);
     }
 
-    public static async Task<FfmpegBackendSelectionStore> OpenAsync(string applicationDataRoot, CancellationToken cancellationToken = default)
+    public bool RequiresReapproval { get; private set; }
+
+    public static async Task<FfmpegBackendSelectionStore> OpenAsync(
+        string applicationDataRoot,
+        CancellationToken cancellationToken = default) =>
+        await OpenWithAnchorAsync(
+            applicationDataRoot,
+            new WindowsLocalModelApprovalStateAnchorStore(),
+            cancellationToken).ConfigureAwait(false);
+
+    public static async Task<FfmpegBackendSelectionStore> OpenWithAnchorAsync(
+        string applicationDataRoot,
+        ILocalModelApprovalStateAnchorStore anchorStore,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(anchorStore);
         var applicationRoot = LocalModelStoragePathGuard.EnsureDirectory(
             applicationDataRoot,
             "FFmpeg application-data");
         var root = LocalModelStoragePathGuard.EnsureDirectory(
             Path.Combine(applicationRoot, "local-models"),
             "FFmpeg settings");
-        var store = new FfmpegBackendSelectionStore(root);
+        var store = new FfmpegBackendSelectionStore(root, anchorStore);
         _ = await store.ReadUnsafeAsync(cancellationToken).ConfigureAwait(false);
         return store;
     }
@@ -270,16 +291,38 @@ public sealed class FfmpegBackendSelectionStore
         LocalModelStoragePathGuard.ValidateFile(statePath, mustExist: true, "FFmpeg selection");
         var file = new FileInfo(statePath);
         if (file.Length is <= 0 or > MaximumStateBytes) throw new InvalidOperationException("The FFmpeg selection file is outside its size limit.");
+        var content = new byte[checked((int)file.Length)];
         try
         {
-            await using var stream = new FileStream(statePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
-            var state = await JsonSerializer.DeserializeAsync<FfmpegBackendSelectionState>(stream, JsonOptions, cancellationToken).ConfigureAwait(false);
+            await using (var stream = new FileStream(
+                             statePath,
+                             FileMode.Open,
+                             FileAccess.Read,
+                             FileShare.Read,
+                             4096,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await stream.ReadExactlyAsync(content, cancellationToken).ConfigureAwait(false);
+            }
+            var state = JsonSerializer.Deserialize<FfmpegBackendSelectionState>(content, JsonOptions);
             if (state is null || state.SchemaVersion != CurrentSchemaVersion) throw new InvalidOperationException("The FFmpeg selection schema is unsupported.");
             if (state.Backend is not null) ValidateBinding(state.Backend);
+            if (state.Backend is not null &&
+                !await LocalModelApprovalStateProtector.MatchesAsync(
+                    ProtectedStateKind,
+                    storageId,
+                    content,
+                    anchorStore,
+                    cancellationToken).ConfigureAwait(false))
+            {
+                RequiresReapproval = true;
+                return new FfmpegBackendSelectionState(CurrentSchemaVersion, null);
+            }
+            RequiresReapproval = false;
             return state;
         }
         catch (JsonException exception) { throw new InvalidOperationException("The FFmpeg selection file is invalid.", exception); }
+        finally { CryptographicOperations.ZeroMemory(content); }
     }
 
     private async Task WriteUnsafeAsync(FfmpegBackendSelectionState state, CancellationToken cancellationToken)
@@ -289,6 +332,14 @@ public sealed class FfmpegBackendSelectionStore
             throw new InvalidOperationException("The FFmpeg selection exceeds its size limit.");
         LocalModelStoragePathGuard.RequireDirectory(root, "FFmpeg settings");
         ValidateStatePath();
+        var removesAllAuthority = state.Backend is null;
+        if (removesAllAuthority)
+        {
+            await anchorStore.DeleteAsync(
+                ProtectedStateKind,
+                storageId,
+                cancellationToken).ConfigureAwait(false);
+        }
         var temporary = Path.Combine(root, $"ffmpeg-{Guid.NewGuid():N}.tmp");
         try
         {
@@ -303,6 +354,16 @@ public sealed class FfmpegBackendSelectionStore
             LocalModelStoragePathGuard.ValidateFile(temporary, mustExist: true, "FFmpeg temporary selection");
             ValidateStatePath();
             File.Move(temporary, statePath, true);
+            if (!removesAllAuthority)
+            {
+                await LocalModelApprovalStateProtector.ProtectAsync(
+                    ProtectedStateKind,
+                    storageId,
+                    content,
+                    anchorStore,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            RequiresReapproval = false;
         }
         finally
         {

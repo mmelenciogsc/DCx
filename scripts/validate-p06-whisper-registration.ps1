@@ -43,6 +43,7 @@ $previousStagingFixture = $env:DCX_WHISPER_STAGING_FIXTURE
 $previousStagingFixtureRoot = $env:DCX_WHISPER_STAGING_FIXTURE_ROOT
 $process = $null
 $stagingProcess = $null
+$cleanupFailure = $null
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -369,7 +370,9 @@ try {
     $store = [DCx.Core.LocalModels.WhisperBackendSelectionStore]::OpenAsync(
         $dataRoot, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
     $state = $store.GetStateAsync([Threading.CancellationToken]::None).GetAwaiter().GetResult()
-    if ($null -eq $state.Backend) { throw "The native UI did not persist the approved Whisper binding." }
+    if ($null -eq $state.Backend -or $store.RequiresReapproval) {
+        throw "The native UI did not persist a protected approved Whisper binding."
+    }
     $transcriber = $state.Backend.CreateTranscriber([TimeSpan]::FromSeconds(5))
     $transcription = $transcriber.TranscribeWavAsync(
         $audio, "en", [Threading.CancellationToken]::None).GetAwaiter().GetResult()
@@ -554,6 +557,19 @@ try {
         throw "The completed local transcript was not exposed and focused through UI Automation."
     }
 
+    $whisperStatePath = Join-Path $dataRoot "local-models\transcription.json"
+    [IO.File]::AppendAllText($whisperStatePath, " ")
+    Invoke-ById $localModelsWindow "RefreshLocalModelsButton" | Out-Null
+    $null = Wait-For {
+        $candidate = Find-ById $localModelsWindow "CurrentWhisperBackend"
+        $null -ne $candidate -and
+            $candidate.Current.Name -like "Transcription: a stored approval did not match its protected per-user anchor*"
+    } "A replayed or changed Whisper approval did not expose the accessible reapproval warning."
+    $rejectedWhisper = $store.GetStateAsync([Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    if ($null -ne $rejectedWhisper.Backend -or -not $store.RequiresReapproval) {
+        throw "A changed Whisper approval remained usable without explicit reapproval."
+    }
+
     Invoke-ById $localModelsWindow "ClearWhisperBackendButton" | Out-Null
     $null = Wait-For {
         $candidate = Find-ById $localModelsWindow "CurrentWhisperBackend"
@@ -672,7 +688,9 @@ try {
     $ffmpegStore = [DCx.Core.LocalModels.FfmpegBackendSelectionStore]::OpenAsync(
         $dataRoot, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
     $ffmpegState = $ffmpegStore.GetStateAsync([Threading.CancellationToken]::None).GetAwaiter().GetResult()
-    if ($null -eq $ffmpegState.Backend) { throw "The native UI did not persist the approved FFmpeg binding." }
+    if ($null -eq $ffmpegState.Backend -or $ffmpegStore.RequiresReapproval) {
+        throw "The native UI did not persist a protected approved FFmpeg binding."
+    }
     $null = $store.SetAsync($state.Backend, $true, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
 
     Set-Value $contentViewer "FilePathBox" $mp3Audio
@@ -690,6 +708,19 @@ try {
         [System.Windows.Automation.ValuePattern]::Pattern).Current.Value
     if ($mp3Transcript -ne "DCx transcription fixture 42.") {
         throw "The approved FFmpeg-to-Whisper MP3 pipeline returned an unexpected transcript."
+    }
+
+    $ffmpegStatePath = Join-Path $dataRoot "local-models\ffmpeg.json"
+    [IO.File]::AppendAllText($ffmpegStatePath, " ")
+    Invoke-ById $localModelsWindow "RefreshLocalModelsButton" | Out-Null
+    $null = Wait-For {
+        $candidate = Find-ById $localModelsWindow "CurrentFfmpegBackend"
+        $null -ne $candidate -and
+            $candidate.Current.Name -like "Media processor: a stored approval did not match its protected per-user anchor*"
+    } "A replayed or changed FFmpeg approval did not expose the accessible reapproval warning."
+    $rejectedFfmpeg = $ffmpegStore.GetStateAsync([Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    if ($null -ne $rejectedFfmpeg.Backend -or -not $ffmpegStore.RequiresReapproval) {
+        throw "A changed FFmpeg approval remained usable without explicit reapproval."
     }
 
     Invoke-ById $localModelsWindow "ClearFfmpegBackendButton" | Out-Null
@@ -948,6 +979,9 @@ try {
         transcript_focus_after_completion = $true
         cleared_registration = $true
         source_files_preserved = $true
+        approval_state_protected = $true
+        whisper_reapproval_warning_uia = $true
+        ffmpeg_reapproval_warning_uia = $true
         publisher_authenticity_validated = $false
         real_backend_accuracy_validated = $false
     }
@@ -959,6 +993,7 @@ try {
     "Immutable dependency catalog and staged-mismatch denial UIA=PASS"
     "Explicit default-off inert Whisper runtime staging UIA=PASS"
     "Protected runtime staging receipt anchor composition UIA=PASS"
+    "Protected Whisper/FFmpeg approval-state anchors and reapproval warnings UIA=PASS"
     "UI-approved production adapter transcript=$($transcription.Text)"
     "Approval-bound aggregate benchmark review and execution UIA=PASS"
     "Benchmark cancellation and evidence preservation UIA=PASS"
@@ -975,8 +1010,31 @@ finally {
         $null = $process.CloseMainWindow()
         if (-not $process.WaitForExit(5000)) { $process.Kill($true) }
     }
+    try {
+        [void][Reflection.Assembly]::LoadFrom($coreAssembly)
+        $localModelStore = [DCx.Core.LocalModels.LocalModelSelectionStore]::OpenAsync(
+            $dataRoot, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $null = $localModelStore.ClearVisionAsync(
+            [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $null = $localModelStore.ClearEmbeddingAsync(
+            [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $whisperCleanupStore = [DCx.Core.LocalModels.WhisperBackendSelectionStore]::OpenAsync(
+            $dataRoot, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $null = $whisperCleanupStore.ClearAsync(
+            [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $ffmpegCleanupStore = [DCx.Core.LocalModels.FfmpegBackendSelectionStore]::OpenAsync(
+            $dataRoot, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $null = $ffmpegCleanupStore.ClearAsync(
+            [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    }
+    catch {
+        $cleanupFailure = $_
+    }
     $env:DCX_DATA_ROOT = $previousDataRoot
     $env:DCX_OFFLINE_STARTUP = $previousOfflineStartup
     $env:DCX_WHISPER_STAGING_FIXTURE = $previousStagingFixture
     $env:DCX_WHISPER_STAGING_FIXTURE_ROOT = $previousStagingFixtureRoot
+    if ($null -ne $cleanupFailure) {
+        throw "P06 could not revoke its disposable local-model approval state: $($cleanupFailure.Exception.GetType().Name)."
+    }
 }

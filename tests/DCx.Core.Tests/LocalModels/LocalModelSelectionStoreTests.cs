@@ -4,6 +4,7 @@ namespace DCx.Core.Tests.LocalModels;
 
 public sealed class LocalModelSelectionStoreTests : IDisposable
 {
+    private readonly MemoryLocalModelApprovalStateAnchorStore anchors = new();
     private const string VisionDigest = "1111111111111111111111111111111111111111111111111111111111111111";
     private const string EmbeddingDigest = "2222222222222222222222222222222222222222222222222222222222222222";
     private const string LicenseDigest = "3333333333333333333333333333333333333333333333333333333333333333";
@@ -15,13 +16,13 @@ public sealed class LocalModelSelectionStoreTests : IDisposable
     {
         var descriptor = new LocalModelDescriptor(
             "vision:" + VisionDigest, 1_000, true, false, Digest: VisionDigest);
-        var store = await LocalModelSelectionStore.OpenAsync(root);
+        var store = await LocalModelSelectionStore.OpenWithAnchorAsync(root, anchors);
         Assert.Null((await store.GetStateAsync()).Vision);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             store.SetVisionAsync(descriptor, LicenseDigest, false, now));
 
         await store.SetVisionAsync(descriptor, LicenseDigest, true, now);
-        var reopened = await LocalModelSelectionStore.OpenAsync(root);
+        var reopened = await LocalModelSelectionStore.OpenWithAnchorAsync(root, anchors);
         var binding = Assert.IsType<ApprovedLocalModelBinding>((await reopened.GetStateAsync()).Vision);
         Assert.Equal(descriptor.Name, binding.Name);
         Assert.Equal(VisionDigest, binding.Digest);
@@ -29,14 +30,14 @@ public sealed class LocalModelSelectionStoreTests : IDisposable
         Assert.Equal(now, binding.ApprovedUtc);
 
         await reopened.ClearVisionAsync();
-        var cleared = await LocalModelSelectionStore.OpenAsync(root);
+        var cleared = await LocalModelSelectionStore.OpenWithAnchorAsync(root, anchors);
         Assert.Null((await cleared.GetStateAsync()).Vision);
     }
 
     [Fact]
     public async Task Selections_RejectMutableNamesWrongCapabilitiesAndInvalidLicenseDigest()
     {
-        var store = await LocalModelSelectionStore.OpenAsync(root);
+        var store = await LocalModelSelectionStore.OpenWithAnchorAsync(root, anchors);
         var mutable = new LocalModelDescriptor("friendly-tag", 1_000, true, false, Digest: VisionDigest);
         var embeddingOnly = new LocalModelDescriptor(
             "embedding:" + EmbeddingDigest, 1_000, false, true, Digest: EmbeddingDigest);
@@ -57,13 +58,13 @@ public sealed class LocalModelSelectionStoreTests : IDisposable
             "vision:" + VisionDigest, 1_000, true, false, Digest: VisionDigest);
         var embedding = new LocalModelDescriptor(
             "embedding:" + EmbeddingDigest, 500, false, true, Digest: EmbeddingDigest);
-        var store = await LocalModelSelectionStore.OpenAsync(root);
+        var store = await LocalModelSelectionStore.OpenWithAnchorAsync(root, anchors);
 
         await store.SetVisionAsync(vision, LicenseDigest, true, now);
         await store.SetEmbeddingAsync(embedding, LicenseDigest, true, now.AddMinutes(1));
         await store.ClearEmbeddingAsync();
 
-        var state = await (await LocalModelSelectionStore.OpenAsync(root)).GetStateAsync();
+        var state = await (await LocalModelSelectionStore.OpenWithAnchorAsync(root, anchors)).GetStateAsync();
         Assert.NotNull(state.Vision);
         Assert.Null(state.Embedding);
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "local-models"), "*.tmp"));
@@ -80,7 +81,7 @@ public sealed class LocalModelSelectionStoreTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(directory, "selection.json"), json);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            LocalModelSelectionStore.OpenAsync(root));
+            LocalModelSelectionStore.OpenWithAnchorAsync(root, anchors));
     }
 
     [Fact]
@@ -89,7 +90,7 @@ public sealed class LocalModelSelectionStoreTests : IDisposable
         Directory.CreateDirectory(Path.Combine(root, "local-models", "selection.json"));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            LocalModelSelectionStore.OpenAsync(root));
+            LocalModelSelectionStore.OpenWithAnchorAsync(root, anchors));
     }
 
     [Fact]
@@ -102,7 +103,7 @@ public sealed class LocalModelSelectionStoreTests : IDisposable
         Directory.CreateSymbolicLink(linked, outside);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            LocalModelSelectionStore.OpenAsync(linked));
+            LocalModelSelectionStore.OpenWithAnchorAsync(linked, anchors));
 
         Assert.Empty(Directory.EnumerateFileSystemEntries(outside));
     }
@@ -111,7 +112,7 @@ public sealed class LocalModelSelectionStoreTests : IDisposable
     public async Task Store_RejectsSettingsDirectorySwappedForLinkAfterOpen()
     {
         var dataRoot = Path.Combine(root, "data");
-        var store = await LocalModelSelectionStore.OpenAsync(dataRoot);
+        var store = await LocalModelSelectionStore.OpenWithAnchorAsync(dataRoot, anchors);
         var settings = Path.Combine(dataRoot, "local-models");
         Directory.Move(settings, settings + "-original");
         var outside = Path.Combine(root, "outside");
@@ -136,9 +137,57 @@ public sealed class LocalModelSelectionStoreTests : IDisposable
         File.CreateSymbolicLink(Path.Combine(settings, "selection.json"), outside);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            LocalModelSelectionStore.OpenAsync(root));
+            LocalModelSelectionStore.OpenWithAnchorAsync(root, anchors));
 
         Assert.Equal("{}", await File.ReadAllTextAsync(outside));
+    }
+
+    [Fact]
+    public async Task ProtectedApproval_RejectsRollbackAndAllowsExplicitReapproval()
+    {
+        var descriptor = new LocalModelDescriptor(
+            "vision:" + VisionDigest, 1_000, true, false, Digest: VisionDigest);
+        var store = await LocalModelSelectionStore.OpenWithAnchorAsync(root, anchors);
+        await store.SetVisionAsync(descriptor, LicenseDigest, true, now);
+        var statePath = Path.Combine(root, "local-models", "selection.json");
+        var firstState = await File.ReadAllBytesAsync(statePath);
+        await store.SetVisionAsync(descriptor, LicenseDigest, true, now.AddMinutes(1));
+
+        await File.WriteAllBytesAsync(statePath, firstState);
+        var replayed = await LocalModelSelectionStore.OpenWithAnchorAsync(root, anchors);
+
+        Assert.True(replayed.RequiresReapproval);
+        Assert.Null((await replayed.GetStateAsync()).Vision);
+
+        await replayed.SetVisionAsync(descriptor, LicenseDigest, true, now.AddMinutes(2));
+        Assert.False(replayed.RequiresReapproval);
+        Assert.Equal(now.AddMinutes(2), (await replayed.GetStateAsync()).Vision?.ApprovedUtc);
+    }
+
+    [Fact]
+    public async Task ProtectedApproval_MissingOrUnreadableAnchorFailsClosedAndWriteFailureRecovers()
+    {
+        var descriptor = new LocalModelDescriptor(
+            "vision:" + VisionDigest, 1_000, true, false, Digest: VisionDigest);
+        var store = await LocalModelSelectionStore.OpenWithAnchorAsync(root, anchors);
+        await store.SetVisionAsync(descriptor, LicenseDigest, true, now);
+
+        anchors.RemoveAll();
+        var missing = await LocalModelSelectionStore.OpenWithAnchorAsync(root, anchors);
+        Assert.True(missing.RequiresReapproval);
+        Assert.Null((await missing.GetStateAsync()).Vision);
+
+        anchors.FailWrites = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            missing.SetVisionAsync(descriptor, LicenseDigest, true, now.AddMinutes(1)));
+        Assert.True((await missing.GetStateAsync()).Vision is null);
+        Assert.True(missing.RequiresReapproval);
+
+        anchors.FailWrites = false;
+        await missing.SetVisionAsync(descriptor, LicenseDigest, true, now.AddMinutes(2));
+        anchors.FailReads = true;
+        Assert.Null((await missing.GetStateAsync()).Vision);
+        Assert.True(missing.RequiresReapproval);
     }
 
     public void Dispose() => TestDirectory.DeleteIfExists(root);

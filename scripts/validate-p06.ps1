@@ -65,6 +65,14 @@ try {
         "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.ArtifactReview_DeniesLinkedArtifactWithoutChangingOutsideFile",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.ArtifactReview_DeniesLinkedAncestorWithoutChangingOutsideFile"
     )
+    $requiredApprovalStateContracts = @(
+        "DCx.Core.Tests.LocalModels.LocalModelApprovalStateAnchorStoreTests.WindowsVaultAnchor_RoundTripsOverwritesIsolatesAndRejectsMalformedState",
+        "DCx.Core.Tests.LocalModels.LocalModelApprovalStateAnchorStoreTests.WindowsVaultAnchor_HonorsPreCanceledOperationsWithoutCreatingCredential",
+        "DCx.Core.Tests.LocalModels.LocalModelSelectionStoreTests.ProtectedApproval_RejectsRollbackAndAllowsExplicitReapproval",
+        "DCx.Core.Tests.LocalModels.LocalModelSelectionStoreTests.ProtectedApproval_MissingOrUnreadableAnchorFailsClosedAndWriteFailureRecovers",
+        "DCx.Core.Tests.LocalModels.WhisperBackendRegistrationTests.ProtectedApproval_RejectsRollbackAndClearRemovesAuthority",
+        "DCx.Core.Tests.LocalModels.FfmpegBackendRegistrationTests.ProtectedApproval_RejectsRollbackAndAllowsExplicitReapproval"
+    )
     $requiredRuntimeStagingContracts = @(
         "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_DeniesWithoutExplicitApprovalAndCreatesNothing",
         "DCx.Core.Tests.LocalModels.WhisperRuntimeStagerTests.Stage_AuthenticatesExtractsHashesAndAtomicallyPublishesInertRuntime",
@@ -97,6 +105,12 @@ try {
         $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredDependencyContract })
         if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
             throw "P06 did not prove required pinned-dependency contract: $requiredDependencyContract"
+        }
+    }
+    foreach ($requiredApprovalStateContract in $requiredApprovalStateContracts) {
+        $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredApprovalStateContract })
+        if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
+            throw "P06 did not prove required protected local-model approval-state contract: $requiredApprovalStateContract"
         }
     }
     foreach ($requiredRuntimeStagingContract in $requiredRuntimeStagingContracts) {
@@ -152,6 +166,9 @@ try {
         $whisperRegistrationEvidence.ffmpeg_real_windows_status -ne "NotSigned" -or
         $whisperRegistrationEvidence.ffmpeg_whisper_mp3_pipeline -ne "pass" -or
         $whisperRegistrationEvidence.cleared_ffmpeg_consumer_denied -ne $true -or
+        $whisperRegistrationEvidence.approval_state_protected -ne $true -or
+        $whisperRegistrationEvidence.whisper_reapproval_warning_uia -ne $true -or
+        $whisperRegistrationEvidence.ffmpeg_reapproval_warning_uia -ne $true -or
         $whisperRegistrationEvidence.transcript_focus_after_completion -ne $true -or
         $whisperRegistrationEvidence.download_or_install_action_exposed -ne $false -or
         $whisperRegistrationEvidence.source_files_preserved -ne $true -or
@@ -340,16 +357,16 @@ $ffmpegBenchmarkStore = [DCx.Core.LocalModels.FfmpegBackendSelectionStore]::Open
     [Threading.CancellationToken]::None).GetAwaiter().GetResult()
 $null = $ffmpegBenchmarkStore.SetAsync(
     $ffmpegReview.Binding, $true, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
-$ffmpegBenchmarkState = $ffmpegBenchmarkStore.GetStateAsync(
-    [Threading.CancellationToken]::None).GetAwaiter().GetResult()
-if ($null -eq $ffmpegBenchmarkState.Backend) {
-    throw "The disposable FFmpeg benchmark approval did not persist."
-}
-$ffmpegProcessor = $ffmpegBenchmarkState.Backend.CreateProcessor([TimeSpan]::FromSeconds(30))
 $ffmpegExtractionClock = [Diagnostics.Stopwatch]::StartNew()
 $ffmpegArtifact = $null
 $ffmpegWavePath = $null
 try {
+    $ffmpegBenchmarkState = $ffmpegBenchmarkStore.GetStateAsync(
+        [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    if ($null -eq $ffmpegBenchmarkState.Backend) {
+        throw "The disposable FFmpeg benchmark approval did not persist."
+    }
+    $ffmpegProcessor = $ffmpegBenchmarkState.Backend.CreateProcessor([TimeSpan]::FromSeconds(30))
     $ffmpegArtifact = $ffmpegProcessor.ExtractWaveAsync(
         $ffmpegAudioFixture, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
     $ffmpegWavePath = $ffmpegArtifact.Path
@@ -485,6 +502,7 @@ $manifest = [ordered]@{
     local_model_contract_tests = $localModelTestsPassed
     local_model_storage_link_denials = $requiredStorageDenials.Count
     local_model_storage_external_writes = 0
+    local_model_approval_anchor_contract_tests = $requiredApprovalStateContracts.Count
     dependency_catalog_id = [string]$dependencyCatalog.CatalogId
     dependency_catalog_sha256 = [string]$dependencyCatalog.CatalogSha256
     dependency_catalog_candidates = @($dependencyCandidateIds)

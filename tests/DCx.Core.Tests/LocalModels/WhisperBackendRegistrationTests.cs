@@ -8,6 +8,7 @@ public sealed class WhisperBackendRegistrationTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), $"dcx-whisper-registration-{Guid.NewGuid():N}");
     private readonly DateTimeOffset now = DateTimeOffset.Parse("2026-10-17T00:00:00Z");
+    private readonly MemoryLocalModelApprovalStateAnchorStore anchors = new();
 
     [Fact]
     public async Task ReviewAndApprovedBinding_ExposeFullLicensesAndTranscribeWithPinnedFixture()
@@ -42,19 +43,19 @@ public sealed class WhisperBackendRegistrationTests : IDisposable
         var fixture = await CreateFixtureAsync();
         var review = await ReviewAsync(fixture);
         var dataRoot = Path.Combine(root, "data");
-        var store = await WhisperBackendSelectionStore.OpenAsync(dataRoot);
+        var store = await WhisperBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.SetAsync(review.Binding, false));
         await store.SetAsync(review.Binding, true);
 
-        var reopened = await WhisperBackendSelectionStore.OpenAsync(dataRoot);
+        var reopened = await WhisperBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors);
         var stored = Assert.IsType<ApprovedWhisperBackendBinding>((await reopened.GetStateAsync()).Backend);
         Assert.True(review.Binding.HasSameIdentity(stored));
         Assert.Equal(now, stored.ApprovedUtc);
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(dataRoot, "local-models"), "*.tmp"));
 
         await reopened.ClearAsync();
-        Assert.Null((await (await WhisperBackendSelectionStore.OpenAsync(dataRoot)).GetStateAsync()).Backend);
+        Assert.Null((await (await WhisperBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors)).GetStateAsync()).Backend);
         Assert.All(
             new[] { fixture.Executable, fixture.Model, fixture.RuntimeLicense, fixture.ModelLicense },
             path => Assert.True(File.Exists(path), $"The source file was unexpectedly removed: {path}"));
@@ -97,7 +98,7 @@ public sealed class WhisperBackendRegistrationTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(localModels, "transcription.json"), json);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            WhisperBackendSelectionStore.OpenAsync(Path.Combine(root, "data")));
+            WhisperBackendSelectionStore.OpenWithAnchorAsync(Path.Combine(root, "data"), anchors));
     }
 
     [Fact]
@@ -118,7 +119,7 @@ public sealed class WhisperBackendRegistrationTests : IDisposable
             new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
         await File.WriteAllTextAsync(Path.Combine(localModels, "transcription.json"), state);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => WhisperBackendSelectionStore.OpenAsync(dataRoot));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => WhisperBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors));
     }
 
     [Fact]
@@ -130,7 +131,7 @@ public sealed class WhisperBackendRegistrationTests : IDisposable
         {
             ExecutablePath = @"\\server\share\whisper.exe",
         };
-        var store = await WhisperBackendSelectionStore.OpenAsync(Path.Combine(root, "data"));
+        var store = await WhisperBackendSelectionStore.OpenWithAnchorAsync(Path.Combine(root, "data"), anchors);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.SetAsync(networkBinding, true));
     }
@@ -174,7 +175,7 @@ public sealed class WhisperBackendRegistrationTests : IDisposable
         var fixture = await CreateFixtureAsync();
         var review = await ReviewAsync(fixture);
         var dataRoot = Path.Combine(root, "data");
-        var store = await WhisperBackendSelectionStore.OpenAsync(dataRoot);
+        var store = await WhisperBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors);
         var settings = Path.Combine(dataRoot, "local-models");
         Directory.Move(settings, settings + "-original");
         var outside = Path.Combine(root, "outside");
@@ -197,9 +198,42 @@ public sealed class WhisperBackendRegistrationTests : IDisposable
         File.CreateSymbolicLink(Path.Combine(settings, "transcription.json"), outside);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            WhisperBackendSelectionStore.OpenAsync(dataRoot));
+            WhisperBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors));
 
         Assert.Equal("{}", await File.ReadAllTextAsync(outside));
+    }
+
+    [Fact]
+    public async Task ProtectedApproval_RejectsRollbackAndClearRemovesAuthority()
+    {
+        var fixture = await CreateFixtureAsync();
+        var first = await ReviewAsync(fixture);
+        var dataRoot = Path.Combine(root, "data");
+        var store = await WhisperBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors);
+        await store.SetAsync(first.Binding, true);
+        var statePath = Path.Combine(dataRoot, "local-models", "transcription.json");
+        var firstState = await File.ReadAllBytesAsync(statePath);
+        var second = first.Binding with { ApprovedUtc = now.AddMinutes(1) };
+        await store.SetAsync(second, true);
+
+        await File.WriteAllBytesAsync(statePath, firstState);
+        var replayed = await WhisperBackendSelectionStore.OpenWithAnchorAsync(dataRoot, anchors);
+
+        Assert.True(replayed.RequiresReapproval);
+        Assert.Null((await replayed.GetStateAsync()).Backend);
+        await replayed.SetAsync(second with { ApprovedUtc = now.AddMinutes(2) }, true);
+        Assert.False(replayed.RequiresReapproval);
+
+        var beforeFailedClear = await File.ReadAllBytesAsync(statePath);
+        anchors.FailDeletes = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => replayed.ClearAsync());
+        Assert.Equal(beforeFailedClear, await File.ReadAllBytesAsync(statePath));
+        Assert.NotNull((await replayed.GetStateAsync()).Backend);
+
+        anchors.FailDeletes = false;
+        await replayed.ClearAsync();
+        Assert.Empty(anchors.Values);
+        Assert.Null((await replayed.GetStateAsync()).Backend);
     }
 
     public void Dispose() => TestDirectory.DeleteIfExists(root);

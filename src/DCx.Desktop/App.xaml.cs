@@ -264,11 +264,12 @@ public partial class App : Application
                 "dcx-p06-staging-fixture",
                 digest,
                 Array.AsReadOnly([candidate]));
-            var modelStore = LocalModelSelectionStore.OpenAsync(applicationDataRoot)
+            var approvalAnchorStore = new FixtureLocalModelApprovalStateAnchorStore();
+            var modelStore = LocalModelSelectionStore.OpenWithAnchorAsync(applicationDataRoot, approvalAnchorStore)
                 .GetAwaiter().GetResult();
-            var whisperStore = WhisperBackendSelectionStore.OpenAsync(applicationDataRoot)
+            var whisperStore = WhisperBackendSelectionStore.OpenWithAnchorAsync(applicationDataRoot, approvalAnchorStore)
                 .GetAwaiter().GetResult();
-            var ffmpegStore = FfmpegBackendSelectionStore.OpenAsync(applicationDataRoot)
+            var ffmpegStore = FfmpegBackendSelectionStore.OpenWithAnchorAsync(applicationDataRoot, approvalAnchorStore)
                 .GetAwaiter().GetResult();
             MainWindow = new LocalModelsWindow(
                 modelStore,
@@ -355,6 +356,41 @@ public partial class App : Application
                 throw new InvalidOperationException("The fixture stage anchor conflicts.");
             }
             anchor = value;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FixtureLocalModelApprovalStateAnchorStore : ILocalModelApprovalStateAnchorStore
+    {
+        private readonly Dictionary<(string Kind, string Storage), LocalModelApprovalStateAnchor> anchors = [];
+
+        public Task<LocalModelApprovalStateAnchor?> ReadAsync(
+            string stateKind,
+            string storageId,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(anchors.TryGetValue((stateKind, storageId), out var anchor)
+                ? anchor
+                : null);
+        }
+
+        public Task WriteAsync(
+            LocalModelApprovalStateAnchor anchor,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            anchors[(anchor.StateKind, anchor.StorageId)] = anchor;
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteAsync(
+            string stateKind,
+            string storageId,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            anchors.Remove((stateKind, storageId));
             return Task.CompletedTask;
         }
     }

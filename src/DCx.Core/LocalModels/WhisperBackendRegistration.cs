@@ -262,6 +262,7 @@ public sealed class WhisperBackendSelectionStore
 {
     public const int CurrentSchemaVersion = 1;
     public const int MaximumStateBytes = 32 * 1024;
+    private const string ProtectedStateKind = "whisper-selection";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -274,25 +275,43 @@ public sealed class WhisperBackendSelectionStore
 
     private readonly string root;
     private readonly string statePath;
+    private readonly string storageId;
+    private readonly ILocalModelApprovalStateAnchorStore anchorStore;
     private readonly SemaphoreSlim mutationLock = new(1, 1);
 
-    private WhisperBackendSelectionStore(string root)
+    private WhisperBackendSelectionStore(
+        string root,
+        ILocalModelApprovalStateAnchorStore anchorStore)
     {
         this.root = root;
+        this.anchorStore = anchorStore;
         statePath = Path.Combine(root, "transcription.json");
+        storageId = LocalModelApprovalStateProtector.StorageId(statePath);
     }
+
+    public bool RequiresReapproval { get; private set; }
 
     public static async Task<WhisperBackendSelectionStore> OpenAsync(
         string applicationDataRoot,
+        CancellationToken cancellationToken = default) =>
+        await OpenWithAnchorAsync(
+            applicationDataRoot,
+            new WindowsLocalModelApprovalStateAnchorStore(),
+            cancellationToken).ConfigureAwait(false);
+
+    public static async Task<WhisperBackendSelectionStore> OpenWithAnchorAsync(
+        string applicationDataRoot,
+        ILocalModelApprovalStateAnchorStore anchorStore,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(anchorStore);
         var applicationRoot = LocalModelStoragePathGuard.EnsureDirectory(
             applicationDataRoot,
             "Whisper application-data");
         var root = LocalModelStoragePathGuard.EnsureDirectory(
             Path.Combine(applicationRoot, "local-models"),
             "Whisper settings");
-        var store = new WhisperBackendSelectionStore(root);
+        var store = new WhisperBackendSelectionStore(root, anchorStore);
         store.ValidateStatePath();
         _ = await store.ReadUnsafeAsync(cancellationToken).ConfigureAwait(false);
         return store;
@@ -375,22 +394,46 @@ public sealed class WhisperBackendSelectionStore
         LocalModelStoragePathGuard.ValidateFile(statePath, mustExist: true, "Whisper selection");
         var file = new FileInfo(statePath);
         if (file.Length is <= 0 or > MaximumStateBytes) throw new InvalidOperationException("The Whisper selection file is outside its size limit.");
+        var content = new byte[checked((int)file.Length)];
         try
         {
-            await using var stream = new FileStream(statePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
-            var state = await JsonSerializer.DeserializeAsync<WhisperBackendSelectionState>(
-                stream, JsonOptions, cancellationToken).ConfigureAwait(false);
+            await using (var stream = new FileStream(
+                             statePath,
+                             FileMode.Open,
+                             FileAccess.Read,
+                             FileShare.Read,
+                             4096,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await stream.ReadExactlyAsync(content, cancellationToken).ConfigureAwait(false);
+            }
+            var state = JsonSerializer.Deserialize<WhisperBackendSelectionState>(content, JsonOptions);
             if (state is null || state.SchemaVersion != CurrentSchemaVersion)
             {
                 throw new InvalidOperationException("The Whisper selection schema is unsupported.");
             }
             if (state.Backend is not null) ValidateBinding(state.Backend);
+            if (state.Backend is not null &&
+                !await LocalModelApprovalStateProtector.MatchesAsync(
+                    ProtectedStateKind,
+                    storageId,
+                    content,
+                    anchorStore,
+                    cancellationToken).ConfigureAwait(false))
+            {
+                RequiresReapproval = true;
+                return new WhisperBackendSelectionState(CurrentSchemaVersion, null);
+            }
+            RequiresReapproval = false;
             return state;
         }
         catch (JsonException exception)
         {
             throw new InvalidOperationException("The Whisper selection file is invalid.", exception);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(content);
         }
     }
 
@@ -404,6 +447,14 @@ public sealed class WhisperBackendSelectionStore
 
         LocalModelStoragePathGuard.RequireDirectory(root, "Whisper settings");
         ValidateStatePath();
+        var removesAllAuthority = state.Backend is null;
+        if (removesAllAuthority)
+        {
+            await anchorStore.DeleteAsync(
+                ProtectedStateKind,
+                storageId,
+                cancellationToken).ConfigureAwait(false);
+        }
         var temporary = Path.Combine(root, $"transcription-{Guid.NewGuid():N}.tmp");
         try
         {
@@ -418,6 +469,16 @@ public sealed class WhisperBackendSelectionStore
             LocalModelStoragePathGuard.ValidateFile(temporary, mustExist: true, "Whisper temporary selection");
             ValidateStatePath();
             File.Move(temporary, statePath, overwrite: true);
+            if (!removesAllAuthority)
+            {
+                await LocalModelApprovalStateProtector.ProtectAsync(
+                    ProtectedStateKind,
+                    storageId,
+                    content,
+                    anchorStore,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            RequiresReapproval = false;
         }
         finally
         {
