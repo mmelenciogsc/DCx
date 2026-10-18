@@ -50,7 +50,7 @@ else if (!Path.GetFileName(audio).StartsWith("instant", StringComparison.Ordinal
     // Keep the normal fixture alive long enough to exercise resource sampling.
     // The instant fixture separately verifies honest handling of processes that
     // finish before Windows exposes a usable working-set observation.
-    await Task.Delay(TimeSpan.FromMilliseconds(75));
+    await Task.Delay(TimeSpan.FromMilliseconds(250));
 }
 
 if (Path.GetFileName(audio).StartsWith("control", StringComparison.OrdinalIgnoreCase))
