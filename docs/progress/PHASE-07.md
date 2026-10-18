@@ -30,7 +30,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 ## Measured result
 
 - Locked native Release build: 0 warnings, 0 errors.
-- Original P07 content tests: passed 74, failed 0, skipped 0. Bounded-question policy tests: passed 5, failed 0, skipped 0. Current full native suite: passed 289, failed 0, skipped 0.
+- Original P07 content tests: passed 74, failed 0, skipped 0. Bounded-question policy tests: passed 5, failed 0, skipped 0. Current full native suite: passed 438, failed 0, skipped 0.
 - Real generated H.264 MP4: initial pause and Play/Pause passed.
 - Local frame description identified the fixture's solid blue content; video remained paused; explicit user resume passed.
 - Shared-viewport generated HTML5 video Q&A answered `Blue`; the video remained paused after narration and explicit same-page resume passed.
@@ -39,7 +39,7 @@ The 2026-10-17 full native regression also ran `smoke-desktop.ps1` and `validate
 - Windows OCR recognized the golden `DCX`/`42` content and returned normalized geometry.
 - Semantic repair, HTML export, real OPC DOCX export and DOCX viewer round-trip passed.
 - Native UIA script result: `P07 content viewer UIA validation=PASS`.
-- Latest evidence directory: `artifacts/test-results/p07-0a3c791833884f67bfa554162c81538a/` (generated and intentionally not committed). The disposable profile explicitly registered the real installed FFmpeg candidate, proved the local blue-frame result through that exact binding, and did not retain approval. Composed P06 evidence at `artifacts/test-results/p06-87811a7e3abf4db090d236332cf0557b/` contains WAV/MP3 transcription, real deterministic audio extraction and FFmpeg-registration/clear-denial evidence.
+- Latest evidence directory: `artifacts/test-results/p07-07771b501d5645f98a304bd9c81894c3/` (generated from source committed as `89f7bb3` and intentionally not committed). The disposable profile explicitly registered the real installed FFmpeg candidate, proved the local blue-frame result through that exact binding, and did not retain approval. Composed P06 evidence at `artifacts/test-results/p06-d18b00681cb34eaa8e6c391d846c0c00/` contains WAV/MP3 transcription, real deterministic audio extraction and FFmpeg-registration/clear-denial evidence.
 
 ## Security, accessibility and limitations
 
