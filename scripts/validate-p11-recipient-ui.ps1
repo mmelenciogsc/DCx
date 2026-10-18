@@ -31,6 +31,7 @@ finally {
 $previousDataRoot = $env:DCX_DATA_ROOT
 $previousOfflineStartup = $env:DCX_OFFLINE_STARTUP
 $previousCareOperationsFixture = $env:DCX_CARE_OPERATIONS_FIXTURE
+$previousCareContributorDashboardFixture = $env:DCX_CARE_CONTRIBUTOR_DASHBOARD_FIXTURE
 $process = $null
 $store = $null
 
@@ -86,6 +87,7 @@ New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 $env:DCX_DATA_ROOT = $dataRoot
 $env:DCX_OFFLINE_STARTUP = "1"
 $env:DCX_CARE_OPERATIONS_FIXTURE = "1"
+$env:DCX_CARE_CONTRIBUTOR_DASHBOARD_FIXTURE = "1"
 
 try {
     $process = Start-Process $desktop -PassThru
@@ -424,8 +426,70 @@ try {
         throw "CARE operations replay remained enabled without due records."
     }
 
+    Invoke-ById $mainWindow "CareContributorDashboardButton" | Out-Null
+    $dashboardWindow = Wait-For {
+        Find-WindowByProcessAndId $process.Id "CareContributorDashboardWindow"
+    } "The accessible CARE contributor dashboard did not open."
+    $dashboardHeading = Wait-For {
+        Find-ById $dashboardWindow "CareContributorDashboardHeading"
+    } "The CARE contributor dashboard heading was not exposed."
+    $null = Wait-For {
+        if ($dashboardHeading.Current.HasKeyboardFocus) { $true }
+    } "Keyboard focus did not enter the CARE contributor dashboard heading."
+    $dashboardBoundary = Wait-For {
+        $element = Find-ById $dashboardWindow "CareContributorDashboardBoundary"
+        if ($null -ne $element -and $element.Current.Name -like
+            "Deterministic local validation fixture*recipient destinations*network requests*production actions are unavailable.*") { $element }
+    } "The generated-only CARE contributor dashboard boundary was not exposed."
+    $dashboardSummary = Wait-For {
+        $value = Get-Value $dashboardWindow "CareContributorDashboardSummary"
+        if ($value -like "*Contributor pseudonym: contributor:dashboard-fixture.*" -and
+            $value -like "*Currency: USD.*" -and
+            $value -like "*Periods: 5.*" -and
+            $value -like "*Allocated: USD 25.00.*" -and
+            $value -like "*Paid: USD 4.00.*" -and
+            $value -like "*Outstanding or held: USD 21.00.*" -and
+            $value -like "*Data source: deterministic local fixture.*") { $value }
+    } "The exact generated CARE contributor summary was not exposed."
+    $refreshDashboard = Find-ById $dashboardWindow "RefreshCareContributorDashboardButton"
+    if ($null -eq $refreshDashboard -or -not $refreshDashboard.Current.IsKeyboardFocusable -or
+        [string]::IsNullOrWhiteSpace($refreshDashboard.Current.AccessKey)) {
+        throw "The CARE contributor dashboard refresh action lacks a keyboard-focusable access key."
+    }
+    $dashboardPeriods = Find-ById $dashboardWindow "CareContributorPeriodsList"
+    $periodItems = Wait-For {
+        $items = $dashboardPeriods.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition)
+        if ($items.Count -eq 5) { $items }
+    } "The five generated CARE contributor periods were not exposed."
+    $periodNames = @()
+    for ($periodIndex = 0; $periodIndex -lt $periodItems.Count; $periodIndex++) {
+        $periodNames += [string]$periodItems[$periodIndex].Current.Name
+    }
+    $periodText = $periodNames -join "`n"
+    foreach ($statusCode in @("withheld", "held_below_threshold", "pending", "partially_paid", "paid")) {
+        if ($periodText -notlike "*Status $statusCode.*") {
+            throw "The CARE contributor dashboard omitted status $statusCode. Observed: $periodText"
+        }
+    }
+    if ($periodText -like "*@*" -or $periodText -like "*PayPal*" -or
+        $periodText -like "*account*" -or $periodText -like "*recipient*") {
+        throw "The CARE contributor period history exposed recipient or provider-account data."
+    }
+    Invoke-ById $dashboardWindow "RefreshCareContributorDashboardButton" | Out-Null
+    $dashboardStatus = Wait-For {
+        $status = Find-ById $dashboardWindow "CareContributorDashboardStatus"
+        if ($null -ne $status -and $status.Current.Name -eq
+            "Loaded 5 generated CARE periods. This dashboard is read-only. Network requests 0. Payout attempts 0.") { $status }
+    } "The read-only CARE contributor dashboard refresh was not announced."
+    $null = Wait-For {
+        $summary = Find-ById $dashboardWindow "CareContributorDashboardSummary"
+        if ($summary.Current.HasKeyboardFocus) { $true }
+    } "CARE contributor dashboard refresh did not move focus to the updated summary."
+
     [ordered]@{
-        schema_version = 2
+        schema_version = 3
         heading = $heading.Current.Name
         owner_approval_default_unchecked = $true
         revocation_approval_default_unchecked = $true
@@ -457,6 +521,16 @@ try {
         blocked_case_remained_blocked = $true
         operations_provider_calls = 0
         operations_production_actions = 0
+        contributor_dashboard_heading = $dashboardHeading.Current.Name
+        contributor_dashboard_fixture_boundary = $dashboardBoundary.Current.Name
+        contributor_dashboard_summary = $dashboardSummary
+        contributor_dashboard_periods = $periodItems.Count
+        contributor_dashboard_statuses = @(
+            "withheld", "held_below_threshold", "pending", "partially_paid", "paid")
+        contributor_dashboard_read_only = $true
+        contributor_dashboard_network_requests = 0
+        contributor_dashboard_payout_attempts = 0
+        contributor_dashboard_status_after_refresh = $dashboardStatus.Current.Name
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $evidencePath -Encoding utf8NoBOM
 
     "P11 recipient snapshot native UIA=$($heading.Current.Name)"
@@ -465,6 +539,7 @@ try {
     "P11 provider eligibility remains false=PASS"
     "P11 CARE operations default-off local cycle and focus=PASS"
     "P11 accessible blocked-case review and non-financial disposition=PASS"
+    "P11 accessible privacy-minimized contributor dashboard=PASS"
     "P11 CARE operations aggregate-only provider calls=0 production actions=0"
     "P11 recipient UI network requests=0 payout attempts=0"
     "P11 recipient UI evidence=$evidencePath"
@@ -493,5 +568,6 @@ finally {
         $env:DCX_DATA_ROOT = $previousDataRoot
         $env:DCX_OFFLINE_STARTUP = $previousOfflineStartup
         $env:DCX_CARE_OPERATIONS_FIXTURE = $previousCareOperationsFixture
+        $env:DCX_CARE_CONTRIBUTOR_DASHBOARD_FIXTURE = $previousCareContributorDashboardFixture
     }
 }

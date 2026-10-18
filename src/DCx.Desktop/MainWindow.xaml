@@ -180,6 +180,14 @@
                             AutomationProperties.Name="Open CARE verified-event operations"
                             AutomationProperties.HelpText="Review aggregate verified-event queue health. Processing is unavailable unless an explicitly authorized source provides it."
                             Click="OnCareOperationsClick" />
+                    <Button x:Name="CareContributorDashboardButton"
+                            MinWidth="120"
+                            Margin="0,0,6,0"
+                            Content="CARE dashboard"
+                            AutomationProperties.AutomationId="CareContributorDashboardButton"
+                            AutomationProperties.Name="Open CARE contributor dashboard"
+                            AutomationProperties.HelpText="Review read-only monthly contributor allocations, holds, eligibility and payment status."
+                            Click="OnCareContributorDashboardClick" />
                     <Button MinWidth="100"
                             Margin="0,0,6,0"
                             Content="Recovery"

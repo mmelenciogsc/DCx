@@ -38,7 +38,10 @@ try {
         "DCx.Core.Tests.Finance.DurableCareRepositoryTests.PayoutReservation_RequiresAndAtomicallyReservesOutstandingLiabilityAcrossRepositories",
         "DCx.Core.Tests.Finance.DurableCareRepositoryTests.PayoutCompletion_RevalidatesLiabilityBeforeFinancialMutation",
         "DCx.Core.Tests.Finance.DurableCareRepositoryTests.SchemaTwelve_UnboundTerminalPayoutRemainsReadableButNewReservationsRequireAllocation",
-        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.SchemaThirteen_UnreviewedCarePeriodRequiresFreshExactCloseApproval"
+        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.SchemaThirteen_UnreviewedCarePeriodRequiresFreshExactCloseApproval",
+        "DCx.Core.Tests.Finance.CareContributorDashboardTests.Contract_IsBoundedAndExcludesProviderRecipientAndAccountFields",
+        "DCx.Core.Tests.Finance.CareContributorDashboardTests.Policy_AcceptsOrderedHeldEligiblePendingPartialAndPaidHistory",
+        "DCx.Core.Tests.Finance.CareContributorDashboardTests.UnavailableSource_DoesNotInventContributorOrPeriodState"
     )
     foreach ($requiredContract in $requiredLiabilityContracts) {
         $matchingResults = @($financeResults | Where-Object {
@@ -100,6 +103,7 @@ try {
     "Mixed payout outcomes post successful items only and hold failed payable amounts=PASS"
     "Separately approved failed-item remediation lineage expiry denial and restart recovery=PASS"
     "Protected recipient snapshot owner-approval UI and restart binding=PASS"
+    "Privacy-minimized read-only contributor dashboard and unavailable default=PASS"
     "Real PayPal network calls=0"
     "P11 evidence=$runRoot"
     "P11 local CARE and PayPal mock validation=PASS"

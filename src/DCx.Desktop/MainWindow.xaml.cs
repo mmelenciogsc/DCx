@@ -57,6 +57,7 @@ public partial class MainWindow : Window
     private ContributionsWindow? _contributionsWindow;
     private CareRecipientsWindow? _careRecipientsWindow;
     private CareOperationsWindow? _careOperationsWindow;
+    private CareContributorDashboardWindow? _careContributorDashboardWindow;
     private CrashDiagnosticsWindow? _crashDiagnosticsWindow;
     private Task<LocalModelSelectionStore>? _localModelSelectionStore;
     private Task<WhisperBackendSelectionStore>? _whisperBackendSelectionStore;
@@ -1209,6 +1210,35 @@ public partial class MainWindow : Window
         catch
         {
             SetStatus("CARE verified-event operations could not open safely. No state changed and no provider request occurred.");
+        }
+    }
+
+    private void OnCareContributorDashboardClick(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Opening the read-only CARE contributor dashboard. No payout action will occur.");
+        if (_careContributorDashboardWindow is { IsVisible: true })
+        {
+            _careContributorDashboardWindow.Activate();
+            return;
+        }
+
+        try
+        {
+            var dashboard = CareContributorDashboardSourceFactory.Create();
+            _careContributorDashboardWindow = new CareContributorDashboardWindow(
+                dashboard.Source,
+                dashboard.IsFixture)
+            {
+                Owner = this,
+            };
+            _careContributorDashboardWindow.Closed +=
+                (_, _) => _careContributorDashboardWindow = null;
+            _careContributorDashboardWindow.Show();
+        }
+        catch
+        {
+            SetStatus(
+                "CARE contributor status could not open safely. No financial state was inferred and no payout action occurred.");
         }
     }
 

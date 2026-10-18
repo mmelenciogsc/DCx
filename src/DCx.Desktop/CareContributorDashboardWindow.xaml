@@ -1,0 +1,86 @@
+<Window x:Class="DCx.Desktop.CareContributorDashboardWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CARE contributor dashboard — DCx"
+        Width="760"
+        Height="620"
+        MinWidth="620"
+        MinHeight="460"
+        AutomationProperties.AutomationId="CareContributorDashboardWindow"
+        AutomationProperties.Name="CARE contributor dashboard">
+    <DockPanel Margin="20">
+        <TextBlock x:Name="StatusText"
+                   DockPanel.Dock="Bottom"
+                   Margin="0,16,0,0"
+                   Padding="10"
+                   Text="Loading CARE contributor status."
+                   TextWrapping="Wrap"
+                   Background="#F3F3F3"
+                   AutomationProperties.AutomationId="CareContributorDashboardStatus"
+                   AutomationProperties.Name="Loading CARE contributor status."
+                   AutomationProperties.LiveSetting="Assertive" />
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Focusable="False">
+            <StackPanel>
+                <TextBlock x:Name="Heading"
+                           FontSize="26"
+                           FontWeight="SemiBold"
+                           Text="CARE contributor dashboard"
+                           Focusable="True"
+                           AutomationProperties.AutomationId="CareContributorDashboardHeading"
+                           AutomationProperties.Name="CARE contributor dashboard" />
+                <TextBlock Margin="0,10,0,0"
+                           TextWrapping="Wrap"
+                           Text="Review monthly allocations, Net 60 eligibility, holds, pending amounts and payments. This read-only surface exposes no recipient destination, provider account, transaction identifier or payout action." />
+                <Border Margin="0,14,0,0"
+                        Padding="10"
+                        Background="#FFF4CE"
+                        BorderBrush="#8A6D00"
+                        BorderThickness="1">
+                    <TextBlock x:Name="BoundaryText"
+                               TextWrapping="Wrap"
+                               Text="Contributor status is not configured. No allocation, hold, eligibility or payment state is inferred."
+                               AutomationProperties.AutomationId="CareContributorDashboardBoundary"
+                               AutomationProperties.Name="Contributor status is not configured. No allocation, hold, eligibility or payment state is inferred." />
+                </Border>
+
+                <GroupBox Margin="0,18,0,0" Header="Contributor summary">
+                    <StackPanel Margin="12,8">
+                        <TextBox x:Name="SummaryText"
+                                 MinHeight="150"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="CARE contributor status has not been loaded."
+                                 AutomationProperties.AutomationId="CareContributorDashboardSummary"
+                                 AutomationProperties.Name="CARE contributor status has not been loaded." />
+                        <Button x:Name="RefreshButton"
+                                Width="190"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="_Refresh dashboard"
+                                AutomationProperties.AutomationId="RefreshCareContributorDashboardButton"
+                                AutomationProperties.Name="Refresh CARE contributor dashboard"
+                                AutomationProperties.HelpText="Reads contributor status only. It cannot create, approve or send a payout."
+                                Click="OnRefreshClick" />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Margin="0,18,0,0" Header="Monthly allocation history">
+                    <ListBox x:Name="PeriodsList"
+                             MinHeight="180"
+                             MaxHeight="260"
+                             Margin="12,8"
+                             DisplayMemberPath="Display"
+                             AutomationProperties.AutomationId="CareContributorPeriodsList"
+                             AutomationProperties.Name="CARE monthly allocation history" />
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>
