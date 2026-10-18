@@ -15,6 +15,8 @@ Catalog parsing rejects unknown or duplicate JSON members, unsupported schema ve
 
 Offline artifact review opens an existing local regular file with a no-write/no-delete read lease, revalidates the path after the lease is acquired, verifies its extension, exact size, container/model signature, semantic Ollama descriptors and exact SHA-256, and returns a content-minimized review record. It does not copy, extract, execute, install, pull or make a network request. Runtime archives remain subject to contained third-party notice review after staging.
 
+The native local-model window authenticates and exposes the embedded catalog through keyboard-focusable UIA controls. It shows exact source, size, digest, license and managed-layer evidence. A user may browse to an already-staged local artifact and invoke only the offline reviewer. The surface provides no download, install, pull, extraction, execution, approval or selection action, and a successful integrity result is explicitly not legal or production approval.
+
 The catalog is an admissibility input, not consent. Any download or model pull still requires explicit owner authorization. Any production selection still requires the existing accessible, default-off license review and approval plus real quality/resource/cancellation/unload gates.
 
 ## Consequences
