@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -94,12 +95,16 @@ public partial class LocalModelsWindow : Window
                 .OrderBy(candidate => candidate.Id, StringComparer.Ordinal)
                 .Select(candidate => new DependencyCandidateRow(candidate))
                 .ToArray();
+            var transferPlan = new LocalModelDependencyTransferPlanner().CreateForAll(
+                catalog,
+                LocalModelDependencyTransferPlanner.TryGetAvailableFreeBytes(applicationDataRoot));
             DependencyCandidatesList.ItemsSource = rows;
             SetDependencyCatalogSummary(dependencyCatalogFixture is null
                 ? $"Catalog {catalog.CatalogId}. SHA-256 {catalog.CatalogSha256}. " +
                   $"{rows.Length} immutable candidates. Network, download, install, pull, execution, registration, and selection actions are absent; only a separately approved exact Whisper runtime can be staged inertly."
                 : $"Synthetic validation catalog {catalog.CatalogId}. SHA-256 {catalog.CatalogSha256}. " +
                   $"{rows.Length} generated candidate. Network, download, install, pull, execution, registration, and selection are unavailable.");
+            SetDependencyTransferPreflight(FormatDependencyTransferPlan(transferPlan));
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
         {
@@ -109,6 +114,8 @@ public partial class LocalModelsWindow : Window
             DependencyCandidatesList.ItemsSource = null;
             SetDependencyCatalogSummary(
                 "The built-in dependency catalog failed authentication and no candidate is available. No external action occurred.");
+            SetDependencyTransferPreflight(
+                "Transfer preflight is unavailable because the dependency catalog failed authentication. No external action occurred.");
         }
         finally
         {
@@ -907,6 +914,12 @@ public partial class LocalModelsWindow : Window
         AutomationProperties.SetName(DependencyCatalogSummary, value);
     }
 
+    private void SetDependencyTransferPreflight(string value)
+    {
+        DependencyTransferPreflight.Text = value;
+        AutomationProperties.SetName(DependencyTransferPreflight, value);
+    }
+
     private void SetDependencyCandidateDetails(string value)
     {
         DependencyCandidateDetails.Text = value;
@@ -938,6 +951,29 @@ public partial class LocalModelsWindow : Window
             $"Expected bytes: {candidate.License.ExpectedBytes:N0}. SHA-256: {candidate.License.Sha256}.\n" +
             $"{containedReview}\n{layers}\n" +
             "This read-only inventory grants no network, download, extraction, install, pull, execution, legal, approval, or selection authority.";
+    }
+
+    private static string FormatDependencyTransferPlan(LocalModelDependencyTransferPlan plan)
+    {
+        static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+        var available = plan.ObservedAvailableFreeBytes is long availableBytes
+            ? $"Observed available storage: {Number(availableBytes)} bytes. " +
+              (plan.CapacitySufficient ? "The observation meets the minimum." : "The observation is below the minimum.")
+            : "Available storage could not be observed, so transfer capacity is not satisfied.";
+        var itemDetails = string.Join(
+            "\n",
+            plan.Items.Select(item =>
+                $"{item.SourceUri}; {Number(item.ExpectedBytes)} bytes; SHA-256 {item.Sha256}; roles {string.Join(", ", item.Roles)}."));
+        var candidateWord = plan.CandidateIds.Count == 1 ? "candidate" : "candidates";
+        var itemWord = plan.Items.Count == 1 ? "item" : "items";
+        return
+            $"Transfer preflight only. Plan SHA-256 {plan.PlanSha256}. " +
+            $"{plan.CandidateIds.Count} {candidateWord}. {plan.Items.Count} immutable transfer {itemWord}. " +
+            $"{Number(plan.TransferBytes)} network bytes. {Number(plan.MinimumFreeBytes)} minimum free bytes. " +
+            "The minimum reserves one temporary transfer copy, one retained verified copy, and 536,870,912 workspace bytes. " +
+            $"{available} Capacity must be rechecked immediately before any future transfer.\n" +
+            $"{itemDetails}\n" +
+            "No transfer approval exists. Nothing was downloaded, installed, extracted, pulled, registered, selected, or executed.";
     }
 
     private static string Sha256(string value) =>

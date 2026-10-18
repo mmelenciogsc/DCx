@@ -225,6 +225,19 @@ try {
             $candidate
         }
     } "The immutable dependency catalog identity and no-authority notice were not exposed."
+    $dependencyTransferPreflight = Wait-For {
+        $candidate = Find-ById $localModelsWindow "DependencyTransferPreflight"
+        if ($null -ne $candidate -and
+            $candidate.Current.Name -like "Transfer preflight only. Plan SHA-256 a0d997c6298fdf5f592241928c6fd9564c6de0c3e023c9eb69bd1df96406c286.*" -and
+            $candidate.Current.Name -like "*4 candidates. 9 immutable transfer items.*" -and
+            $candidate.Current.Name -like "*1,281,058,770 network bytes. 3,098,988,452 minimum free bytes.*" -and
+            $candidate.Current.Name -like "*No transfer approval exists. Nothing was downloaded, installed, extracted, pulled, registered, selected, or executed.*") {
+            $candidate
+        }
+    } "The exact dependency transfer preflight and no-authority notice were not exposed."
+    if (-not $dependencyTransferPreflight.Current.IsKeyboardFocusable) {
+        throw "The exact dependency transfer preflight is not keyboard focusable."
+    }
     $dependencyList = Find-ById $localModelsWindow "DependencyCandidatesList"
     if ($null -eq $dependencyList -or -not $dependencyList.Current.IsKeyboardFocusable) {
         throw "The audited dependency candidate list is not keyboard focusable."
@@ -772,6 +785,15 @@ try {
                 $candidate
             }
         } "The gated synthetic staging catalog was not exposed."
+        $null = Wait-For {
+            $candidate = Find-ById $stagingWindow "DependencyTransferPreflight"
+            if ($null -ne $candidate -and
+                $candidate.Current.Name -like "Transfer preflight only. Plan SHA-256 *" -and
+                $candidate.Current.Name -like "*1 candidate. 2 immutable transfer items.*" -and
+                $candidate.Current.Name -like "*No transfer approval exists. Nothing was downloaded, installed, extracted, pulled, registered, selected, or executed.*") {
+                $candidate
+            }
+        } "The generated-catalog transfer preflight and no-authority notice were not exposed."
         $stagingList = Find-ById $stagingWindow "DependencyCandidatesList"
         $stagingItem = Wait-For {
             $items = $stagingList.FindAll(
@@ -934,6 +956,12 @@ try {
         dependency_catalog_native_uia = "pass"
         dependency_catalog_sha256 = "1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325"
         dependency_candidate_count = 4
+        dependency_transfer_preflight_native_uia = "pass"
+        dependency_transfer_plan_sha256 = "a0d997c6298fdf5f592241928c6fd9564c6de0c3e023c9eb69bd1df96406c286"
+        dependency_transfer_bytes = 1281058770
+        dependency_transfer_minimum_free_bytes = 3098988452
+        dependency_transfer_item_count = 9
+        dependency_transfer_authority_granted = $false
         dependency_staged_mismatch_denied = $true
         dependency_rejected_source_preserved = $true
         dependency_external_actions_exposed = $false
@@ -991,6 +1019,7 @@ try {
     "Complete runtime/model licenses UIA=PASS"
     "Exact four-file digest review UIA=PASS"
     "Immutable dependency catalog and staged-mismatch denial UIA=PASS"
+    "Exact dependency transfer footprint and capacity preflight UIA=PASS"
     "Explicit default-off inert Whisper runtime staging UIA=PASS"
     "Protected runtime staging receipt anchor composition UIA=PASS"
     "Protected Whisper/FFmpeg approval-state anchors and reapproval warnings UIA=PASS"

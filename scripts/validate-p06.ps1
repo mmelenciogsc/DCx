@@ -65,6 +65,13 @@ try {
         "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.ArtifactReview_DeniesLinkedArtifactWithoutChangingOutsideFile",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyCatalogTests.ArtifactReview_DeniesLinkedAncestorWithoutChangingOutsideFile"
     )
+    $requiredDependencyTransferContracts = @(
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferPlanTests.EmbeddedCatalog_ProducesExactDeduplicatedTransferAndStorageFootprint",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferPlanTests.Plan_IsOrderStableAndCapacityObservationDoesNotChangeAuthorityDigest",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferPlanTests.Plan_BindsExactSelectedCandidatesAndChangesForAValidSubset",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferPlanTests.Plan_RejectsUnknownDuplicateOrMalformedSelectionsAndCatalogs",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferPlanTests.Plan_RejectsConflictingIdentityForOneExactSource"
+    )
     $requiredApprovalStateContracts = @(
         "DCx.Core.Tests.LocalModels.LocalModelApprovalStateAnchorStoreTests.WindowsVaultAnchor_RoundTripsOverwritesIsolatesAndRejectsMalformedState",
         "DCx.Core.Tests.LocalModels.LocalModelApprovalStateAnchorStoreTests.WindowsVaultAnchor_HonorsPreCanceledOperationsWithoutCreatingCredential",
@@ -107,6 +114,12 @@ try {
             throw "P06 did not prove required pinned-dependency contract: $requiredDependencyContract"
         }
     }
+    foreach ($requiredDependencyTransferContract in $requiredDependencyTransferContracts) {
+        $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredDependencyTransferContract })
+        if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
+            throw "P06 did not prove required dependency transfer-preflight contract: $requiredDependencyTransferContract"
+        }
+    }
     foreach ($requiredApprovalStateContract in $requiredApprovalStateContracts) {
         $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredApprovalStateContract })
         if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
@@ -147,6 +160,12 @@ try {
         $whisperRegistrationEvidence.dependency_catalog_native_uia -ne "pass" -or
         $whisperRegistrationEvidence.dependency_catalog_sha256 -ne "1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325" -or
         $whisperRegistrationEvidence.dependency_candidate_count -ne 4 -or
+        $whisperRegistrationEvidence.dependency_transfer_preflight_native_uia -ne "pass" -or
+        $whisperRegistrationEvidence.dependency_transfer_plan_sha256 -ne "a0d997c6298fdf5f592241928c6fd9564c6de0c3e023c9eb69bd1df96406c286" -or
+        $whisperRegistrationEvidence.dependency_transfer_bytes -ne 1281058770 -or
+        $whisperRegistrationEvidence.dependency_transfer_minimum_free_bytes -ne 3098988452 -or
+        $whisperRegistrationEvidence.dependency_transfer_item_count -ne 9 -or
+        $whisperRegistrationEvidence.dependency_transfer_authority_granted -ne $false -or
         $whisperRegistrationEvidence.dependency_staged_mismatch_denied -ne $true -or
         $whisperRegistrationEvidence.dependency_rejected_source_preserved -ne $true -or
         $whisperRegistrationEvidence.dependency_external_actions_exposed -ne $false -or
@@ -251,6 +270,17 @@ if ($dependencyCatalog.CatalogId -cne "dcx-p06-dependencies-2026-10-18" -or
     $dependencyCatalog.CatalogSha256 -cne "1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325" -or
     $dependencyCandidateIds.Count -ne 4) {
     throw "The embedded P06 dependency catalog identity changed."
+}
+$observedFreeBytes = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($repoRoot)).AvailableFreeSpace
+$dependencyTransferPlan = [DCx.Core.LocalModels.LocalModelDependencyTransferPlanner]::new().CreateForAll(
+    $dependencyCatalog,
+    [Nullable[long]]::new($observedFreeBytes))
+if ($dependencyTransferPlan.PlanSha256 -cne "a0d997c6298fdf5f592241928c6fd9564c6de0c3e023c9eb69bd1df96406c286" -or
+    $dependencyTransferPlan.Items.Count -ne 9 -or
+    $dependencyTransferPlan.TransferBytes -ne 1281058770 -or
+    $dependencyTransferPlan.MinimumFreeBytes -ne 3098988452 -or
+    $dependencyTransferPlan.CapacitySufficient -ne $true) {
+    throw "The exact P06 dependency transfer footprint or current storage-capacity preflight failed."
 }
 $client = [DCx.Core.LocalModels.OllamaLocalClient]::new(
     [Uri]"http://localhost:11434/", [TimeSpan]::FromMinutes(3))
@@ -507,6 +537,14 @@ $manifest = [ordered]@{
     dependency_catalog_sha256 = [string]$dependencyCatalog.CatalogSha256
     dependency_catalog_candidates = @($dependencyCandidateIds)
     dependency_catalog_contract_tests = $requiredDependencyContracts.Count
+    dependency_transfer_contract_tests = $requiredDependencyTransferContracts.Count
+    dependency_transfer_plan_sha256 = [string]$dependencyTransferPlan.PlanSha256
+    dependency_transfer_items = [int]$dependencyTransferPlan.Items.Count
+    dependency_transfer_bytes = [long]$dependencyTransferPlan.TransferBytes
+    dependency_transfer_minimum_free_bytes = [long]$dependencyTransferPlan.MinimumFreeBytes
+    dependency_transfer_observed_free_bytes = [long]$dependencyTransferPlan.ObservedAvailableFreeBytes
+    dependency_transfer_capacity_sufficient = [bool]$dependencyTransferPlan.CapacitySufficient
+    dependency_transfer_authority_granted = $false
     dependency_runtime_archive_denials = $runtimeArchiveDenials.Count
     dependency_downloads_or_installs = 0
     model_unload_verified = $unloaded
@@ -542,6 +580,7 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Local-model linked-root, linked-file and swapped-directory denials=PASS ($($manifest.local_model_storage_link_denials)/$($manifest.local_model_storage_link_denials)); external writes=$($manifest.local_model_storage_external_writes)"
 "Pinned dependency catalog=$($manifest.dependency_catalog_id); SHA-256=$($manifest.dependency_catalog_sha256)"
 "Pinned dependency catalog/reviewer contracts=PASS ($($manifest.dependency_catalog_contract_tests)/$($manifest.dependency_catalog_contract_tests)); downloads or installs=$($manifest.dependency_downloads_or_installs)"
+"Dependency transfer preflight contracts=PASS ($($manifest.dependency_transfer_contract_tests)/$($manifest.dependency_transfer_contract_tests)); plan SHA-256=$($manifest.dependency_transfer_plan_sha256); network bytes=$($manifest.dependency_transfer_bytes); minimum free bytes=$($manifest.dependency_transfer_minimum_free_bytes); observed free bytes=$($manifest.dependency_transfer_observed_free_bytes); authority granted=False"
 "Whisper runtime traversal, collision, device, link, missing-CLI, compression-bomb, CRC and encryption denials=PASS ($($manifest.dependency_runtime_archive_denials)/$($manifest.dependency_runtime_archive_denials))"
 "Model unload verified=PASS"
 "P06 local-model tests=PASS ($localModelTestsPassed/$localModelTestsPassed)"
