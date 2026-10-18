@@ -234,7 +234,8 @@ try {
             $candidate.Current.Name -like "Catalog dcx-p06-dependencies-2026-10-18.*" -and
             $candidate.Current.Name -like "*SHA-256 1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325*" -and
             $candidate.Current.Name -like "*4 immutable candidates*" -and
-            $candidate.Current.Name -like "*Provider contact is available only through the separate default-off exact-plan transfer approval*" -and
+            $candidate.Current.Name -like "*Route observation is available only through the explicit HEAD-only action*" -and
+            $candidate.Current.Name -like "*Payload contact is available only after that in-memory review and the separate default-off exact-plan transfer approval*" -and
             $candidate.Current.Name -like "*Transferred content remains inert*installation, extraction, pull, execution, registration, and selection are not authorized*") {
             $candidate
         }
@@ -249,6 +250,7 @@ try {
             $candidate.Current.Name -like "*reloads the authenticated catalog, requires exact-item approval, disables automatic redirects, proxy, credentials, preauthentication, cookies and decompression, and rolls back any partial stream*" -and
             $candidate.Current.Name -like "*bounded manual redirect policy is bound to the displayed digest and routes*" -and
             $candidate.Current.Name -like "*current policy has no routes; no real provider redirect is authorized*" -and
+            $candidate.Current.Name -like "*No current in-memory provider-route review exists*HEAD-only route review*" -and
             $candidate.Current.Name -like "*private set coordinator serializes transfer, verification and cleanup*rechecks capacity*uses random incoming storage*protects a source-path-free receipt*atomically publishes only a complete plan*can rehash the completed set*" -and
             $candidate.Current.Name -like "*separately approved exact-plan transfer, cancellation, protected verification and abandoned-partial recovery*" -and
             $candidate.Current.Name -like "*Current provider redirects remain denied*" -and
@@ -267,10 +269,29 @@ try {
         [System.Windows.Automation.TogglePattern]::Pattern)
     $dependencyTransferStart = Find-ById $localModelsWindow "StartDependencyTransferButton"
     $dependencyTransferCancel = Find-ById $localModelsWindow "CancelDependencyTransferButton"
+    $dependencyRouteReview = Find-ById $localModelsWindow "ReviewDependencyRoutesButton"
+    $dependencyRouteReviewCancel = Find-ById $localModelsWindow "CancelDependencyRouteReviewButton"
     if ($dependencyTransferToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off -or
-        -not $dependencyTransferApproval.Current.IsEnabled -or
-        $dependencyTransferStart.Current.IsEnabled -or $dependencyTransferCancel.Current.IsEnabled) {
-        throw "The production dependency transfer did not begin default-off with start and cancellation unavailable."
+        $dependencyTransferApproval.Current.IsEnabled -or
+        $dependencyTransferStart.Current.IsEnabled -or $dependencyTransferCancel.Current.IsEnabled -or
+        $null -eq $dependencyRouteReview -or -not $dependencyRouteReview.Current.IsEnabled -or
+        -not $dependencyRouteReview.Current.IsKeyboardFocusable -or
+        $dependencyRouteReview.Current.Name -notlike "*HEAD requests only*" -or
+        $dependencyRouteReview.Current.HelpText -notlike "*reads no response body or payload*" -or
+        $dependencyRouteReview.Current.HelpText -notlike "*does not approve a transfer*" -or
+        $null -eq $dependencyRouteReviewCancel -or $dependencyRouteReviewCancel.Current.IsEnabled) {
+        throw "Production route review and dependency transfer did not begin at the explicit, default-off authority boundary."
+    }
+    $routeActionIds = @("ReviewDependencyRoutesButton", "CancelDependencyRouteReviewButton")
+    $routeAccessKeys = foreach ($automationId in $routeActionIds) {
+        $action = Find-ById $localModelsWindow $automationId
+        if ([string]::IsNullOrWhiteSpace($action.Current.AccessKey)) {
+            throw "The $automationId provider-route review control lacks an access key."
+        }
+        $action.Current.AccessKey
+    }
+    if (@($routeAccessKeys | Sort-Object -Unique).Count -ne $routeAccessKeys.Count) {
+        throw "Provider-route review controls expose duplicate access keys."
     }
     $dependencyList = Find-ById $localModelsWindow "DependencyCandidatesList"
     if ($null -eq $dependencyList -or -not $dependencyList.Current.IsKeyboardFocusable) {
@@ -1002,6 +1023,9 @@ try {
         dependency_transfer_action_exposed = $true
         dependency_transfer_approval_default_unchecked = $true
         dependency_transfer_start_without_approval_denied = $true
+        dependency_provider_route_review_explicit = $true
+        dependency_provider_route_review_head_only_notice = $true
+        dependency_provider_route_review_not_invoked = $true
         dependency_staged_mismatch_denied = $true
         dependency_rejected_source_preserved = $true
         dependency_forbidden_activation_actions_exposed = $false

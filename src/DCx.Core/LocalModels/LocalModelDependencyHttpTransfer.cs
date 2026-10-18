@@ -90,8 +90,8 @@ public sealed record LocalModelDependencyRedirectRouteReview(
     Uri ItemSourceUri,
     long ExpectedBytes,
     string Sha256,
-    Uri FromOrigin,
-    Uri TargetUriPrefix);
+    Uri FromUriWithoutQuery,
+    Uri TargetUriWithoutQuery);
 
 public sealed record LocalModelDependencyRedirectPolicyReview(
     int SchemaVersion,
@@ -99,9 +99,9 @@ public sealed record LocalModelDependencyRedirectPolicyReview(
     bool AllowsRedirects,
     IReadOnlyList<LocalModelDependencyRedirectRouteReview> Routes)
 {
-    public const int CurrentSchemaVersion = 1;
-    private const int MaximumRules = 16;
-    private const string DigestDomain = "DCx.local-model-dependency-redirect-policy.v1";
+    public const int CurrentSchemaVersion = 2;
+    private const int MaximumRules = 32;
+    private const string DigestDomain = "DCx.local-model-dependency-redirect-policy.v2";
 
     public static LocalModelDependencyRedirectPolicyReview DenyAll { get; } = Create([]);
 
@@ -171,29 +171,16 @@ public sealed record LocalModelDependencyRedirectPolicyReview(
                 route.ItemSourceUri.AbsoluteUri,
                 item.SourceUri.AbsoluteUri,
                 StringComparison.Ordinal) &&
-            SameOrigin(route.FromOrigin, previousUri) &&
-            SameOrigin(route.TargetUriPrefix, targetUri) &&
-            targetUri.AbsolutePath.StartsWith(
-                route.TargetUriPrefix.AbsolutePath,
-                StringComparison.Ordinal));
+            SameUriWithoutQuery(route.FromUriWithoutQuery, previousUri) &&
+            SameUriWithoutQuery(route.TargetUriWithoutQuery, targetUri));
     }
 
-    internal static void ValidateOrigin(Uri uri, string parameterName)
+    internal static void ValidateRouteUriWithoutQuery(Uri uri, string parameterName)
     {
         ValidateRedirectUri(uri);
-        if (!string.Equals(uri.AbsolutePath, "/", StringComparison.Ordinal))
+        if (string.Equals(uri.AbsolutePath, "/", StringComparison.Ordinal))
         {
-            throw new ArgumentException("A redirect origin must have a root path.", parameterName);
-        }
-    }
-
-    internal static void ValidateTargetPrefix(Uri uri)
-    {
-        ValidateRedirectUri(uri);
-        if (string.Equals(uri.AbsolutePath, "/", StringComparison.Ordinal) ||
-            !uri.AbsolutePath.EndsWith("/", StringComparison.Ordinal))
-        {
-            throw new ArgumentException("A redirect target prefix must be non-root and end with a slash.", nameof(uri));
+            throw new ArgumentException("A redirect route URI must have an exact non-root path.", parameterName);
         }
     }
 
@@ -206,8 +193,8 @@ public sealed record LocalModelDependencyRedirectPolicyReview(
             throw new ArgumentOutOfRangeException(nameof(route));
         }
         LocalModelDependencyCatalogLoader.ValidateSha256(route.Sha256, "redirect item");
-        ValidateOrigin(route.FromOrigin, nameof(route.FromOrigin));
-        ValidateTargetPrefix(route.TargetUriPrefix);
+        ValidateRouteUriWithoutQuery(route.FromUriWithoutQuery, nameof(route.FromUriWithoutQuery));
+        ValidateRouteUriWithoutQuery(route.TargetUriWithoutQuery, nameof(route.TargetUriWithoutQuery));
     }
 
     private static void ValidateRedirectUri(Uri uri)
@@ -229,13 +216,14 @@ public sealed record LocalModelDependencyRedirectPolicyReview(
         route.ItemSourceUri.AbsoluteUri,
         route.ExpectedBytes.ToString(System.Globalization.CultureInfo.InvariantCulture),
         route.Sha256,
-        route.FromOrigin.AbsoluteUri,
-        route.TargetUriPrefix.AbsoluteUri);
+        route.FromUriWithoutQuery.AbsoluteUri,
+        route.TargetUriWithoutQuery.AbsoluteUri);
 
-    private static bool SameOrigin(Uri expected, Uri actual) =>
+    private static bool SameUriWithoutQuery(Uri expected, Uri actual) =>
         expected.Scheme == actual.Scheme &&
         expected.Port == actual.Port &&
-        string.Equals(expected.IdnHost, actual.IdnHost, StringComparison.Ordinal);
+        string.Equals(expected.IdnHost, actual.IdnHost, StringComparison.Ordinal) &&
+        string.Equals(expected.AbsolutePath, actual.AbsolutePath, StringComparison.Ordinal);
 
     private static string ComputeDigest(IReadOnlyList<LocalModelDependencyRedirectRouteReview> routes)
     {
@@ -288,17 +276,17 @@ internal sealed record LocalModelDependencyRedirectRule(
     Uri ItemSourceUri,
     long ExpectedBytes,
     string Sha256,
-    Uri FromOrigin,
-    Uri TargetUriPrefix);
+    Uri FromUriWithoutQuery,
+    Uri TargetUriWithoutQuery);
 
 /// <summary>
-/// Matches redirect transitions only for one exact authenticated plan item and one compiled
-/// HTTPS origin/path transition. Production intentionally supplies no rules until official
-/// provider behavior has been reviewed and approved.
+/// Matches redirect transitions only for one exact authenticated plan item and exact query-free
+/// HTTPS source/target paths. Production starts deny-all and can receive routes only from an
+/// explicit, bounded, in-memory provider-route review session.
 /// </summary>
 internal sealed class ExactLocalModelDependencyRedirectPolicy : ILocalModelDependencyRedirectPolicy
 {
-    private const int MaximumRules = 16;
+    private const int MaximumRules = 32;
     public LocalModelDependencyRedirectPolicyReview Review { get; }
 
     public ExactLocalModelDependencyRedirectPolicy(
@@ -321,14 +309,18 @@ internal sealed class ExactLocalModelDependencyRedirectPolicy : ILocalModelDepen
                 throw new ArgumentOutOfRangeException(nameof(rules));
             }
             LocalModelDependencyCatalogLoader.ValidateSha256(rule.Sha256, "redirect item");
-            LocalModelDependencyRedirectPolicyReview.ValidateOrigin(rule.FromOrigin, nameof(rule.FromOrigin));
-            LocalModelDependencyRedirectPolicyReview.ValidateTargetPrefix(rule.TargetUriPrefix);
+            LocalModelDependencyRedirectPolicyReview.ValidateRouteUriWithoutQuery(
+                rule.FromUriWithoutQuery,
+                nameof(rule.FromUriWithoutQuery));
+            LocalModelDependencyRedirectPolicyReview.ValidateRouteUriWithoutQuery(
+                rule.TargetUriWithoutQuery,
+                nameof(rule.TargetUriWithoutQuery));
             var identity = string.Join('\n',
                 rule.ItemSourceUri.AbsoluteUri,
                 rule.ExpectedBytes.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 rule.Sha256,
-                rule.FromOrigin.AbsoluteUri,
-                rule.TargetUriPrefix.AbsoluteUri);
+                rule.FromUriWithoutQuery.AbsoluteUri,
+                rule.TargetUriWithoutQuery.AbsoluteUri);
             if (!identities.Add(identity))
             {
                 throw new ArgumentException("The redirect policy contains a duplicate rule.", nameof(rules));
@@ -343,8 +335,8 @@ internal sealed class ExactLocalModelDependencyRedirectPolicy : ILocalModelDepen
                 rule.ItemSourceUri,
                 rule.ExpectedBytes,
                 rule.Sha256,
-                rule.FromOrigin,
-                rule.TargetUriPrefix)).ToArray()));
+                rule.FromUriWithoutQuery,
+                rule.TargetUriWithoutQuery)).ToArray()));
     }
 
     public bool IsAllowed(
@@ -360,8 +352,8 @@ internal sealed class ExactLocalModelDependencyRedirectPolicy : ILocalModelDepen
         rule.ItemSourceUri.AbsoluteUri,
         rule.ExpectedBytes.ToString(System.Globalization.CultureInfo.InvariantCulture),
         rule.Sha256,
-        rule.FromOrigin.AbsoluteUri,
-        rule.TargetUriPrefix.AbsoluteUri);
+        rule.FromUriWithoutQuery.AbsoluteUri,
+        rule.TargetUriWithoutQuery.AbsoluteUri);
 
 }
 
@@ -414,6 +406,16 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
             timeout,
             redirectPolicy ?? DenyAllLocalModelDependencyRedirectPolicy.Instance,
             useInjectedCatalog: true)
+    {
+    }
+
+    internal LocalModelDependencyHttpTransfer(ILocalModelDependencyRedirectPolicy redirectPolicy)
+        : this(
+            CreateHardenedHandler(),
+            null,
+            DefaultTimeout,
+            redirectPolicy ?? throw new ArgumentNullException(nameof(redirectPolicy)),
+            useInjectedCatalog: false)
     {
     }
 
@@ -594,14 +596,14 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
         return request;
     }
 
-    private static bool IsRedirect(HttpStatusCode statusCode) => statusCode is
+    internal static bool IsRedirect(HttpStatusCode statusCode) => statusCode is
         HttpStatusCode.MovedPermanently or
         HttpStatusCode.Found or
         HttpStatusCode.SeeOther or
         HttpStatusCode.TemporaryRedirect or
         HttpStatusCode.PermanentRedirect;
 
-    private static bool IsStructurallySafeRedirectTarget(Uri? uri) =>
+    internal static bool IsStructurallySafeRedirectTarget(Uri? uri) =>
         uri is
         {
             IsAbsoluteUri: true,
@@ -618,7 +620,7 @@ public sealed class LocalModelDependencyHttpTransfer : ILocalModelDependencyTran
         !uri.OriginalString.Contains("\\", StringComparison.Ordinal) &&
         !uri.OriginalString.Any(char.IsControl);
 
-    private static void ValidateResponseRequestUri(HttpResponseMessage response, Uri requestedUri)
+    internal static void ValidateResponseRequestUri(HttpResponseMessage response, Uri requestedUri)
     {
         if (response.RequestMessage?.RequestUri is not { } responseUri ||
             !string.Equals(responseUri.AbsoluteUri, requestedUri.AbsoluteUri, StringComparison.Ordinal))

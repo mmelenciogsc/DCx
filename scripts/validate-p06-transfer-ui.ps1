@@ -109,6 +109,15 @@ try {
     $approvalToggle = $approval.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
     $start = Find-ById $window "StartDependencyTransferButton"
     $cancel = Find-ById $window "CancelDependencyTransferButton"
+    $routeReview = Find-ById $window "ReviewDependencyRoutesButton"
+    $routeReviewCancel = Find-ById $window "CancelDependencyRouteReviewButton"
+    if ($null -eq $routeReview -or $null -eq $routeReviewCancel -or
+        $routeReview.Current.Name -notlike "*HEAD requests only*" -or
+        $routeReview.Current.HelpText -notlike "*reads no response body or payload*" -or
+        $routeReview.Current.HelpText -notlike "*does not approve a transfer*" -or
+        $routeReview.Current.IsEnabled -or $routeReviewCancel.Current.IsEnabled) {
+        throw "The synthetic fixture did not expose a disabled, accurately described provider-route review boundary."
+    }
     if ($approvalToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off -or
         -not $approval.Current.IsEnabled -or $start.Current.IsEnabled -or $cancel.Current.IsEnabled) {
         throw "Dependency transfer did not begin default-off with start and cancellation unavailable."
@@ -116,6 +125,8 @@ try {
 
     $actionIds = @(
         "ApproveDependencyTransferBox",
+        "ReviewDependencyRoutesButton",
+        "CancelDependencyRouteReviewButton",
         "StartDependencyTransferButton",
         "CancelDependencyTransferButton",
         "VerifyDependencyTransferButton",
@@ -215,6 +226,9 @@ try {
         keyboard_focusable_unique_access_keys = $true
         redirect_policy_digest_and_routes_reviewed = $true
         redirect_policy_bound_to_one_time_approval_and_receipt = $true
+        provider_route_review_accessible = $true
+        provider_route_review_explicit_and_head_only = $true
+        provider_route_review_does_not_approve_transfer = $true
         item_and_byte_progress_announced = $true
         cancellation_available = $true
         cancellation_result_focus = $true
@@ -233,7 +247,7 @@ try {
     }
     $evidence | ConvertTo-Json | Set-Content -LiteralPath $evidencePath -Encoding utf8
     "Dependency transfer UIA=PASS"
-    "Default-off exact-plan approval and unique access keys=PASS"
+    "Default-off exact-plan approval, provider-route review boundary and unique access keys=PASS"
     "Item/byte progress, cancellation cleanup and focus=PASS"
     "Completed protected verification and recovery focus=PASS"
     "Provider requests/downloads/installs/executions=0"

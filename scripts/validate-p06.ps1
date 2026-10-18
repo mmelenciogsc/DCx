@@ -96,6 +96,14 @@ try {
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.UnexpectedRollbackFailureReturnsStableCleanupCode",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyHttpTransferTests.SelfConsistentPlanFromDifferentCatalogIsDeniedBeforeNetwork"
     )
+    $requiredDependencyRedirectReviewContracts = @(
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyRedirectReviewerTests.ExplicitReview_UsesHeadOnlyAndReturnsExactQueryFreeSessionPolicy",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyRedirectReviewerTests.MissingApprovalAndChangedCatalogFailBeforeNetwork",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyRedirectReviewerTests.UnsafeLoopAndMismatchedLengthFailClosedWithoutReadingBodies",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyRedirectReviewerTests.SessionExpiryRevokesPolicyAndRejectsCoordinatorConstruction",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyRedirectReviewerTests.ReviewedSession_ComposesWithTransferAndExpiryDeniesBeforeNewPayloadRequest",
+        "DCx.Core.Tests.LocalModels.LocalModelDependencyRedirectReviewerTests.CallerCancellationAndDeadlineUseStableOutcomes"
+    )
     $requiredDependencyTransferSetContracts = @(
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Transfer_RequiresExplicitApprovalAndFreshCapacityBeforeCreatingStorage",
         "DCx.Core.Tests.LocalModels.LocalModelDependencyTransferSetCoordinatorTests.Transfer_StreamsEveryItemProtectsReceiptAndAtomicallyPublishesVerifiableSet",
@@ -170,6 +178,12 @@ try {
             throw "P06 did not prove required dependency HTTP-transfer contract: $requiredDependencyHttpTransferContract"
         }
     }
+    foreach ($requiredDependencyRedirectReviewContract in $requiredDependencyRedirectReviewContracts) {
+        $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredDependencyRedirectReviewContract })
+        if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
+            throw "P06 did not prove required dependency redirect-review contract: $requiredDependencyRedirectReviewContract"
+        }
+    }
     foreach ($requiredDependencyTransferSetContract in $requiredDependencyTransferSetContracts) {
         $matchingResults = @($localModelResults | Where-Object { $_.testName -ceq $requiredDependencyTransferSetContract })
         if ($matchingResults.Count -ne 1 -or $matchingResults[0].outcome -cne "Passed") {
@@ -232,6 +246,9 @@ try {
         $whisperRegistrationEvidence.dependency_transfer_action_exposed -ne $true -or
         $whisperRegistrationEvidence.dependency_transfer_approval_default_unchecked -ne $true -or
         $whisperRegistrationEvidence.dependency_transfer_start_without_approval_denied -ne $true -or
+        $whisperRegistrationEvidence.dependency_provider_route_review_explicit -ne $true -or
+        $whisperRegistrationEvidence.dependency_provider_route_review_head_only_notice -ne $true -or
+        $whisperRegistrationEvidence.dependency_provider_route_review_not_invoked -ne $true -or
         $whisperRegistrationEvidence.dependency_staged_mismatch_denied -ne $true -or
         $whisperRegistrationEvidence.dependency_rejected_source_preserved -ne $true -or
         $whisperRegistrationEvidence.dependency_forbidden_activation_actions_exposed -ne $false -or
@@ -271,6 +288,9 @@ try {
         $dependencyTransferUiEvidence.approval_default_unchecked -ne $true -or
         $dependencyTransferUiEvidence.start_without_approval_denied -ne $true -or
         $dependencyTransferUiEvidence.keyboard_focusable_unique_access_keys -ne $true -or
+        $dependencyTransferUiEvidence.provider_route_review_accessible -ne $true -or
+        $dependencyTransferUiEvidence.provider_route_review_explicit_and_head_only -ne $true -or
+        $dependencyTransferUiEvidence.provider_route_review_does_not_approve_transfer -ne $true -or
         $dependencyTransferUiEvidence.item_and_byte_progress_announced -ne $true -or
         $dependencyTransferUiEvidence.cancellation_available -ne $true -or
         $dependencyTransferUiEvidence.cancellation_result_focus -ne $true -or
@@ -681,6 +701,7 @@ $manifest = [ordered]@{
     dependency_catalog_contract_tests = $requiredDependencyContracts.Count
     dependency_transfer_contract_tests = $requiredDependencyTransferContracts.Count
     dependency_http_transfer_contract_tests = $requiredDependencyHttpTransferContracts.Count
+    dependency_redirect_review_contract_tests = $requiredDependencyRedirectReviewContracts.Count
     dependency_transfer_set_contract_tests = $requiredDependencyTransferSetContracts.Count
     dependency_transfer_plan_sha256 = [string]$dependencyTransferPlan.PlanSha256
     dependency_transfer_items = [int]$dependencyTransferPlan.Items.Count
@@ -737,6 +758,7 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding ut
 "Pinned dependency catalog/reviewer contracts=PASS ($($manifest.dependency_catalog_contract_tests)/$($manifest.dependency_catalog_contract_tests)); downloads or installs=$($manifest.dependency_downloads_or_installs)"
 "Dependency transfer preflight contracts=PASS ($($manifest.dependency_transfer_contract_tests)/$($manifest.dependency_transfer_contract_tests)); plan SHA-256=$($manifest.dependency_transfer_plan_sha256); network bytes=$($manifest.dependency_transfer_bytes); minimum free bytes=$($manifest.dependency_transfer_minimum_free_bytes); observed free bytes=$($manifest.dependency_transfer_observed_free_bytes); authority granted=False"
 "Dependency HTTP transfer contracts=PASS ($($manifest.dependency_http_transfer_contract_tests)/$($manifest.dependency_http_transfer_contract_tests)); production transfer actions=0"
+"Dependency HEAD-only route-review contracts=PASS ($($manifest.dependency_redirect_review_contract_tests)/$($manifest.dependency_redirect_review_contract_tests)); production route reviews=0"
 "Dependency transfer-set coordinator contracts=PASS ($($manifest.dependency_transfer_set_contract_tests)/$($manifest.dependency_transfer_set_contract_tests)); production transfer actions=0"
 "Dependency redirect policy binding=PASS; SHA-256=$($manifest.dependency_redirect_policy_sha256); approved routes=$($manifest.dependency_redirect_policy_routes); approval and protected receipt bound=True"
 "Accessible default-off transfer progress/cancellation/reverification/recovery UIA=PASS; provider requests/downloads/installs/executions=0"

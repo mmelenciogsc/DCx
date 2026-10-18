@@ -87,7 +87,7 @@ public sealed class LocalModelDependencyHttpTransferTests
             catalog,
             redirectPolicy: ExactPolicy(
                 item,
-                (new Uri("https://github.com/"), new Uri("https://assets.example.test/releases/"))));
+                (item.SourceUri, new Uri("https://assets.example.test/releases/dependency.bin"))));
         using var destination = new MemoryStream();
 
         var result = await transfer.TransferAsync(
@@ -155,11 +155,11 @@ public sealed class LocalModelDependencyHttpTransferTests
         var fourth = new Uri("https://four.example.test/files/four.bin");
         var policy = ExactPolicy(
             item,
-            (new Uri("https://github.com/"), new Uri("https://one.example.test/files/")),
-            (new Uri("https://one.example.test/"), new Uri("https://two.example.test/files/")),
-            (new Uri("https://two.example.test/"), new Uri("https://three.example.test/files/")),
-            (new Uri("https://three.example.test/"), new Uri("https://four.example.test/files/")),
-            (new Uri("https://one.example.test/"), new Uri("https://github.com/dcx/")));
+            (item.SourceUri, first),
+            (first, second),
+            (second, third),
+            (third, fourth),
+            (first, item.SourceUri));
 
         var loopHandler = new FixtureHandler(request =>
             request.RequestUri == item.SourceUri
@@ -208,27 +208,29 @@ public sealed class LocalModelDependencyHttpTransferTests
     {
         var bytes = "redirect policy fixture"u8.ToArray();
         var (_, _, item) = Plan(bytes);
-        var from = new Uri("https://github.com/");
-        var prefix = new Uri("https://assets.example.test/releases/");
-        var policy = ExactPolicy(item, (from, prefix));
+        var from = item.SourceUri;
+        var exactTarget = new Uri("https://assets.example.test/releases/dependency.bin");
+        var policy = ExactPolicy(item, (from, exactTarget));
         var target = new Uri("https://assets.example.test/releases/dependency.bin?signature=fixture");
 
         Assert.True(policy.IsAllowed(item, item.SourceUri, target, 1));
         Assert.False(policy.IsAllowed(item with { ExpectedBytes = item.ExpectedBytes + 1 }, item.SourceUri, target, 1));
-        Assert.False(policy.IsAllowed(item, item.SourceUri, new Uri("https://assets.example.test/other/dependency.bin"), 1));
+        Assert.False(policy.IsAllowed(item, item.SourceUri, new Uri("https://assets.example.test/releases/other.bin"), 1));
         Assert.False(policy.IsAllowed(item, item.SourceUri, target, 0));
         Assert.Throws<ArgumentException>(() => ExactPolicy(
             item,
-            (from, new Uri("https://assets.example.test"))));
-        Assert.Throws<ArgumentException>(() => ExactPolicy(item, (from, prefix), (from, prefix)));
+            (from, new Uri("https://assets.example.test/"))));
+        Assert.Throws<ArgumentException>(() => ExactPolicy(item, (from, exactTarget), (from, exactTarget)));
     }
 
     [Fact]
     public void RedirectPolicyReview_IsCanonicalAndRejectsMalformedReview()
     {
         var (_, _, item) = Plan("canonical redirect policy fixture"u8.ToArray());
-        var first = (new Uri("https://github.com/"), new Uri("https://one.example.test/files/"));
-        var second = (new Uri("https://one.example.test/"), new Uri("https://two.example.test/files/"));
+        var firstTarget = new Uri("https://one.example.test/files/one.bin");
+        var secondTarget = new Uri("https://two.example.test/files/two.bin");
+        var first = (item.SourceUri, firstTarget);
+        var second = (firstTarget, secondTarget);
         var forward = ExactPolicy(item, first, second).Review;
         var reverse = ExactPolicy(item, second, first).Review;
 
@@ -251,7 +253,7 @@ public sealed class LocalModelDependencyHttpTransferTests
         var (catalog, plan, item) = Plan(bytes);
         var policy = ExactPolicy(
             item,
-            (new Uri("https://github.com/"), new Uri("https://assets.example.test/releases/")));
+            (item.SourceUri, new Uri("https://assets.example.test/releases/dependency.bin")));
         var handler = new FixtureHandler(request => Response(request, bytes));
         using var transfer = new LocalModelDependencyHttpTransfer(handler, catalog, redirectPolicy: policy);
 
@@ -270,7 +272,7 @@ public sealed class LocalModelDependencyHttpTransferTests
         var (catalog, plan, item) = Plan(bytes);
         var mutablePolicy = new MutableRedirectPolicy(ExactPolicy(
             item,
-            (new Uri("https://github.com/"), new Uri("https://assets.example.test/releases/"))).Review);
+            (item.SourceUri, new Uri("https://assets.example.test/releases/dependency.bin"))).Review);
         var handler = new FixtureHandler(request =>
         {
             mutablePolicy.Review = LocalModelDependencyRedirectPolicyReview.DenyAll;
@@ -668,14 +670,14 @@ public sealed class LocalModelDependencyHttpTransferTests
 
     private static ExactLocalModelDependencyRedirectPolicy ExactPolicy(
         LocalModelDependencyTransferItem item,
-        params (Uri FromOrigin, Uri TargetPrefix)[] transitions) =>
+        params (Uri FromUriWithoutQuery, Uri TargetUriWithoutQuery)[] transitions) =>
         new(Array.AsReadOnly(transitions.Select(transition =>
             new LocalModelDependencyRedirectRule(
                 item.SourceUri,
                 item.ExpectedBytes,
                 item.Sha256,
-                transition.FromOrigin,
-                transition.TargetPrefix)).ToArray()));
+                transition.FromUriWithoutQuery,
+                transition.TargetUriWithoutQuery)).ToArray()));
 
     private sealed class FixtureHandler(
         Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler

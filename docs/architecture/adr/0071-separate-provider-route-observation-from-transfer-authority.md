@@ -1,6 +1,6 @@
 # ADR 0071: Separate provider-route observation from transfer authority
 
-- Status: Accepted for explicit read-only P06 audit; production transfer policy remains deny-all
+- Status: Accepted for explicit read-only P06 audit; product-session follow-up is ADR 0072
 - Date: 2026-10-18
 
 ## Context
@@ -22,4 +22,4 @@ The audit never creates or changes `LocalModelDependencyRedirectPolicyReview`. I
 - Current direct and redirect behavior can be reproduced without downloading the 1.28 GB plan.
 - Dynamic, regional or signed redirect behavior remains visible without retaining bearer-like query material.
 - A passing route observation proves only status, structure and available HEAD metadata at one time/location. It does not prove payload digest, contained licenses, CDN permanence or global portability.
-- Production remains deny-all until an exact rule design, provider-contract basis and owner approval are separately recorded.
+- ADR 0072 later adds a separate product-side, exact, query-free, two-hour in-memory route-review session. The audit itself still grants no product or payload authority.

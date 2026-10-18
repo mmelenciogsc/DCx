@@ -72,6 +72,7 @@
 | [0068](architecture/adr/0068-total-local-dependency-transfer-rollback.md) | Roll back every admitted dependency-transfer failure | Accepted for the inert core transport; real acquisition remains blocked | 2026-10-18 |
 | [0069](architecture/adr/0069-nonauthoritative-progress-after-transfer-commit.md) | Keep progress observers non-authoritative after transfer commit | Accepted for the inert transfer-set coordinator; real acquisition remains blocked | 2026-10-18 |
 | [0070](architecture/adr/0070-retain-codex-turn-identity-through-cancellation.md) | Retain Codex turn identity through cancellation | Accepted for the local app-server boundary; real provider acceptance remains blocked | 2026-10-18 |
-| [0071](architecture/adr/0071-separate-provider-route-observation-from-transfer-authority.md) | Separate provider-route observation from transfer authority | Accepted for explicit read-only P06 audit; production transfer policy remains deny-all | 2026-10-18 |
+| [0071](architecture/adr/0071-separate-provider-route-observation-from-transfer-authority.md) | Separate provider-route observation from transfer authority | Accepted for explicit read-only P06 audit; product-session follow-up is 0072 | 2026-10-18 |
+| [0072](architecture/adr/0072-session-bound-exact-provider-route-review.md) | Review exact provider routes in a short-lived user-initiated session | Accepted for the inert dependency workflow; real payload transfer remains owner-gated | 2026-10-18 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

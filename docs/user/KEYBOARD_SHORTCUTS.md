@@ -24,9 +24,11 @@ These window-local access keys are available only in **Local models**. Approval 
 
 | Shortcut | Action |
 |---|---|
+| `Alt+O` | Explicitly observe current public provider routes with HEAD requests only; this does not approve payload transfer. |
+| `Alt+K` | Cancel the active provider-route review. |
 | `Alt+B` | Begin the separately approved exact-plan dependency transfer. |
 | `Alt+C` | Cancel the active transfer and clean its incomplete private state. |
 | `Alt+V` | Reverify the protected completed transfer set. |
 | `Alt+R` | Recover strict abandoned partial-transfer directories under the DCx data lease. |
 
-These actions do not install, register, select or execute transferred content. Human JAWS/NVDA/Narrator conflict testing remains required.
+Route observation creates only a non-persisted two-hour exact query-free review. Payload approval remains separately unchecked. These actions do not install, register, select or execute transferred content. Human JAWS/NVDA/Narrator conflict testing remains required.

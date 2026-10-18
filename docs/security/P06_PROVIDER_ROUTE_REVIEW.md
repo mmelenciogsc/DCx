@@ -14,6 +14,14 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\audit-p06-provi
 
 Omitting the switch fails before any network request. The audit uses the native Windows .NET handler with automatic redirects, proxy, cookies, credentials, preauthentication and decompression disabled. It sends only bounded `HEAD` requests and manually follows at most three safe redirects. It reads zero response bodies and stores no redirect query values.
 
+After ADR 0072, the actual product reviewer can be exercised separately from a clean committed tree:
+
+```powershell
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\DCx\scripts\validate-p06-route-session.ps1 -ExplicitReadOnlyNetworkReview
+```
+
+That check creates only the expiring in-memory policy review and sanitized evidence. It creates no transfer coordinator or approval and issues no payload GET.
+
 ## Measured observation
 
 Evidence: `artifacts/test-results/p06-route-audit-89f5876ba34549cba66bf32d8941dcc5/provider-route-audit.json` (intentionally uncommitted; generated from clean exact source `b82c270636aedd521b5e2c7a44e6ce4207df9484`).
@@ -38,6 +46,6 @@ The other six plan items were direct: two pinned license objects, the Ollama man
 
 ## Decision and remaining limits
 
-Production stays deny-all. GitHub and Hugging Face use signed query URLs; the Hugging Face host is region-specific and is not established as a stable distribution contract for every DCx user. The existing rule type binds exact item source/length/digest plus target origin/path prefix, but one time-and-location observation is insufficient grounds to compile a global production allowlist.
+DCx still starts deny-all. GitHub and Hugging Face use signed query URLs; the Hugging Face host is region-specific and is not established as a stable distribution contract for every DCx user. ADR 0072 therefore does not compile this one observation into a global allowlist. The product can create a separate two-hour, in-memory policy only after the user explicitly invokes its HEAD-only review. That schema-v2 policy binds the exact item source/length/digest and exact query-free previous/target paths, not a host or directory prefix. It expires back to deny-all and still requires a separate unchecked transfer approval.
 
-No GET, payload byte, digest verification, archive inspection, contained-license review, install, model pull, registration, selection or execution occurred. A first ad-hoc WSL HEAD attempt was discarded because its local AWK formatter failed; it followed no redirect and yielded no accepted evidence. Only the native Windows audit above is accepted.
+The product-side review action has not been invoked against real providers in validation. No GET, payload byte, digest verification, archive inspection, contained-license review, install, model pull, registration, selection or execution occurred. A first ad-hoc WSL HEAD attempt was discarded because its local AWK formatter failed; it followed no redirect and yielded no accepted evidence. Only the native Windows audit above is accepted as current external route evidence.

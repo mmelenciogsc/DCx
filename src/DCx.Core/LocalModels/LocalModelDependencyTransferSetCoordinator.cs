@@ -127,6 +127,30 @@ public sealed class LocalModelDependencyTransferSetCoordinator : ILocalModelDepe
     {
     }
 
+    public LocalModelDependencyTransferSetCoordinator(
+        string applicationDataRoot,
+        LocalModelDependencyRedirectReviewSession redirectReviewSession)
+        : this(
+            applicationDataRoot,
+            new LocalModelDependencyHttpTransfer(
+                RequireCurrentSession(redirectReviewSession).CreatePolicy()),
+            new WindowsLocalModelApprovalStateAnchorStore(),
+            LocalModelDependencyTransferPlanner.TryGetAvailableFreeBytes,
+            ownsTransfer: true)
+    {
+    }
+
+    private static LocalModelDependencyRedirectReviewSession RequireCurrentSession(
+        LocalModelDependencyRedirectReviewSession? session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        if (!session.IsCurrent)
+        {
+            throw new ArgumentException("The dependency redirect review session has expired.", nameof(session));
+        }
+        return session;
+    }
+
     internal LocalModelDependencyTransferSetCoordinator(
         string applicationDataRoot,
         ILocalModelDependencyTransfer transfer,

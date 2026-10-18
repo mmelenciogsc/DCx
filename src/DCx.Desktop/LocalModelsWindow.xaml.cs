@@ -21,7 +21,8 @@ public partial class LocalModelsWindow : Window
     private readonly LocalModelDependencyCatalogLoader dependencyCatalogLoader = new();
     private readonly LocalModelDependencyArtifactReviewer dependencyArtifactReviewer = new();
     private readonly WhisperRuntimeStager whisperRuntimeStager;
-    private readonly ILocalModelDependencyTransferSetCoordinator? dependencyTransferCoordinator;
+    private ILocalModelDependencyTransferSetCoordinator? dependencyTransferCoordinator;
+    private readonly ILocalModelDependencyRedirectReviewer? dependencyRedirectReviewer;
     private readonly string applicationDataRoot;
     private readonly LocalModelDependencyCatalogReview? dependencyCatalogFixture;
     private readonly CancellationTokenSource lifetime = new();
@@ -34,6 +35,10 @@ public partial class LocalModelsWindow : Window
     private LocalHardwareProfile? hardwareProfile;
     private LocalModelDependencyTransferPlan? dependencyTransferPlan;
     private LocalModelDependencyRedirectPolicyReview? dependencyRedirectPolicyReview;
+    private LocalModelDependencyRedirectReviewSession? dependencyRedirectReviewSession;
+    private CancellationTokenSource? dependencyRouteReviewCancellation;
+    private Task? dependencyRouteReviewOperation;
+    private bool dependencyRouteReviewRunning;
     private CancellationTokenSource? dependencyTransferCancellation;
     private Task? dependencyTransferOperation;
     private bool dependencyTransferRunning;
@@ -66,7 +71,8 @@ public partial class LocalModelsWindow : Window
         TimeProvider? timeProvider,
         IWhisperRuntimeStageAnchorStore? stageAnchorStore,
         bool enableDependencyTransfer = false,
-        ILocalModelDependencyTransferSetCoordinator? dependencyTransferCoordinator = null)
+        ILocalModelDependencyTransferSetCoordinator? dependencyTransferCoordinator = null,
+        ILocalModelDependencyRedirectReviewer? dependencyRedirectReviewer = null)
     {
         this.store = store ?? throw new ArgumentNullException(nameof(store));
         this.whisperStore = whisperStore ?? throw new ArgumentNullException(nameof(whisperStore));
@@ -76,6 +82,10 @@ public partial class LocalModelsWindow : Window
         this.dependencyTransferCoordinator = dependencyTransferCoordinator ??
             (enableDependencyTransfer && dependencyCatalogFixture is null
                 ? new LocalModelDependencyTransferSetCoordinator(applicationDataRoot)
+                : null);
+        this.dependencyRedirectReviewer = dependencyRedirectReviewer ??
+            (enableDependencyTransfer && dependencyCatalogFixture is null
+                ? new LocalModelDependencyRedirectReviewer()
                 : null);
         whisperRuntimeStager = new WhisperRuntimeStager(timeProvider, stageAnchorStore);
         InitializeComponent();
@@ -89,15 +99,24 @@ public partial class LocalModelsWindow : Window
         {
             lifetime.Cancel();
             dependencyTransferCancellation?.Cancel();
-            var operation = dependencyTransferOperation;
-            if (operation is null || operation.IsCompleted)
+            dependencyRouteReviewCancellation?.Cancel();
+            var operations = new[] { dependencyTransferOperation, dependencyRouteReviewOperation }
+                .Where(operation => operation is not null && !operation.IsCompleted)
+                .Cast<Task>()
+                .ToArray();
+            if (operations.Length == 0)
             {
                 this.dependencyTransferCoordinator?.Dispose();
+                this.dependencyRedirectReviewer?.Dispose();
             }
             else
             {
-                _ = operation.ContinueWith(
-                    _ => this.dependencyTransferCoordinator?.Dispose(),
+                _ = Task.WhenAll(operations).ContinueWith(
+                    _ =>
+                    {
+                        this.dependencyTransferCoordinator?.Dispose();
+                        this.dependencyRedirectReviewer?.Dispose();
+                    },
                     CancellationToken.None,
                     TaskContinuationOptions.ExecuteSynchronously,
                     TaskScheduler.Default);
@@ -139,6 +158,7 @@ public partial class LocalModelsWindow : Window
     {
         dependencyTransferPlan = null;
         dependencyRedirectPolicyReview = null;
+        dependencyRedirectReviewSession = null;
         DependencyTransferApprovalBox.IsChecked = false;
         SetDependencyControlsEnabled(false);
         SetDependencyCatalogSummary(dependencyCatalogFixture is null
@@ -165,13 +185,14 @@ public partial class LocalModelsWindow : Window
                     ? $"Catalog {catalog.CatalogId}. SHA-256 {catalog.CatalogSha256}. " +
                       $"{rows.Length} immutable candidates. Provider transfer is unavailable; installation, pull, execution, registration, and selection actions are absent."
                     : $"Catalog {catalog.CatalogId}. SHA-256 {catalog.CatalogSha256}. " +
-                      $"{rows.Length} immutable candidates. Provider contact is available only through the separate default-off exact-plan transfer approval. Transferred content remains inert; installation, extraction, pull, execution, registration, and selection are not authorized."
+                      $"{rows.Length} immutable candidates. Route observation is available only through the explicit HEAD-only action. Payload contact is available only after that in-memory review and the separate default-off exact-plan transfer approval. Transferred content remains inert; installation, extraction, pull, execution, registration, and selection are not authorized."
                 : $"Synthetic validation catalog {catalog.CatalogId}. SHA-256 {catalog.CatalogSha256}. " +
                   $"{rows.Length} generated candidate. Network, download, install, pull, execution, registration, and selection are unavailable.");
             SetDependencyTransferPreflight(FormatDependencyTransferPlan(
                 transferPlan,
                 redirectPolicyReview,
-                this.dependencyTransferCoordinator is not null));
+                this.dependencyTransferCoordinator is not null,
+                dependencyRedirectReviewSession));
             if (this.dependencyTransferCoordinator is not null)
             {
                 var removed = await this.dependencyTransferCoordinator.CleanupAbandonedAsync(lifetime.Token);
@@ -206,8 +227,118 @@ public partial class LocalModelsWindow : Window
     private void OnDependencyTransferApprovalChanged(object sender, RoutedEventArgs e) =>
         SetDependencyTransferControlsEnabled(enabled: true);
 
+    private async void OnReviewDependencyRoutesClick(object sender, RoutedEventArgs e)
+    {
+        if (dependencyRedirectReviewer is null || dependencyTransferPlan is null ||
+            dependencyTransferRunning || dependencyRouteReviewRunning)
+        {
+            SetDependencyTransferStatus(
+                "Provider-route review is unavailable until the authenticated exact plan is ready and no other dependency operation is active.");
+            ReviewDependencyRoutesButton.Focus();
+            return;
+        }
+
+        dependencyRouteReviewOperation = ReviewDependencyRoutesAsync(dependencyTransferPlan);
+        await dependencyRouteReviewOperation;
+    }
+
+    private async Task ReviewDependencyRoutesAsync(LocalModelDependencyTransferPlan plan)
+    {
+        dependencyRouteReviewRunning = true;
+        dependencyRouteReviewCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        DependencyTransferApprovalBox.IsChecked = false;
+        SetDependencyTransferStatus(
+            "Reviewing current provider routes with bounded HEAD requests only. No response body, payload, credential, or signed query value will be retained.");
+        SetStatus("DCx is reviewing current dependency routes. No payload transfer has started.");
+        SetDependencyControlsEnabled(false);
+        try
+        {
+            var session = await dependencyRedirectReviewer!.ReviewEmbeddedAsync(
+                plan,
+                LocalModelDependencyRedirectReviewApproval.Create(plan, approved: true),
+                dependencyRouteReviewCancellation.Token);
+            if (!string.Equals(plan.PlanSha256, dependencyTransferPlan?.PlanSha256, StringComparison.Ordinal) ||
+                !session.IsCurrent)
+            {
+                throw new InvalidOperationException("The dependency route review is no longer current.");
+            }
+
+            var nextCoordinator = new LocalModelDependencyTransferSetCoordinator(
+                applicationDataRoot,
+                session);
+            var previousCoordinator = dependencyTransferCoordinator;
+            dependencyTransferCoordinator = nextCoordinator;
+            dependencyRedirectReviewSession = session;
+            dependencyRedirectPolicyReview = session.PolicyReview;
+            previousCoordinator?.Dispose();
+
+            SetDependencyTransferPreflight(FormatDependencyTransferPlan(
+                plan,
+                session.PolicyReview,
+                transferActionAvailable: true,
+                session));
+            SetDependencyTransferStatus(
+                $"Provider-route review complete. {session.ItemCount:N0} items. {session.RequestCount:N0} HEAD requests. {session.RedirectCount:N0} exact query-free redirect transitions. {session.ExactLengthCount:N0} exact final lengths. Review expires {session.ExpiresAtUtc:u}. No response body or payload was read. Transfer approval remains unchecked.");
+            SetStatus(
+                "Current provider routes are ready for accessible review. A separate unchecked exact-plan transfer approval is still required.");
+            DependencyTransferStatus.Focus();
+        }
+        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
+        {
+            SetDependencyTransferStatus(
+                "Provider-route review was canceled. No payload transfer started and transfer approval remains unavailable.");
+            DependencyTransferStatus.Focus();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch (LocalModelDependencyRedirectReviewException exception)
+        {
+            SetDependencyTransferStatus(RouteReviewFailureMessage(exception.Code));
+            DependencyTransferStatus.Focus();
+        }
+        catch
+        {
+            SetDependencyTransferStatus(
+                "Provider-route review failed closed. No payload transfer started and no route authority was retained.");
+            DependencyTransferStatus.Focus();
+        }
+        finally
+        {
+            dependencyRouteReviewCancellation.Dispose();
+            dependencyRouteReviewCancellation = null;
+            dependencyRouteReviewRunning = false;
+            DependencyTransferApprovalBox.IsChecked = false;
+            SetDependencyControlsEnabled(true);
+        }
+    }
+
+    private void OnCancelDependencyRouteReviewClick(object sender, RoutedEventArgs e)
+    {
+        if (!dependencyRouteReviewRunning || dependencyRouteReviewCancellation is null) return;
+        CancelDependencyRouteReviewButton.IsEnabled = false;
+        SetDependencyTransferStatus(
+            "Canceling provider-route review. No payload transfer has started.");
+        dependencyRouteReviewCancellation.Cancel();
+    }
+
     private async void OnStartDependencyTransferClick(object sender, RoutedEventArgs e)
     {
+        if (dependencyRedirectReviewer is not null &&
+            (dependencyRedirectReviewSession?.IsCurrent != true ||
+             dependencyTransferCoordinator is null || dependencyRedirectPolicyReview is null ||
+             !string.Equals(
+                 dependencyTransferCoordinator.RedirectPolicyReview.PolicySha256,
+                 dependencyRedirectPolicyReview.PolicySha256,
+                 StringComparison.Ordinal)))
+        {
+            DependencyTransferApprovalBox.IsChecked = false;
+            SetDependencyTransferStatus(
+                "Transfer denied because the in-memory provider-route review is missing, expired, or changed. Review current provider routes again. No payload request started.");
+            ReviewDependencyRoutesButton.Focus();
+            SetDependencyTransferControlsEnabled(enabled: true);
+            return;
+        }
         if (dependencyTransferCoordinator is null || dependencyTransferPlan is null ||
             dependencyRedirectPolicyReview is null ||
             !dependencyTransferPlan.CapacitySufficient ||
@@ -453,6 +584,20 @@ public partial class LocalModelsWindow : Window
         "dependency_transfer_catalog_invalid" or "dependency_transfer_approval_invalid" =>
             "Transfer stopped because the authenticated catalog, exact plan, or one-time approval no longer matched. No unapproved transfer continued.",
         _ => "Transfer failed closed. Partial bytes from this operation were removed. No completed unverified set was published.",
+    };
+
+    private static string RouteReviewFailureMessage(string code) => code switch
+    {
+        "dependency_redirect_review_timeout" =>
+            "Provider-route review timed out. No payload transfer started and no route authority was retained.",
+        "dependency_redirect_review_response_invalid" or
+        "dependency_redirect_review_redirect_invalid" or
+        "dependency_redirect_review_redirect_limit" =>
+            "Provider-route review stopped because a response or redirect was outside the exact bounded policy. No payload transfer started.",
+        "dependency_redirect_review_catalog_invalid" or
+        "dependency_redirect_review_approval_invalid" =>
+            "Provider-route review stopped because the authenticated exact plan or explicit review action no longer matched. No provider payload was requested.",
+        _ => "Provider-route review failed closed. No payload transfer started and no route authority was retained.",
     };
 
     private void OnDependencyCandidateSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1131,7 +1276,7 @@ public partial class LocalModelsWindow : Window
 
     private void SetDependencyControlsEnabled(bool enabled)
     {
-        var reviewEnabled = enabled && !dependencyTransferRunning;
+        var reviewEnabled = enabled && !dependencyTransferRunning && !dependencyRouteReviewRunning;
         DependencyCandidatesList.IsEnabled = reviewEnabled;
         DependencyArtifactPath.IsEnabled = reviewEnabled && selectedDependencyCandidate is not null;
         BrowseDependencyArtifactButton.IsEnabled = reviewEnabled && selectedDependencyCandidate is not null;
@@ -1148,10 +1293,17 @@ public partial class LocalModelsWindow : Window
 
     private void SetDependencyTransferControlsEnabled(bool enabled)
     {
-        var planAvailable = enabled && !dependencyTransferRunning &&
+        var planAvailable = enabled && !dependencyTransferRunning && !dependencyRouteReviewRunning &&
             dependencyTransferCoordinator is not null &&
             dependencyTransferPlan is not null;
-        var transferAvailable = planAvailable && dependencyTransferPlan!.CapacitySufficient;
+        var routeReviewCurrent = dependencyRedirectReviewer is null ||
+            dependencyRedirectReviewSession?.IsCurrent == true;
+        var transferAvailable = planAvailable && dependencyTransferPlan!.CapacitySufficient &&
+            routeReviewCurrent;
+        ReviewDependencyRoutesButton.IsEnabled = enabled && !dependencyTransferRunning &&
+            !dependencyRouteReviewRunning && dependencyRedirectReviewer is not null &&
+            dependencyTransferPlan is not null;
+        CancelDependencyRouteReviewButton.IsEnabled = dependencyRouteReviewRunning;
         DependencyTransferApprovalBox.IsEnabled = transferAvailable;
         StartDependencyTransferButton.IsEnabled =
             transferAvailable && DependencyTransferApprovalBox.IsChecked == true;
@@ -1355,7 +1507,8 @@ public partial class LocalModelsWindow : Window
     private static string FormatDependencyTransferPlan(
         LocalModelDependencyTransferPlan plan,
         LocalModelDependencyRedirectPolicyReview redirectPolicy,
-        bool transferActionAvailable)
+        bool transferActionAvailable,
+        LocalModelDependencyRedirectReviewSession? routeReviewSession)
     {
         static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
         var available = plan.ObservedAvailableFreeBytes is long availableBytes
@@ -1371,10 +1524,13 @@ public partial class LocalModelsWindow : Window
             : string.Join(
                 "\n",
                 redirectPolicy.Routes.Select((route, index) =>
-                    $"Approved redirect route {index + 1}: exact item {route.ItemSourceUri}; {Number(route.ExpectedBytes)} bytes; SHA-256 {route.Sha256}; from origin {route.FromOrigin}; to HTTPS prefix {route.TargetUriPrefix}."));
+                    $"Approved redirect route {index + 1}: exact item {route.ItemSourceUri}; {Number(route.ExpectedBytes)} bytes; SHA-256 {route.Sha256}; from exact query-free URI {route.FromUriWithoutQuery}; to exact query-free HTTPS URI {route.TargetUriWithoutQuery}."));
         var redirectPolicyState = redirectPolicy.Routes.Count == 0
             ? "The current policy has no routes; no real provider redirect is authorized."
             : "Only the exact displayed redirect routes are authorized.";
+        var sessionState = routeReviewSession is null
+            ? "No current in-memory provider-route review exists. Production transfer remains unavailable until the user explicitly starts the HEAD-only route review."
+            : $"In-memory provider-route review: {routeReviewSession.RequestCount:N0} HEAD requests; {routeReviewSession.RedirectCount:N0} exact query-free transitions; expires {routeReviewSession.ExpiresAtUtc:u}. The review is not persisted and is not transfer approval.";
         var candidateWord = plan.CandidateIds.Count == 1 ? "candidate" : "candidates";
         var itemWord = plan.Items.Count == 1 ? "item" : "items";
         return
@@ -1385,6 +1541,7 @@ public partial class LocalModelsWindow : Window
             $"{available} Capacity must be rechecked immediately before any future transfer.\n" +
             $"{itemDetails}\n" +
             $"Redirect policy SHA-256 {redirectPolicy.PolicySha256}. {redirectDetails}\n" +
+            $"{sessionState}\n" +
             "The inert core transport reloads the authenticated catalog, requires exact-item approval, disables automatic redirects, proxy, credentials, preauthentication, cookies and decompression, and rolls back any partial stream unless the requested URI, final status, length and SHA-256 all match. Its bounded manual redirect policy is bound to the displayed digest and routes. " +
             $"{redirectPolicyState} Its private set coordinator serializes transfer, verification and cleanup; rechecks capacity; uses random incoming storage; protects a source-path-free receipt; atomically publishes only a complete plan; and can rehash the completed set. " +
             (transferActionAvailable

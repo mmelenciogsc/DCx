@@ -420,8 +420,8 @@ public sealed class LocalModelDependencyTransferSetCoordinatorTests : IDisposabl
                 item.SourceUri,
                 item.ExpectedBytes,
                 item.Sha256,
-                new Uri($"{item.SourceUri.Scheme}://{item.SourceUri.IdnHost}/"),
-                new Uri("https://assets.example.test/releases/"))
+                item.SourceUri,
+                new Uri("https://assets.example.test/releases/dependency.bin"))
         ])).Review;
 
     private sealed record FixtureState(

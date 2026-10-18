@@ -1,6 +1,6 @@
 # ADR 0067: Bind dependency redirect policy to approval and protected receipt
 
-- Status: Accepted for the inert acquisition workflow; production provider rules and real acquisition remain blocked
+- Status: Accepted for approval/receipt binding; route schema and source are superseded by ADR 0072
 - Date: 2026-10-18
 
 ## Context
@@ -9,7 +9,7 @@ ADR 0066 introduced a deny-by-default bounded redirect mechanism. The transfer p
 
 ## Decision
 
-Represent redirect authority as a canonical schema-v1 review. It contains at most 16 exact routes, sorted by an ordinal identity that binds the plan-item source URI, expected bytes, content SHA-256, source origin and non-root HTTPS target prefix. A domain-separated SHA-256 binds the schema's canonical route sequence. Empty routes produce the production deny-all review. Duplicate, malformed, noncanonical or digest-substituted reviews fail closed.
+Represent redirect authority as a canonical review. ADR 0072 advances the current review to schema v2 with at most 32 transitions, sorted by an ordinal identity that binds the plan-item source URI, expected bytes, content SHA-256 and exact query-free previous/target HTTPS URIs. A domain-separated SHA-256 binds the canonical route sequence. Empty routes produce the startup deny-all review. Duplicate, malformed, noncanonical or digest-substituted reviews fail closed.
 
 Item and set approvals use schema v2 and bind both the plan digest and reviewed redirect-policy digest. The desktop displays the digest and every route in a keyboard-readable preflight, retains that displayed snapshot, and names the redirect-policy authority in the unchecked one-time approval. It never derives approval from a later policy read.
 
@@ -23,4 +23,4 @@ Later read-only verification authenticates the protected historical receipt and 
 - Policy substitution before network access is denied; a mid-operation policy change removes partial output and prevents publication.
 - Completed sets retain privacy-safe policy provenance without storing signed redirect query values, local paths, credentials or account data.
 - Synthetic tests cover deterministic ordering, malformed review, stale approval, hostile behavior, mid-transfer mutation, receipt tamper and accessible review. They make no provider request.
-- Production remains deny-all. This decision authorizes no provider contact, download, extraction, staging, installation, registration, selection or execution.
+- Startup and any missing/expired review remain deny-all. ADR 0072 permits only explicitly initiated HEAD observation; payload transfer still requires separate exact approval.
