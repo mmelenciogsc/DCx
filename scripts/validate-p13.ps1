@@ -19,6 +19,7 @@ $msixOne = Join-Path $runRoot "DCx-local-validation-a.msix"
 $msixTwo = Join-Path $runRoot "DCx-local-validation-b.msix"
 $reliabilityTrx = Join-Path $runRoot "p13-reliability.trx"
 $packageTrustTrx = Join-Path $runRoot "p13-package-trust.trx"
+$webView2PolicyTrx = Join-Path $runRoot "p13-webview2-policy.trx"
 $previousDataRoot = $env:DCX_DATA_ROOT
 $previousOfflineStartup = $env:DCX_OFFLINE_STARTUP
 $process = $null
@@ -291,6 +292,23 @@ try {
         [int]$packageTrustCounters.timeout -ne 0 -or
         [int]$packageTrustCounters.aborted -ne 0) {
         throw "P13 package-trust TRX counters were not exactly 21 passed and zero failed or unexecuted."
+    }
+
+    dotnet test $tests --configuration Release --no-build --no-restore `
+        --filter "FullyQualifiedName~Deployment.WebView2PrerequisiteHandoffPolicyTests" `
+        --logger "trx;LogFileName=p13-webview2-policy.trx" --results-directory $runRoot
+    if ($LASTEXITCODE -ne 0) { throw "P13 WebView2 prerequisite policy tests failed with exit code $LASTEXITCODE." }
+    [xml]$webView2PolicyReport = Get-Content -LiteralPath $webView2PolicyTrx -Raw
+    $webView2PolicyCounters = $webView2PolicyReport.TestRun.ResultSummary.Counters
+    $webView2PolicyTestsPassed = [int]$webView2PolicyCounters.passed
+    if ($webView2PolicyTestsPassed -ne 3 -or
+        [int]$webView2PolicyCounters.total -ne $webView2PolicyTestsPassed -or
+        [int]$webView2PolicyCounters.executed -ne $webView2PolicyTestsPassed -or
+        [int]$webView2PolicyCounters.failed -ne 0 -or
+        [int]$webView2PolicyCounters.error -ne 0 -or
+        [int]$webView2PolicyCounters.timeout -ne 0 -or
+        [int]$webView2PolicyCounters.aborted -ne 0) {
+        throw "P13 WebView2 prerequisite-policy TRX counters were not exactly 3 passed and zero failed or unexecuted."
     }
 
     dotnet publish $desktopProject --configuration Release --runtime win-x64 --no-restore --self-contained true --output $publishOne
@@ -691,10 +709,16 @@ try {
     if (-not $webView2MissingEvidence.fixture_gate_denied_without_environment -or
         $webView2MissingEvidence.prerequisite_panel_name -ne "WebView2 Runtime required" -or
         -not $webView2MissingEvidence.prerequisite_heading_keyboard_focus -or
-        $webView2MissingEvidence.official_address -ne "https://developer.microsoft.com/microsoft-edge/webview2/" -or
+        $webView2MissingEvidence.official_address -ne "https://developer.microsoft.com/microsoft-edge/webview2/consumer/" -or
         -not $webView2MissingEvidence.browser_commands_disabled -or
         -not $webView2MissingEvidence.independent_content_viewer_enabled -or
         -not $webView2MissingEvidence.recheck_fail_closed -or
+        -not $webView2MissingEvidence.handoff_approval_initially_unchecked -or
+        -not $webView2MissingEvidence.handoff_approval_reset -or
+        -not $webView2MissingEvidence.exact_official_page_handoff -or
+        @($webView2MissingEvidence.distinct_handoff_access_keys).Count -ne 2 -or
+        @($webView2MissingEvidence.distinct_handoff_access_keys | Select-Object -Unique).Count -ne 2 -or
+        $webView2MissingEvidence.external_child_processes_started -ne 0 -or
         $webView2MissingEvidence.webview2_profile_created -or
         $webView2MissingEvidence.download_attempted -or
         $webView2MissingEvidence.install_attempted -or
@@ -708,6 +732,7 @@ try {
         release_build_errors = 0
         reliability_tests_passed = $reliabilityTestsPassed
         package_trust_tests_passed = $packageTrustTestsPassed
+        webview2_prerequisite_policy_tests_passed = $webView2PolicyTestsPassed
         defender_antivirus_enabled = [bool]$defenderStatus.AntivirusEnabled
         defender_realtime_enabled = [bool]$defenderStatus.RealTimeProtectionEnabled
         defender_signature_version = [string]$defenderStatus.AntivirusSignatureVersion
@@ -747,6 +772,11 @@ try {
         webview2_missing_runtime_uia = [string]$webView2MissingEvidence.prerequisite_panel_name
         webview2_missing_runtime_browser_commands_disabled = [bool]$webView2MissingEvidence.browser_commands_disabled
         webview2_missing_runtime_independent_tools_enabled = [bool]$webView2MissingEvidence.independent_content_viewer_enabled
+        webview2_default_browser_handoff_approval_initially_unchecked = [bool]$webView2MissingEvidence.handoff_approval_initially_unchecked
+        webview2_default_browser_handoff_approval_reset = [bool]$webView2MissingEvidence.handoff_approval_reset
+        webview2_default_browser_handoff = [bool]$webView2MissingEvidence.exact_official_page_handoff
+        webview2_default_browser_handoff_access_keys = @($webView2MissingEvidence.distinct_handoff_access_keys)
+        webview2_default_browser_handoff_external_child_processes = [int]$webView2MissingEvidence.external_child_processes_started
         webview2_missing_runtime_profile_created = [bool]$webView2MissingEvidence.webview2_profile_created
         webview2_missing_runtime_downloads = 0
         webview2_missing_runtime_installs = 0
@@ -777,6 +807,7 @@ try {
 
     "P13 reliability tests=PASS ($reliabilityTestsPassed/$reliabilityTestsPassed)"
     "P13 bounded MSIX manifest and Windows Authenticode tests=PASS ($packageTrustTestsPassed/$packageTrustTestsPassed)"
+    "P13 WebView2 prerequisite handoff policy tests=PASS ($webView2PolicyTestsPassed/$webView2PolicyTestsPassed)"
     "P13 complete unsigned local-validation MSIX trust denial=PASS"
     "P13 Microsoft Defender current signatures and trusted scanner=PASS"
     "P13 Microsoft Defender publish, ZIP and MSIX no-remediation scans=PASS"
@@ -789,6 +820,7 @@ try {
     "Unsigned MSIX real Windows trust denial=PASS ($($actualMsixSignature.Status))"
     "WebView2 Evergreen Runtime required and not bundled=PASS"
     "Accessible WebView2 missing-runtime detection and fail-closed recheck=PASS"
+    "Separately approved exact Microsoft default-browser prerequisite handoff=PASS"
     "CycloneDX components=$($components.Count)"
     "Third-party license records=$($licenseInventory.Count)"
     "DCx-owned binary and published text secret-scan files=$($publishedSecretScanFiles.Count)"

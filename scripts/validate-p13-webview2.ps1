@@ -102,6 +102,8 @@ try {
     $explanation = Wait-For { Find-ById $window "WebView2PrerequisiteExplanation" } "The WebView2 explanation was not exposed."
     $address = Wait-For { Find-ById $window "WebView2DownloadAddress" } "The official WebView2 address was not exposed."
     $copy = Wait-For { Find-ById $window "CopyWebView2DownloadAddressButton" } "The copy-address action was not exposed."
+    $handoffApproval = Wait-For { Find-ById $window "OpenWebView2PageApproval" } "The explicit default-browser handoff approval was not exposed."
+    $openOfficialPage = Wait-For { Find-ById $window "OpenWebView2DownloadPageButton" } "The official-page handoff action was not exposed."
     $recheck = Wait-For { Find-ById $window "RecheckWebView2RuntimeButton" } "The runtime recheck action was not exposed."
     $status = Wait-For { Find-ById $window "StatusText" } "The missing-runtime live status was not exposed."
     $newTab = Wait-For { Find-ById $window "NewTabButton" } "The new-tab control was not exposed."
@@ -111,13 +113,15 @@ try {
     $content = Wait-For { Find-ById $window "ContentViewerButton" } "The independent content viewer was not exposed."
     if ($panel.Current.Name -ne "WebView2 Runtime required" -or
         $heading.Current.Name -ne "WebView2 Runtime required" -or
-        $explanation.Current.Name -notlike "DCx cannot open web pages*No download or installation was attempted*" -or
+        $explanation.Current.Name -notlike "DCx cannot open web pages*will not download or run an installer*separately approve*" -or
         $copy.Current.Name -ne "Copy official Microsoft WebView2 download address" -or
-        $recheck.Current.Name -ne "Recheck WebView2 Runtime availability") {
+        $recheck.Current.Name -ne "Recheck WebView2 Runtime availability" -or
+        $handoffApproval.Current.Name -notlike "*initially unchecked*" -or
+        $openOfficialPage.Current.Name -ne "Open official Microsoft WebView2 page in default browser") {
         throw "The missing-runtime disclosure or actions were not exact."
     }
     $addressValue = $address.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value
-    if ($addressValue -ne "https://developer.microsoft.com/microsoft-edge/webview2/") {
+    if ($addressValue -ne "https://developer.microsoft.com/microsoft-edge/webview2/consumer/") {
         throw "The missing-runtime UI did not expose the reviewed official address."
     }
     if ($newTab.Current.IsEnabled -or $go.Current.IsEnabled -or $profiles.Current.IsEnabled -or
@@ -126,7 +130,39 @@ try {
         throw "Browser controls did not fail closed while independent local tools remained available."
     }
     $expectedStatus = "WebView2 Runtime is unavailable. Browser commands are unavailable. No download or installation was attempted."
-    $null = Wait-For { $status.Current.Name -eq $expectedStatus } "The missing-runtime status was not exact."
+    $null = Wait-For { $status.Current.Name -eq $expectedStatus } "The initial missing-runtime status was not exact."
+    $handoffToggle = [Windows.Automation.TogglePattern]$handoffApproval.GetCurrentPattern(
+        [Windows.Automation.TogglePattern]::Pattern)
+    if ($handoffToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::Off -or
+        $openOfficialPage.Current.IsEnabled) {
+        throw "The official-page handoff did not begin separately unchecked and disabled."
+    }
+    $handoffAccessKeys = @($handoffApproval.Current.AccessKey, $openOfficialPage.Current.AccessKey)
+    if ($handoffAccessKeys -contains "" -or
+        @($handoffAccessKeys | Select-Object -Unique).Count -ne $handoffAccessKeys.Count) {
+        throw "The official-page handoff approval and action do not have distinct keyboard access keys."
+    }
+    $childrenBefore = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($process.Id)").Count
+    $handoffToggle.Toggle()
+    $openOfficialPage = Wait-For {
+        $candidate = Find-ById $window "OpenWebView2DownloadPageButton"
+        if ($null -ne $candidate -and $candidate.Current.IsEnabled) { $candidate }
+    } "The explicit handoff approval did not enable the exact official-page action."
+    $openOfficialPage.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $handoffStatus = "The official Microsoft WebView2 page was handed to the default browser. DCx did not download or run an installer. After installing the Evergreen Runtime yourself, return and choose Recheck."
+    $null = Wait-For { $status.Current.Name -eq $handoffStatus } "The official-page handoff did not expose its exact bounded result."
+    $handoffApproval = Find-ById $window "OpenWebView2PageApproval"
+    $openOfficialPage = Find-ById $window "OpenWebView2DownloadPageButton"
+    $handoffToggle = [Windows.Automation.TogglePattern]$handoffApproval.GetCurrentPattern(
+        [Windows.Automation.TogglePattern]::Pattern)
+    if ($handoffToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::Off -or
+        $openOfficialPage.Current.IsEnabled) {
+        throw "The one-use official-page handoff approval did not reset."
+    }
+    $childrenAfter = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($process.Id)").Count
+    if ($childrenAfter -ne $childrenBefore) {
+        throw "The fixture official-page handoff started an external child process."
+    }
     $heading.SetFocus()
     $null = Wait-For { $heading.Current.HasKeyboardFocus } "The missing-runtime heading did not accept keyboard focus."
     $recheck.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -146,6 +182,11 @@ try {
         browser_commands_disabled = $true
         independent_content_viewer_enabled = $true
         recheck_fail_closed = $true
+        handoff_approval_initially_unchecked = $true
+        handoff_approval_reset = $true
+        exact_official_page_handoff = $true
+        distinct_handoff_access_keys = $handoffAccessKeys
+        external_child_processes_started = 0
         webview2_profile_created = $false
         download_attempted = $false
         install_attempted = $false
@@ -157,6 +198,7 @@ try {
     Write-Host "P13 WebView2 browser commands fail closed=PASS"
     Write-Host "P13 WebView2 independent local content viewer remains enabled=PASS"
     Write-Host "P13 WebView2 local-only recheck=PASS"
+    Write-Host "P13 WebView2 separately approved default-browser handoff=PASS; external fixture processes=0"
     Write-Host "P13 WebView2 downloads=0 installs=0 production actions=0"
     Write-Host "P13 WebView2 evidence=$evidence"
     [pscustomobject]$result

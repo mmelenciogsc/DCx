@@ -86,6 +86,7 @@ public partial class App : Application
         }
 
         IWebView2RuntimeProbe? webView2RuntimeProbe = null;
+        IWebView2PrerequisiteHandoff? webView2PrerequisiteHandoff = null;
         IGlobalRegistryEnrollmentStore globalRegistryEnrollmentStore =
             new WindowsGlobalRegistryEnrollmentStore();
         var useUnconfiguredGlobalKnowledgeFixture = e.Args.Length == 1 &&
@@ -119,6 +120,7 @@ public partial class App : Application
             }
 
             webView2RuntimeProbe = new MissingWebView2RuntimeFixtureProbe();
+            webView2PrerequisiteHandoff = new FixtureWebView2PrerequisiteHandoff();
         }
 
         try
@@ -136,7 +138,8 @@ public partial class App : Application
             TryInitializeCrashDiagnostics(applicationDataRoot);
             MainWindow = new MainWindow(
                 webView2RuntimeProbe ?? new InstalledWebView2RuntimeProbe(),
-                globalRegistryEnrollmentStore);
+                globalRegistryEnrollmentStore,
+                webView2PrerequisiteHandoff);
             MainWindow.Show();
         }
         catch (ApplicationDataInUseException exception)

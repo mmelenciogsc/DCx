@@ -10,6 +10,7 @@ using DCx.Core;
 using DCx.Core.Browsing;
 using DCx.Core.Control;
 using DCx.Core.Downloads;
+using DCx.Core.Deployment;
 using DCx.Core.Finance;
 using DCx.Core.GlobalKnowledge;
 using DCx.Core.LocalModels;
@@ -28,9 +29,9 @@ namespace DCx.Desktop;
 public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
 {
     private static readonly Uri StartPage = new("https://example.com/");
-    private const string WebView2DownloadPage = "https://developer.microsoft.com/microsoft-edge/webview2/";
 
     private readonly IWebView2RuntimeProbe _webView2RuntimeProbe;
+    private readonly IWebView2PrerequisiteHandoff _webView2PrerequisiteHandoff;
     private readonly IGlobalRegistryEnrollmentStore _globalRegistryEnrollmentStore;
     private readonly AddressNavigationPolicy _navigationPolicy = new();
     private readonly BrowserProfilePaths _profilePaths = new();
@@ -79,20 +80,26 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
     public MainWindow()
         : this(
             new InstalledWebView2RuntimeProbe(),
-            new WindowsGlobalRegistryEnrollmentStore())
+            new WindowsGlobalRegistryEnrollmentStore(),
+            new WindowsWebView2PrerequisiteHandoff())
     {
     }
 
     internal MainWindow(IWebView2RuntimeProbe webView2RuntimeProbe)
-        : this(webView2RuntimeProbe, new WindowsGlobalRegistryEnrollmentStore())
+        : this(
+            webView2RuntimeProbe,
+            new WindowsGlobalRegistryEnrollmentStore(),
+            new WindowsWebView2PrerequisiteHandoff())
     {
     }
 
     internal MainWindow(
         IWebView2RuntimeProbe webView2RuntimeProbe,
-        IGlobalRegistryEnrollmentStore globalRegistryEnrollmentStore)
+        IGlobalRegistryEnrollmentStore globalRegistryEnrollmentStore,
+        IWebView2PrerequisiteHandoff? webView2PrerequisiteHandoff = null)
     {
         _webView2RuntimeProbe = webView2RuntimeProbe ?? throw new ArgumentNullException(nameof(webView2RuntimeProbe));
+        _webView2PrerequisiteHandoff = webView2PrerequisiteHandoff ?? new WindowsWebView2PrerequisiteHandoff();
         _globalRegistryEnrollmentStore = globalRegistryEnrollmentStore ??
             throw new ArgumentNullException(nameof(globalRegistryEnrollmentStore));
         _domAdapter = new BrowserDomAdapter(_controlCoordinator);
@@ -178,10 +185,11 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
         BookmarkButton.IsEnabled = false;
         AgentDrawerButton.IsEnabled = false;
         FacebookPostFinderButton.IsEnabled = false;
-        FacebookPostFinderButton.IsEnabled = false;
+        OpenWebView2PageApprovalBox.IsChecked = false;
+        OpenWebView2DownloadPageButton.IsEnabled = false;
         WebView2PrerequisiteExplanation.Text = inspectFailed
-            ? "DCx could not verify Microsoft Edge WebView2 Runtime, so it did not open a web page. No download or installation was attempted. Use another browser to visit the official Microsoft page. Install or repair the Evergreen Runtime only after you approve it. Then return here and choose Recheck."
-            : "DCx cannot open web pages because Microsoft Edge WebView2 Runtime is unavailable. No download or installation was attempted. Use another browser to visit the official Microsoft page. Install the Evergreen Runtime only after you approve it. Then return here and choose Recheck.";
+            ? "DCx could not verify Microsoft Edge WebView2 Runtime, so it did not open a web page. DCx will not download or run an installer. You can separately approve opening Microsoft's official page in your default browser; DCx verifies that the Runtime is still missing before handoff. Install or repair the Evergreen Runtime yourself, then return here and choose Recheck."
+            : "DCx cannot open web pages because Microsoft Edge WebView2 Runtime is unavailable. DCx will not download or run an installer. You can separately approve opening Microsoft's official page in your default browser, install the Evergreen Runtime yourself, then return here and choose Recheck.";
         SetStatus(inspectFailed
             ? "WebView2 Runtime could not be verified. Browser commands are unavailable. No download or installation was attempted."
             : "WebView2 Runtime is unavailable. Browser commands are unavailable. No download or installation was attempted.");
@@ -199,19 +207,70 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
         BookmarkButton.IsEnabled = true;
         AgentDrawerButton.IsEnabled = true;
         FacebookPostFinderButton.IsEnabled = true;
-        FacebookPostFinderButton.IsEnabled = true;
+        OpenWebView2PageApprovalBox.IsChecked = false;
+        OpenWebView2DownloadPageButton.IsEnabled = false;
     }
 
     private void OnCopyWebView2DownloadAddressClick(object sender, RoutedEventArgs e)
     {
         try
         {
-            Clipboard.SetText(WebView2DownloadPage);
+            Clipboard.SetText(WebView2PrerequisiteHandoffPolicy.OfficialConsumerPageAddress);
             SetStatus("The official Microsoft WebView2 address was copied. DCx did not open a page or download software.");
         }
         catch
         {
             SetStatus("The official address could not be copied. Select the read-only address and press Control C instead.");
+        }
+    }
+
+    private void OnWebView2PageApprovalChanged(object sender, RoutedEventArgs e)
+    {
+        OpenWebView2DownloadPageButton.IsEnabled =
+            WebView2PrerequisitePanel.Visibility == Visibility.Visible &&
+            OpenWebView2PageApprovalBox.IsChecked == true;
+    }
+
+    private void OnOpenWebView2DownloadPageClick(object sender, RoutedEventArgs e)
+    {
+        OpenWebView2DownloadPageButton.IsEnabled = false;
+        try
+        {
+            WebView2RuntimeStatus runtime;
+            try
+            {
+                runtime = _webView2RuntimeProbe.Inspect();
+            }
+            catch
+            {
+                SetStatus("The WebView2 Runtime state could not be verified. The official page was not opened.");
+                return;
+            }
+
+            var decision = WebView2PrerequisiteHandoffPolicy.Evaluate(
+                runtimeVerifiedMissing: !runtime.IsAvailable,
+                exactHandoffApproved: OpenWebView2PageApprovalBox.IsChecked == true);
+            if (!decision.Permitted)
+            {
+                SetStatus(runtime.IsAvailable
+                    ? "WebView2 Runtime is now available. The official page was not opened. Choose Recheck to enable browsing."
+                    : "The official page was not opened. Check the separate approval first.");
+                return;
+            }
+
+            _webView2PrerequisiteHandoff.OpenOfficialConsumerPage();
+            SetStatus(
+                "The official Microsoft WebView2 page was handed to the default browser. " +
+                "DCx did not download or run an installer. After installing the Evergreen Runtime yourself, return and choose Recheck.");
+        }
+        catch
+        {
+            SetStatus("The official Microsoft WebView2 page could not be opened. DCx did not download or run an installer.");
+        }
+        finally
+        {
+            OpenWebView2PageApprovalBox.IsChecked = false;
+            OpenWebView2DownloadPageButton.IsEnabled = false;
         }
     }
 

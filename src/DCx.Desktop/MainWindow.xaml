@@ -315,7 +315,7 @@
                                Margin="0,0,0,12"
                                TextWrapping="Wrap"
                                AutomationProperties.AutomationId="WebView2PrerequisiteExplanation"
-                               Text="DCx cannot open web pages because Microsoft Edge WebView2 Runtime is unavailable. No download or installation was attempted. Use another browser to visit the official Microsoft page. Install the Evergreen Runtime only after you approve it. Then return here and choose Recheck." />
+                               Text="DCx cannot open web pages because Microsoft Edge WebView2 Runtime is unavailable. DCx will not download or run an installer. You can separately approve opening Microsoft's official page in your default browser, install the Evergreen Runtime yourself, then return here and choose Recheck." />
                     <Label Padding="0"
                            Target="{Binding ElementName=WebView2DownloadAddress}"
                            Content="Official Microsoft WebView2 download address" />
@@ -323,10 +323,18 @@
                              Margin="0,4,0,12"
                              Padding="6"
                              IsReadOnly="True"
-                             Text="https://developer.microsoft.com/microsoft-edge/webview2/"
+                             Text="https://developer.microsoft.com/microsoft-edge/webview2/consumer/"
                              AutomationProperties.AutomationId="WebView2DownloadAddress"
                              AutomationProperties.Name="Official Microsoft WebView2 download address"
-                             AutomationProperties.HelpText="Read-only address. DCx does not open or download anything automatically." />
+                             AutomationProperties.HelpText="Read-only exact Microsoft consumer address. DCx does not open or download anything automatically." />
+                    <CheckBox x:Name="OpenWebView2PageApprovalBox"
+                              Margin="0,0,0,8"
+                              Content="_I approve opening the official Microsoft page in my default browser"
+                              AutomationProperties.AutomationId="OpenWebView2PageApproval"
+                              AutomationProperties.Name="I approve opening the official Microsoft WebView2 page in my default browser, initially unchecked"
+                              AutomationProperties.HelpText="This opens one exact Microsoft HTTPS page. It does not authorize DCx to download or run an installer."
+                              Checked="OnWebView2PageApprovalChanged"
+                              Unchecked="OnWebView2PageApprovalChanged" />
                     <WrapPanel>
                         <Button MinWidth="190"
                                 Margin="0,0,8,0"
@@ -334,6 +342,15 @@
                                 AutomationProperties.AutomationId="CopyWebView2DownloadAddressButton"
                                 AutomationProperties.Name="Copy official Microsoft WebView2 download address"
                                 Click="OnCopyWebView2DownloadAddressClick" />
+                        <Button x:Name="OpenWebView2DownloadPageButton"
+                                MinWidth="190"
+                                Margin="0,0,8,0"
+                                Content="_Open official page"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="OpenWebView2DownloadPageButton"
+                                AutomationProperties.Name="Open official Microsoft WebView2 page in default browser"
+                                AutomationProperties.HelpText="Requires the separate unchecked approval. DCx does not download or execute the installer."
+                                Click="OnOpenWebView2DownloadPageClick" />
                         <Button x:Name="RecheckWebView2RuntimeButton"
                                 MinWidth="100"
                                 Content="Recheck"
