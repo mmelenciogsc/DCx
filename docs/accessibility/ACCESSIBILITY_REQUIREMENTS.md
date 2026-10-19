@@ -21,3 +21,6 @@ Accessibility failures are release blockers, not enhancement requests.
 
 Automated P00 UIA smoke evidence does not satisfy the human screen-reader gate.
 
+## P11 failed-payout hold review
+
+The generated-data CARE operations fixture exposes a privacy-minimized failed-payout hold through stable UIA names and distinct access keys. Approval begins unchecked. Denial returns focus to approval; an accepted non-financial intent returns focus to updated details, disables replay and announces provider calls, financial mutations, payout attempts and notification transports as zero. The read-only contributor period list adds fixed local status notices. No external notification is inferred. Automated details and the outstanding human JAWS/NVDA/Narrator rows are recorded in `P11_FAILED_PAYOUT_HOLD_CHECKLIST.md`.
