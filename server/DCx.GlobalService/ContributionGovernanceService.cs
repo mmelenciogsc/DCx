@@ -716,7 +716,14 @@ public sealed partial class ContributionGovernanceService
                     receipt.ResourceVersion,
                     cancellationToken)
                 .ConfigureAwait(false);
-            var prior = await CountQualifiedForDayAsync(connection, transaction, receipt, cancellationToken)
+            var activity = await ReadUsageReceiptActivityAsync(
+                    connection,
+                    transaction,
+                    receipt,
+                    authoritative.InstallationPseudonym,
+                    authoritative.EntitlementId,
+                    authoritative.NowUtc,
+                    cancellationToken)
                 .ConfigureAwait(false);
             var context = new UsageReceiptContext(
                 authoritative.EntitlementActive,
@@ -724,7 +731,7 @@ public sealed partial class ContributionGovernanceService
                 contribution is not null && contribution.ContributorPseudonym == authoritative.ActorPseudonym,
                 authoritative.InstallationPseudonym,
                 authoritative.EntitlementId,
-                prior,
+                activity,
                 replay.Receipt,
                 replay.Nonce,
                 authoritative.NowUtc);
@@ -740,8 +747,9 @@ public sealed partial class ContributionGovernanceService
             command.CommandText = """
                 INSERT INTO usage_receipts(
                     receipt_id, nonce, installation_pseudonym, entitlement_id, resource_id, resource_version,
-                    occurred_utc, qualified, decision_code)
-                VALUES($receipt, $nonce, $installation, $entitlement, $resource, $version, $occurred, $qualified, $decision);
+                    occurred_utc, evaluated_utc, qualified, decision_code)
+                VALUES($receipt, $nonce, $installation, $entitlement, $resource, $version, $occurred,
+                       $evaluated, $qualified, $decision);
                 """;
             command.Parameters.AddWithValue("$receipt", receipt.ReceiptId);
             command.Parameters.AddWithValue("$nonce", receipt.Nonce);
@@ -750,6 +758,7 @@ public sealed partial class ContributionGovernanceService
             command.Parameters.AddWithValue("$resource", receipt.ResourceId);
             command.Parameters.AddWithValue("$version", receipt.ResourceVersion);
             command.Parameters.AddWithValue("$occurred", receipt.OccurredUtc.ToUniversalTime().ToString("O"));
+            command.Parameters.AddWithValue("$evaluated", authoritative.NowUtc.ToString("O"));
             command.Parameters.AddWithValue("$qualified", decision.Qualified ? 1 : 0);
             command.Parameters.AddWithValue("$decision", decision.Code);
             if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
@@ -797,6 +806,7 @@ public sealed partial class ContributionGovernanceService
                 resource_id TEXT NOT NULL,
                 resource_version TEXT NOT NULL,
                 occurred_utc TEXT NOT NULL,
+                evaluated_utc TEXT NOT NULL,
                 qualified INTEGER NOT NULL,
                 decision_code TEXT NOT NULL
             );
@@ -868,7 +878,46 @@ public sealed partial class ContributionGovernanceService
             );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureUsageReceiptActivitySchemaAsync(connection, cancellationToken).ConfigureAwait(false);
         await InitializeCcbReviewQueueAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task EnsureUsageReceiptActivitySchemaAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var hasEvaluatedUtc = false;
+        var schema = connection.CreateCommand();
+        schema.CommandText = "PRAGMA table_info(usage_receipts);";
+        await using (var reader = await schema.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                hasEvaluatedUtc |= string.Equals(reader.GetString(1), "evaluated_utc", StringComparison.Ordinal);
+            }
+        }
+
+        if (!hasEvaluatedUtc)
+        {
+            var migrate = connection.CreateCommand();
+            migrate.CommandText = "ALTER TABLE usage_receipts ADD COLUMN evaluated_utc TEXT;";
+            await migrate.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var backfill = connection.CreateCommand();
+        backfill.CommandText = "UPDATE usage_receipts SET evaluated_utc = occurred_utc WHERE evaluated_utc IS NULL;";
+        await backfill.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+        var indexes = connection.CreateCommand();
+        indexes.CommandText = """
+            CREATE INDEX IF NOT EXISTS ix_usage_receipts_installation_resource_occurred
+                ON usage_receipts(installation_pseudonym, resource_id, qualified, occurred_utc);
+            CREATE INDEX IF NOT EXISTS ix_usage_receipts_installation_evaluated
+                ON usage_receipts(installation_pseudonym, qualified, evaluated_utc);
+            CREATE INDEX IF NOT EXISTS ix_usage_receipts_entitlement_evaluated
+                ON usage_receipts(entitlement_id, qualified, evaluated_utc);
+            """;
+        await indexes.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
@@ -2107,25 +2156,65 @@ public sealed partial class ContributionGovernanceService
         return (receiptSeen, nonceSeen);
     }
 
-    private static async Task<int> CountQualifiedForDayAsync(
+    private static async Task<UsageReceiptActivity> ReadUsageReceiptActivityAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         QualifiedUsageReceipt receipt,
+        string authoritativeInstallationPseudonym,
+        string authoritativeEntitlementId,
+        DateTimeOffset evaluatedUtc,
         CancellationToken cancellationToken)
     {
-        var day = receipt.OccurredUtc.UtcDateTime.Date;
+        var occurrenceDay = receipt.OccurredUtc.UtcDateTime.Date;
+        var evaluationDay = evaluatedUtc.UtcDateTime.Date;
         var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT COUNT(*) FROM usage_receipts
-            WHERE installation_pseudonym = $installation AND resource_id = $resource AND qualified = 1
-              AND occurred_utc >= $start AND occurred_utc < $end;
+            SELECT
+                (SELECT COUNT(*) FROM usage_receipts
+                 WHERE installation_pseudonym = $installation AND resource_id = $resource AND qualified = 1
+                   AND occurred_utc >= $occurrence_start AND occurred_utc < $occurrence_end),
+                (SELECT COUNT(*) FROM usage_receipts
+                 WHERE installation_pseudonym = $installation AND qualified = 1
+                   AND evaluated_utc >= $minute_start),
+                (SELECT COUNT(*) FROM usage_receipts
+                 WHERE installation_pseudonym = $installation AND qualified = 1
+                   AND evaluated_utc >= $evaluation_start AND evaluated_utc < $evaluation_end),
+                (SELECT COUNT(*) FROM usage_receipts
+                 WHERE entitlement_id = $entitlement AND qualified = 1
+                   AND evaluated_utc >= $evaluation_start AND evaluated_utc < $evaluation_end),
+                (SELECT COUNT(DISTINCT resource_id) FROM usage_receipts
+                 WHERE installation_pseudonym = $installation AND qualified = 1
+                   AND evaluated_utc >= $evaluation_start AND evaluated_utc < $evaluation_end),
+                EXISTS(SELECT 1 FROM usage_receipts
+                 WHERE installation_pseudonym = $installation AND resource_id = $resource AND qualified = 1
+                   AND evaluated_utc >= $evaluation_start AND evaluated_utc < $evaluation_end);
             """;
-        command.Parameters.AddWithValue("$installation", receipt.InstallationPseudonym);
+        command.Parameters.AddWithValue("$installation", authoritativeInstallationPseudonym);
+        command.Parameters.AddWithValue("$entitlement", authoritativeEntitlementId);
         command.Parameters.AddWithValue("$resource", receipt.ResourceId);
-        command.Parameters.AddWithValue("$start", new DateTimeOffset(day, TimeSpan.Zero).ToString("O"));
-        command.Parameters.AddWithValue("$end", new DateTimeOffset(day.AddDays(1), TimeSpan.Zero).ToString("O"));
-        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
+        command.Parameters.AddWithValue(
+            "$occurrence_start", new DateTimeOffset(occurrenceDay, TimeSpan.Zero).ToString("O"));
+        command.Parameters.AddWithValue(
+            "$occurrence_end", new DateTimeOffset(occurrenceDay.AddDays(1), TimeSpan.Zero).ToString("O"));
+        command.Parameters.AddWithValue("$minute_start", evaluatedUtc.AddMinutes(-1).ToString("O"));
+        command.Parameters.AddWithValue(
+            "$evaluation_start", new DateTimeOffset(evaluationDay, TimeSpan.Zero).ToString("O"));
+        command.Parameters.AddWithValue(
+            "$evaluation_end", new DateTimeOffset(evaluationDay.AddDays(1), TimeSpan.Zero).ToString("O"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new ContributionPolicyException("usage_activity_read_failed");
+        }
+
+        return new UsageReceiptActivity(
+            reader.GetInt32(0),
+            reader.GetInt32(1),
+            reader.GetInt32(2),
+            reader.GetInt32(3),
+            reader.GetInt32(4),
+            reader.GetInt32(5) == 1);
     }
 
     private sealed record SubmissionRow(

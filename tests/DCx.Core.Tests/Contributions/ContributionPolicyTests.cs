@@ -98,7 +98,7 @@ public sealed class ContributionPolicyTests
             false,
             receipt.InstallationPseudonym,
             receipt.EntitlementId,
-            0,
+            new UsageReceiptActivity(0, 0, 0, 0, 0, false),
             false,
             false,
             now);
@@ -115,7 +115,68 @@ public sealed class ContributionPolicyTests
             eligible with { AuthoritativeEntitlementId = "entitlement:other" }).Code);
         Assert.Equal("rate_anomaly", UsageReceiptPolicy.Evaluate(
             receipt,
-            eligible with { PriorQualifiedEventsForDay = UsageReceiptPolicy.MaximumQualifiedEventsPerResourceDay }).Code);
+            eligible with
+            {
+                Activity = eligible.Activity with
+                {
+                    PriorQualifiedEventsForResourceDay = UsageReceiptPolicy.MaximumQualifiedEventsPerResourceDay,
+                },
+            }).Code);
+        Assert.Equal("rate_anomaly", UsageReceiptPolicy.Evaluate(
+            receipt,
+            eligible with
+            {
+                Activity = eligible.Activity with
+                {
+                    PriorQualifiedEventsForInstallationMinute =
+                        UsageReceiptPolicy.MaximumQualifiedEventsPerInstallationMinute,
+                },
+            }).Code);
+        Assert.Equal("rate_anomaly", UsageReceiptPolicy.Evaluate(
+            receipt,
+            eligible with
+            {
+                Activity = eligible.Activity with
+                {
+                    PriorQualifiedEventsForInstallationDay =
+                        UsageReceiptPolicy.MaximumQualifiedEventsPerInstallationDay,
+                },
+            }).Code);
+        Assert.Equal("rate_anomaly", UsageReceiptPolicy.Evaluate(
+            receipt,
+            eligible with
+            {
+                Activity = eligible.Activity with
+                {
+                    PriorQualifiedEventsForEntitlementDay =
+                        UsageReceiptPolicy.MaximumQualifiedEventsPerEntitlementDay,
+                },
+            }).Code);
+        Assert.Equal("rate_anomaly", UsageReceiptPolicy.Evaluate(
+            receipt,
+            eligible with
+            {
+                Activity = eligible.Activity with
+                {
+                    PriorQualifiedEventsForInstallationDay =
+                        UsageReceiptPolicy.MaximumDistinctResourcesPerInstallationDay,
+                    PriorDistinctResourcesForInstallationDay =
+                        UsageReceiptPolicy.MaximumDistinctResourcesPerInstallationDay,
+                },
+            }).Code);
+        Assert.True(UsageReceiptPolicy.Evaluate(
+            receipt,
+            eligible with
+            {
+                Activity = eligible.Activity with
+                {
+                    PriorQualifiedEventsForInstallationDay =
+                        UsageReceiptPolicy.MaximumDistinctResourcesPerInstallationDay,
+                    PriorDistinctResourcesForInstallationDay =
+                        UsageReceiptPolicy.MaximumDistinctResourcesPerInstallationDay,
+                    ResourceSeenForInstallationDay = true,
+                },
+            }).Qualified);
         Assert.False(UsageReceiptPolicy.Verify(receipt with { ResourceId = "resource:other" }, signature, key));
         Assert.False(UsageReceiptPolicy.Verify(receipt, new string('a', 129), key));
         Assert.False(UsageReceiptPolicy.Verify(receipt, signature, key.AsSpan(0, 16)));

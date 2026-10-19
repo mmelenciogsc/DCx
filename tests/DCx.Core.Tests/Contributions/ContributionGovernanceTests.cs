@@ -254,6 +254,140 @@ public sealed class ContributionGovernanceTests : IDisposable
     }
 
     [Fact]
+    public async Task UsageReceipts_UseAuthoritativeEvaluationTimeAndAtomicallyEnforceVelocityCap()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "velocity-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "velocity-governance");
+        var first = await ContributionGovernanceService.OpenAsync(governanceRoot, registry);
+        var candidate = Candidate(
+            "candidate:velocity",
+            "resource:velocity",
+            "A deterministic fixture for authoritative receipt-time velocity enforcement.");
+        var prepared = Prepare(candidate, "nonce-velocity-12345678");
+        await first.IntakeAsync(prepared, now);
+        await first.ApproveAndPublishAsync(prepared.SubmissionId, "reviewer:fixture", now);
+        var second = await ContributionGovernanceService.OpenAsync(governanceRoot, registry);
+
+        await using (var connection = await OpenGovernanceConnectionAsync(governanceRoot, readOnly: false))
+        await using (var transaction = connection.BeginTransaction())
+        {
+            for (var index = 0; index < UsageReceiptPolicy.MaximumQualifiedEventsPerInstallationMinute - 1; index++)
+            {
+                var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = """
+                    INSERT INTO usage_receipts(
+                        receipt_id, nonce, installation_pseudonym, entitlement_id, resource_id, resource_version,
+                        occurred_utc, evaluated_utc, qualified, decision_code)
+                    VALUES($receipt, $nonce, $installation, $entitlement, $resource, '1',
+                           $occurred, $evaluated, 1, 'qualified');
+                    """;
+                command.Parameters.AddWithValue("$receipt", $"receipt:velocity-seed-{index:D3}");
+                command.Parameters.AddWithValue("$nonce", $"nonce:velocity-seed-{index:D3}");
+                command.Parameters.AddWithValue("$installation", "installation:velocity");
+                command.Parameters.AddWithValue("$entitlement", "entitlement:velocity");
+                command.Parameters.AddWithValue("$resource", $"resource:seed-{index % 12:D2}");
+                command.Parameters.AddWithValue("$occurred", now.AddDays(-6).ToString("O"));
+                // A later prior server time proves a small clock regression cannot reopen the velocity window.
+                command.Parameters.AddWithValue("$evaluated", now.AddSeconds(30).ToString("O"));
+                Assert.Equal(1, await command.ExecuteNonQueryAsync());
+            }
+
+            await transaction.CommitAsync();
+        }
+
+        var integrityKey = Enumerable.Repeat((byte)37, 32).ToArray();
+        var firstReceipt = UsageReceipt(
+            "receipt:velocity-final-a",
+            "nonce:velocity-final-a",
+            candidate,
+            "installation:velocity",
+            "entitlement:velocity");
+        var secondReceipt = UsageReceipt(
+            "receipt:velocity-final-b",
+            "nonce:velocity-final-b",
+            candidate,
+            "installation:velocity",
+            "entitlement:velocity");
+        var decisions = await Task.WhenAll(
+            first.EvaluateUsageAsync(
+                firstReceipt,
+                UsageReceiptPolicy.Sign(firstReceipt, integrityKey),
+                UsageContext(firstReceipt, "consumer:other", integrityKey)),
+            second.EvaluateUsageAsync(
+                secondReceipt,
+                UsageReceiptPolicy.Sign(secondReceipt, integrityKey),
+                UsageContext(secondReceipt, "consumer:other", integrityKey)));
+
+        Assert.Single(decisions, decision => decision.Qualified);
+        Assert.Single(decisions, decision => decision.Code == "rate_anomaly");
+        await using var verification = await OpenGovernanceConnectionAsync(governanceRoot);
+        var verify = verification.CreateCommand();
+        verify.CommandText = """
+            SELECT COUNT(*), COUNT(DISTINCT evaluated_utc)
+            FROM usage_receipts
+            WHERE installation_pseudonym = 'installation:velocity' AND qualified = 1;
+            """;
+        await using var reader = await verify.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(UsageReceiptPolicy.MaximumQualifiedEventsPerInstallationMinute, reader.GetInt64(0));
+        Assert.Equal(2, reader.GetInt64(1));
+    }
+
+    [Fact]
+    public async Task UsageReceiptSchema_MigratesLegacyOccurrenceTimeWithoutLosingEvidence()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var registry = await GlobalRegistryRepository.OpenAsync(
+            Path.Combine(root, "migration-registry"), key.ExportPkcs8PrivateKey());
+        var governanceRoot = Path.Combine(root, "migration-governance");
+        Directory.CreateDirectory(governanceRoot);
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(governanceRoot, "contribution-governance.sqlite3"),
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = false,
+        }.ToString()))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE usage_receipts(
+                    receipt_id TEXT PRIMARY KEY,
+                    nonce TEXT NOT NULL UNIQUE,
+                    installation_pseudonym TEXT NOT NULL,
+                    entitlement_id TEXT NOT NULL,
+                    resource_id TEXT NOT NULL,
+                    resource_version TEXT NOT NULL,
+                    occurred_utc TEXT NOT NULL,
+                    qualified INTEGER NOT NULL,
+                    decision_code TEXT NOT NULL
+                );
+                INSERT INTO usage_receipts VALUES(
+                    'receipt:legacy', 'nonce:legacy', 'installation:legacy', 'entitlement:legacy',
+                    'resource:legacy', '1', '2026-10-16T12:00:00.0000000+00:00', 1, 'qualified');
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        _ = await ContributionGovernanceService.OpenAsync(governanceRoot, registry);
+
+        await using var verification = await OpenGovernanceConnectionAsync(governanceRoot);
+        var verify = verification.CreateCommand();
+        verify.CommandText = """
+            SELECT occurred_utc, evaluated_utc,
+                   (SELECT COUNT(*) FROM pragma_index_list('usage_receipts') WHERE name LIKE 'ix_usage_receipts_%')
+            FROM usage_receipts WHERE receipt_id = 'receipt:legacy';
+            """;
+        await using var reader = await verify.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(reader.GetString(0), reader.GetString(1));
+        Assert.Equal(3, reader.GetInt64(2));
+    }
+
+    [Fact]
     public async Task ApprovalAndWithdrawal_ReconcileCommittedRegistryOperationsWithoutDuplicateReleases()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);

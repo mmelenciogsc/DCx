@@ -21,16 +21,28 @@ public sealed record UsageReceiptContext(
     bool IsContributorSelfUse,
     string AuthoritativeInstallationPseudonym,
     string AuthoritativeEntitlementId,
-    int PriorQualifiedEventsForDay,
+    UsageReceiptActivity Activity,
     bool ReceiptIdSeen,
     bool NonceSeen,
     DateTimeOffset NowUtc);
+
+public sealed record UsageReceiptActivity(
+    int PriorQualifiedEventsForResourceDay,
+    int PriorQualifiedEventsForInstallationMinute,
+    int PriorQualifiedEventsForInstallationDay,
+    int PriorQualifiedEventsForEntitlementDay,
+    int PriorDistinctResourcesForInstallationDay,
+    bool ResourceSeenForInstallationDay);
 
 public sealed record UsageReceiptDecision(bool Qualified, string Code);
 
 public static class UsageReceiptPolicy
 {
     public const int MaximumQualifiedEventsPerResourceDay = 100;
+    public const int MaximumQualifiedEventsPerInstallationMinute = 120;
+    public const int MaximumQualifiedEventsPerInstallationDay = 2_000;
+    public const int MaximumQualifiedEventsPerEntitlementDay = 10_000;
+    public const int MaximumDistinctResourcesPerInstallationDay = 128;
 
     public static UsageReceiptDecision Evaluate(QualifiedUsageReceipt receipt, UsageReceiptContext context)
     {
@@ -43,7 +55,8 @@ public static class UsageReceiptPolicy
 
         if (!ValidIdentifier(context.AuthoritativeInstallationPseudonym, 128) ||
             !ValidIdentifier(context.AuthoritativeEntitlementId, 128) ||
-            context.PriorQualifiedEventsForDay < 0 || context.NowUtc.Offset != TimeSpan.Zero)
+            context.Activity is null || !HasValidActivity(context.Activity) ||
+            context.NowUtc.Offset != TimeSpan.Zero)
         {
             return new UsageReceiptDecision(false, "context_invalid");
         }
@@ -83,7 +96,12 @@ public static class UsageReceiptPolicy
             return new UsageReceiptDecision(false, "timestamp_out_of_range");
         }
 
-        if (context.PriorQualifiedEventsForDay >= MaximumQualifiedEventsPerResourceDay)
+        if (context.Activity.PriorQualifiedEventsForResourceDay >= MaximumQualifiedEventsPerResourceDay ||
+            context.Activity.PriorQualifiedEventsForInstallationMinute >= MaximumQualifiedEventsPerInstallationMinute ||
+            context.Activity.PriorQualifiedEventsForInstallationDay >= MaximumQualifiedEventsPerInstallationDay ||
+            context.Activity.PriorQualifiedEventsForEntitlementDay >= MaximumQualifiedEventsPerEntitlementDay ||
+            (!context.Activity.ResourceSeenForInstallationDay &&
+             context.Activity.PriorDistinctResourcesForInstallationDay >= MaximumDistinctResourcesPerInstallationDay))
         {
             return new UsageReceiptDecision(false, "rate_anomaly");
         }
@@ -148,6 +166,14 @@ public static class UsageReceiptPolicy
     private static bool ValidIdentifier(string value, int maximumLength) =>
         !string.IsNullOrWhiteSpace(value) && value.Length <= maximumLength &&
         value.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-' or ':' or '/');
+
+    private static bool HasValidActivity(UsageReceiptActivity activity) =>
+        activity.PriorQualifiedEventsForResourceDay >= 0 &&
+        activity.PriorQualifiedEventsForInstallationMinute >= 0 &&
+        activity.PriorQualifiedEventsForInstallationDay >= 0 &&
+        activity.PriorQualifiedEventsForEntitlementDay >= 0 &&
+        activity.PriorDistinctResourcesForInstallationDay >= 0 &&
+        activity.PriorDistinctResourcesForInstallationDay <= activity.PriorQualifiedEventsForInstallationDay;
 
     private static bool HasValidSchema(QualifiedUsageReceipt receipt) =>
         ValidIdentifier(receipt.ReceiptId, 128) && ValidIdentifier(receipt.InstallationPseudonym, 128) &&
