@@ -619,6 +619,9 @@ try {
     $null = Wait-For {
         $diagnosticsStatus.Current.Name -eq "Local crash diagnostics are disabled. No crash reports are retained or sent."
     } "The default-disabled crash diagnostics state was not exposed."
+    $null = Wait-For {
+        $diagnosticsConsent.Current.IsEnabled -and $diagnosticsSave.Current.IsEnabled
+    } "The crash diagnostics controls did not become ready after loading."
 
     $consentToggle.Toggle()
     $diagnosticsSave.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -630,11 +633,17 @@ try {
     if (-not $savedConsent.enabled -or $savedConsent.noticeVersion -ne 1) {
         throw "The local crash diagnostics consent record did not reflect explicit opt-in."
     }
+    $null = Wait-For {
+        $diagnosticsDelete.Current.IsEnabled
+    } "The crash diagnostics purge control did not become ready after opt-in."
 
     $diagnosticsDelete.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For {
         $diagnosticsStatus.Current.Name -eq "All retained crash reports were deleted. Local crash diagnostics remain enabled. Nothing was sent."
     } "The explicit local crash-report purge action did not complete."
+    $null = Wait-For {
+        $diagnosticsConsent.Current.IsEnabled -and $diagnosticsSave.Current.IsEnabled
+    } "The crash diagnostics controls did not become ready after purge."
     $consentToggle.Toggle()
     $diagnosticsSave.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For {
