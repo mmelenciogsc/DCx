@@ -115,5 +115,6 @@
 | [0111](architecture/adr/0111-revalidate-staged-update-without-activation-authority.md) | Revalidate the final staged update without activation authority | Accepted for a read-only local readiness review; installation and activation remain absent and blocked | 2026-10-19 |
 | [0112](architecture/adr/0112-hold-staged-update-files-across-activation-transaction.md) | Hold staged update files across the activation transaction | Accepted for the activation-transaction foundation; production execution and lifecycle acceptance remain blocked | 2026-10-19 |
 | [0113](architecture/adr/0113-compile-current-user-package-manager-adapter-without-composition.md) | Compile a current-user PackageManager adapter without composing activation | Accepted for an uncomposed adapter; production execution and lifecycle acceptance remain blocked | 2026-10-19 |
+| [0114](architecture/adr/0114-exercise-activation-transaction-with-zero-authority-ui.md) | Exercise the activation transaction through a zero-authority accessible workflow | Accepted for synthetic validation; package activation remains unavailable and blocked | 2026-10-19 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

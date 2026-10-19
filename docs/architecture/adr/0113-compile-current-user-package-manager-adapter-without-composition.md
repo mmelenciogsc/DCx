@@ -23,7 +23,7 @@ The repository now contains a compile-checked Windows implementation for a futur
 
 ## Validation
 
-Implementation `fc23b48` passes 24/24 focused controlled-update/adapter tests, 42/42 P13 reliability tests and the full 682/682 Windows suite with zero build warnings/errors. Exact P13 evidence is `artifacts/test-results/p13-e0abd97bf39849e792dec2f561fa1b37/`. The gate recorded zero controlled-update network requests, installer processes, elevation requests, activation attempts, restart attempts and production actions. Exact P12 review evidence `artifacts/test-results/p12-package-approval-d582b16ecdf9444183027b7dc0271c5b/` passes 12/12 plus native UIA with zero installer child processes.
+Implementation `fc23b48`, revalidated with ADR 0114 at `63100d1`, passes 24/24 focused controlled-update/adapter tests, 42/42 P13 reliability tests and the full 682/682 Windows suite with zero build warnings/errors. Current exact P13 evidence is `artifacts/test-results/p13-c18e4b6bf1c5409fbb65dbc0f5422026/`. The gate recorded zero PackageManager calls and zero controlled-update network requests, installer processes, elevation requests, activation attempts, restart attempts and production actions. Exact P12 review evidence `artifacts/test-results/p12-package-approval-d582b16ecdf9444183027b7dc0271c5b/` passes 12/12 plus native UIA with zero installer child processes.
 
 ## Verified upstream contracts
 
