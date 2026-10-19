@@ -951,12 +951,19 @@ public sealed class ControlledUpdateStagerTests : IDisposable
 
         public int Executions => Volatile.Read(ref executions);
 
-        public Task ExecuteAsync(
+        public async Task<ControlledUpdateActivationExecutionResult> ExecuteAsync(
             ControlledUpdateActivationContext context,
             CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref executions);
-            return execute(context, cancellationToken);
+            await execute(context, cancellationToken);
+            return new ControlledUpdateActivationExecutionResult(
+                ControlledUpdateActivationExecutionStatus.ValidationNoOp,
+                PackageManagerInvocations: 0,
+                IsRegistered: false,
+                RestartRequired: false,
+                RequestsElevation: false,
+                InstallerProcessesStarted: 0);
         }
     }
 

@@ -64,7 +64,7 @@ public static class PackageInstallReviewService
     public const long MaximumPackageBytes = 1024L * 1024 * 1024;
     public const string CurrentUserMsixOperation = "msix-current-user-install";
     public const string DeploymentApiName =
-        "Windows.Management.Deployment.PackageManager.AddPackageByUriAsync";
+        "Windows.Management.Deployment.PackageManager.AddPackageAsync";
     public const string NoDeploymentOptions = "None";
     public const string CurrentUserScope = "Current Windows user";
     public static readonly TimeSpan MaximumReviewAge = TimeSpan.FromMinutes(10);

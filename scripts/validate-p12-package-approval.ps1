@@ -74,7 +74,7 @@ function Assert-RequestDetails($window) {
     $value = $details.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
     foreach ($expected in @(
         "Requested operation: msix-current-user-install",
-        "Windows.Management.Deployment.PackageManager.AddPackageByUriAsync",
+        "Windows.Management.Deployment.PackageManager.AddPackageAsync",
         "Deployment options: None",
         "Installation scope: Current Windows user",
         "Requests elevation: no",

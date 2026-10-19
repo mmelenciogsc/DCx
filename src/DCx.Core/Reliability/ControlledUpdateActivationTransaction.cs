@@ -10,6 +10,52 @@ public sealed record ControlledUpdateActivationContext(
     string ReviewSha256,
     string ReadinessSha256);
 
+public enum ControlledUpdateActivationExecutionStatus
+{
+    ValidationNoOp,
+    Registered,
+    RegistrationDeferred,
+}
+
+public sealed record ControlledUpdateActivationExecutionResult(
+    ControlledUpdateActivationExecutionStatus Status,
+    int PackageManagerInvocations,
+    bool IsRegistered,
+    bool RestartRequired,
+    bool RequestsElevation,
+    int InstallerProcessesStarted);
+
+public static class ControlledUpdateActivationExecutionPolicy
+{
+    public static void Require(ControlledUpdateActivationExecutionResult? result)
+    {
+        if (result is null || result.RequestsElevation ||
+            result.InstallerProcessesStarted != 0 ||
+            result.PackageManagerInvocations is < 0 or > 1)
+        {
+            throw new ControlledUpdateException("update_activation_result_invalid");
+        }
+
+        var valid = result.Status switch
+        {
+            ControlledUpdateActivationExecutionStatus.ValidationNoOp =>
+                result.PackageManagerInvocations == 0 && !result.IsRegistered &&
+                !result.RestartRequired,
+            ControlledUpdateActivationExecutionStatus.Registered =>
+                result.PackageManagerInvocations == 1 && result.IsRegistered &&
+                !result.RestartRequired,
+            ControlledUpdateActivationExecutionStatus.RegistrationDeferred =>
+                result.PackageManagerInvocations == 1 && !result.IsRegistered &&
+                result.RestartRequired,
+            _ => false,
+        };
+        if (!valid)
+        {
+            throw new ControlledUpdateException("update_activation_result_invalid");
+        }
+    }
+}
+
 /// <summary>
 /// Product-owned activation adapters implement this contract. An implementation must not
 /// return until its operating-system package operation is terminal. DCx currently composes
@@ -17,7 +63,7 @@ public sealed record ControlledUpdateActivationContext(
 /// </summary>
 public interface IControlledUpdateActivationExecutor
 {
-    Task ExecuteAsync(
+    Task<ControlledUpdateActivationExecutionResult> ExecuteAsync(
         ControlledUpdateActivationContext context,
         CancellationToken cancellationToken);
 }
@@ -30,7 +76,7 @@ public sealed partial class ControlledUpdateStager
     /// authority by itself; authority remains with the explicitly composed executor and its
     /// caller. Normal DCx composition does not expose or call this method.
     /// </summary>
-    public async Task ExecuteActivationTransactionAsync(
+    public async Task<ControlledUpdateActivationExecutionResult> ExecuteActivationTransactionAsync(
         ControlledUpdateReview review,
         ControlledUpdateActivationReadiness readiness,
         string currentVersion,
@@ -125,9 +171,11 @@ public sealed partial class ControlledUpdateStager
                 review.ReviewSha256,
                 readiness.ReadinessSha256);
 
+            ControlledUpdateActivationExecutionResult? executionResult;
             try
             {
-                await executor.ExecuteAsync(context, cancellationToken).ConfigureAwait(false);
+                executionResult = await executor.ExecuteAsync(context, cancellationToken)
+                    .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -171,6 +219,8 @@ public sealed partial class ControlledUpdateStager
                     manifestLease,
                     CancellationToken.None)
                 .ConfigureAwait(false);
+            ControlledUpdateActivationExecutionPolicy.Require(executionResult);
+            return executionResult!;
         }
     }
 
