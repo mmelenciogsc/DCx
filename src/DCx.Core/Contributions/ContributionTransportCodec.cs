@@ -26,6 +26,12 @@ public static class ContributionTransportCodec
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         MaxDepth = 32,
     };
+    private static readonly JsonDocumentOptions DocumentOptions = new()
+    {
+        AllowTrailingCommas = false,
+        CommentHandling = JsonCommentHandling.Disallow,
+        MaxDepth = 32,
+    };
 
     public static byte[] Encode(
         PreparedContribution submission,
@@ -76,16 +82,25 @@ public static class ContributionTransportCodec
 
         try
         {
-            var submission = JsonSerializer.Deserialize<PreparedContribution>(
-                    envelope.Slice(HeaderBytes, metadataLength), JsonOptions)
-                ?? throw new ContributionPolicyException("contribution_envelope_invalid");
-            var artifact = envelope[(HeaderBytes + metadataLength)..].ToArray();
-            if (artifact.Length > ContentAddressedArtifactStore.MaximumArtifactBytes)
+            var metadata = envelope.Slice(HeaderBytes, metadataLength).ToArray();
+            try
             {
-                throw new ContributionPolicyException("contribution_envelope_size_invalid");
-            }
+                using var document = JsonDocument.Parse(metadata, DocumentOptions);
+                RejectDuplicateProperties(document.RootElement);
+                var submission = document.RootElement.Deserialize<PreparedContribution>(JsonOptions)
+                    ?? throw new ContributionPolicyException("contribution_envelope_invalid");
+                var artifact = envelope[(HeaderBytes + metadataLength)..].ToArray();
+                if (artifact.Length > ContentAddressedArtifactStore.MaximumArtifactBytes)
+                {
+                    throw new ContributionPolicyException("contribution_envelope_size_invalid");
+                }
 
-            return new ContributionTransportEnvelope(submission, artifact);
+                return new ContributionTransportEnvelope(submission, artifact);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(metadata);
+            }
         }
         catch (ContributionPolicyException)
         {
@@ -95,6 +110,33 @@ public static class ContributionTransportCodec
             exception is JsonException or ArgumentException or InvalidOperationException or OverflowException)
         {
             throw new ContributionPolicyException("contribution_envelope_invalid");
+        }
+    }
+
+    private static void RejectDuplicateProperties(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (!names.Add(property.Name))
+                    {
+                        throw new ContributionPolicyException("contribution_envelope_invalid");
+                    }
+
+                    RejectDuplicateProperties(property.Value);
+                }
+
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    RejectDuplicateProperties(item);
+                }
+
+                break;
         }
     }
 }

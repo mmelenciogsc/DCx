@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Text;
 using System.Text.Json;
 using DCx.Core.Contributions;
 using DCx.Core.Knowledge;
@@ -174,11 +176,24 @@ public sealed class ContributionPolicyTests
         var encoded = ContributionTransportCodec.Encode(prepared);
         var changedVersion = encoded.ToArray();
         changedVersion[4] = 2;
+        var metadataLength = BinaryPrimitives.ReadInt32BigEndian(encoded.AsSpan(5, 4));
+        var metadata = Encoding.UTF8.GetString(
+            encoded,
+            ContributionTransportCodec.HeaderBytes,
+            metadataLength);
+        var duplicateMetadata = Encoding.UTF8.GetBytes(
+            metadata.Insert(1, $"\"submissionId\":\"{prepared.SubmissionId}\","));
+        var duplicateEnvelope = new byte[ContributionTransportCodec.HeaderBytes + duplicateMetadata.Length];
+        encoded.AsSpan(0, ContributionTransportCodec.HeaderBytes).CopyTo(duplicateEnvelope);
+        BinaryPrimitives.WriteInt32BigEndian(duplicateEnvelope.AsSpan(5, 4), duplicateMetadata.Length);
+        duplicateMetadata.CopyTo(duplicateEnvelope.AsSpan(ContributionTransportCodec.HeaderBytes));
 
         Assert.Equal("contribution_envelope_invalid", Assert.Throws<ContributionPolicyException>(() =>
             ContributionTransportCodec.Decode(changedVersion)).Code);
         Assert.Equal("contribution_envelope_invalid", Assert.Throws<ContributionPolicyException>(() =>
             ContributionTransportCodec.Decode(encoded.AsSpan(0, ContributionTransportCodec.HeaderBytes))).Code);
+        Assert.Equal("contribution_envelope_invalid", Assert.Throws<ContributionPolicyException>(() =>
+            ContributionTransportCodec.Decode(duplicateEnvelope)).Code);
         Assert.Equal("contribution_envelope_size_invalid", Assert.Throws<ContributionPolicyException>(() =>
             ContributionTransportCodec.Encode(prepared with
             {

@@ -24,6 +24,8 @@ public sealed class ContributionSubmissionClientTests
         Assert.False(handler.UseCookies);
         Assert.False(handler.UseProxy);
         Assert.Equal(DecompressionMethods.None, handler.AutomaticDecompression);
+        Assert.Equal(2, handler.MaxConnectionsPerServer);
+        Assert.Equal(16, handler.MaxResponseHeadersLength);
     }
 
     [Fact]
@@ -69,6 +71,12 @@ public sealed class ContributionSubmissionClientTests
                      new FixtureHandler(contribution.SubmissionId) { State = ContributionState.Approved },
                      new FixtureHandler(contribution.SubmissionId) { WrongLocation = true },
                      new FixtureHandler(contribution.SubmissionId) { AddUnknownResponseField = true },
+                     new FixtureHandler(contribution.SubmissionId) { DuplicateResponseField = true },
+                     new FixtureHandler(contribution.SubmissionId) { WrongResponsePath = true },
+                     new FixtureHandler(contribution.SubmissionId) { WrongContentType = true },
+                     new FixtureHandler(contribution.SubmissionId) { InvalidCharset = true },
+                     new FixtureHandler(contribution.SubmissionId) { ContentEncoding = true },
+                     new FixtureHandler(contribution.SubmissionId) { DeclaredOversizedResponse = true },
                      new FixtureHandler(contribution.SubmissionId) { OversizedResponse = true },
                  })
         {
@@ -94,6 +102,31 @@ public sealed class ContributionSubmissionClientTests
         var exception = await Assert.ThrowsAsync<ContributionSubmissionException>(() =>
             client.SubmitAsync(contribution, Token));
         Assert.Equal("authentication_invalid", exception.Code);
+
+        foreach (var handler in new[]
+                 {
+                     new FixtureHandler(contribution.SubmissionId)
+                     {
+                         StatusCode = HttpStatusCode.Unauthorized,
+                         ErrorCode = "authentication_invalid",
+                         WrongContentType = true,
+                     },
+                     new FixtureHandler(contribution.SubmissionId)
+                     {
+                         StatusCode = HttpStatusCode.Unauthorized,
+                         ErrorCode = "authentication_invalid",
+                         DuplicateResponseField = true,
+                     },
+                 })
+        {
+            using var invalidClient = new ContributionSubmissionClient(
+                handler, new Uri("http://127.0.0.1:5087/"));
+            var invalid = await Assert.ThrowsAsync<ContributionSubmissionException>(() =>
+                invalidClient.SubmitAsync(contribution, Token));
+            Assert.Contains(
+                invalid.Code,
+                new[] { "submission_response_invalid", "submission_rejected" });
+        }
     }
 
     [Fact]
@@ -140,8 +173,13 @@ public sealed class ContributionSubmissionClientTests
                      new LifecycleHandler(contribution) { WrongCandidateDigest = true },
                      new LifecycleHandler(contribution) { State = ContributionState.Approved },
                      new LifecycleHandler(contribution) { AddUnknownResponseField = true },
+                     new LifecycleHandler(contribution) { DuplicateResponseField = true },
                      new LifecycleHandler(contribution) { WrongContentType = true },
+                     new LifecycleHandler(contribution) { InvalidCharset = true },
+                     new LifecycleHandler(contribution) { ContentEncoding = true },
                      new LifecycleHandler(contribution) { EscapeResponseOrigin = true },
+                     new LifecycleHandler(contribution) { WrongResponsePath = true },
+                     new LifecycleHandler(contribution) { DeclaredOversizedResponse = true },
                      new LifecycleHandler(contribution) { OversizedResponse = true },
                  })
         {
@@ -297,6 +335,12 @@ public sealed class ContributionSubmissionClientTests
         public bool EscapeResponseOrigin { get; init; }
         public bool WrongLocation { get; init; }
         public bool AddUnknownResponseField { get; init; }
+        public bool DuplicateResponseField { get; init; }
+        public bool WrongResponsePath { get; init; }
+        public bool WrongContentType { get; init; }
+        public bool InvalidCharset { get; init; }
+        public bool ContentEncoding { get; init; }
+        public bool DeclaredOversizedResponse { get; init; }
         public bool OversizedResponse { get; init; }
         public ContributionState State { get; init; } = ContributionState.Quarantined;
         public HttpStatusCode StatusCode { get; init; } = HttpStatusCode.Accepted;
@@ -315,14 +359,19 @@ public sealed class ContributionSubmissionClientTests
             {
                 RequestMessage = EscapeResponseOrigin
                     ? new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:6553/api/contributions/intake")
+                    : WrongResponsePath
+                        ? new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:5087/api/contributions/other")
                     : request,
             };
             if (StatusCode == HttpStatusCode.Accepted)
             {
                 var unknown = AddUnknownResponseField ? ",\"unknown\":true" : string.Empty;
+                var duplicate = DuplicateResponseField
+                    ? $",\"state\":{(int)State}"
+                    : string.Empty;
                 var body = OversizedResponse
                     ? new string('x', 16 * 1024 + 1)
-                    : $"{{\"submissionId\":\"{submissionId}\",\"state\":{(int)State}{unknown}}}";
+                    : $"{{\"submissionId\":\"{submissionId}\",\"state\":{(int)State}{duplicate}{unknown}}}";
                 response.Content = new StringContent(body, Encoding.UTF8, "application/json");
                 response.Headers.Location = new Uri(
                     WrongLocation
@@ -332,9 +381,21 @@ public sealed class ContributionSubmissionClientTests
             }
             else
             {
+                var duplicate = DuplicateResponseField ? $",\"code\":\"{ErrorCode}\"" : string.Empty;
                 response.Content = new StringContent(
-                    $"{{\"code\":\"{ErrorCode}\"}}", Encoding.UTF8, "application/json");
+                    $"{{\"code\":\"{ErrorCode}\"{duplicate}}}", Encoding.UTF8, "application/json");
             }
+
+            if (WrongContentType)
+            {
+                response.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("text/plain");
+            }
+            else if (InvalidCharset)
+            {
+                response.Content.Headers.ContentType!.CharSet = "utf-16";
+            }
+            if (ContentEncoding) response.Content.Headers.ContentEncoding.Add("gzip");
+            if (DeclaredOversizedResponse) response.Content.Headers.ContentLength = 16 * 1024 + 1;
 
             return response;
         }
@@ -349,8 +410,13 @@ public sealed class ContributionSubmissionClientTests
         public bool WrongSubmissionId { get; init; }
         public bool WrongCandidateDigest { get; init; }
         public bool AddUnknownResponseField { get; init; }
+        public bool DuplicateResponseField { get; init; }
         public bool WrongContentType { get; init; }
+        public bool InvalidCharset { get; init; }
+        public bool ContentEncoding { get; init; }
         public bool EscapeResponseOrigin { get; init; }
+        public bool WrongResponsePath { get; init; }
+        public bool DeclaredOversizedResponse { get; init; }
         public bool OversizedResponse { get; init; }
         public bool InvalidRelease { get; init; }
         public ContributionState State { get; init; } = ContributionState.Quarantined;
@@ -370,6 +436,8 @@ public sealed class ContributionSubmissionClientTests
             {
                 RequestMessage = EscapeResponseOrigin
                     ? new HttpRequestMessage(HttpMethod.Get, "http://127.0.0.1:6553/api/contributions/escaped")
+                    : WrongResponsePath
+                        ? new HttpRequestMessage(HttpMethod.Get, "http://127.0.0.1:5087/api/contributions/other")
                     : request,
             };
             if (StatusCode != HttpStatusCode.OK)
@@ -384,6 +452,7 @@ public sealed class ContributionSubmissionClientTests
                 ? new string('0', 64)
                 : ContributionCodec.CandidateSha256(contribution.Candidate);
             var unknown = AddUnknownResponseField ? ",\"unknown\":true" : string.Empty;
+            var duplicate = DuplicateResponseField ? $",\"state\":{(int)State}" : string.Empty;
             string body;
             if (OversizedResponse)
             {
@@ -394,7 +463,7 @@ public sealed class ContributionSubmissionClientTests
                 var releaseSha256 = InvalidRelease ? "invalid" : new string('a', 64);
                 var releaseSize = InvalidRelease ? 0 : 1234;
                 body =
-                    $"{{\"submissionId\":\"{submissionId}\",\"candidateSha256\":\"{candidateSha256}\",\"state\":{(int)State},\"release\":{{\"sequence\":7,\"sha256\":\"{releaseSha256}\",\"sizeBytes\":{releaseSize}}}{unknown}}}";
+                    $"{{\"submissionId\":\"{submissionId}\",\"candidateSha256\":\"{candidateSha256}\",\"state\":{(int)State},\"release\":{{\"sequence\":7,\"sha256\":\"{releaseSha256}\",\"sizeBytes\":{releaseSize}}}{duplicate}{unknown}}}";
             }
             else
             {
@@ -402,13 +471,16 @@ public sealed class ContributionSubmissionClientTests
                 var reviewed = ReviewedUtc is null ? "null" : $"\"{ReviewedUtc.Value:O}\"";
                 var sequence = ReleaseSequence?.ToString() ?? "null";
                 body =
-                    $"{{\"submissionId\":\"{submissionId}\",\"candidateSha256\":\"{candidateSha256}\",\"state\":{(int)State},\"createdUtc\":\"{created}\",\"reviewedUtc\":{reviewed},\"releaseSequence\":{sequence}{unknown}}}";
+                    $"{{\"submissionId\":\"{submissionId}\",\"candidateSha256\":\"{candidateSha256}\",\"state\":{(int)State},\"createdUtc\":\"{created}\",\"reviewedUtc\":{reviewed},\"releaseSequence\":{sequence}{duplicate}{unknown}}}";
             }
 
             response.Content = new StringContent(
                 body,
                 Encoding.UTF8,
                 WrongContentType ? "text/plain" : "application/json");
+            if (InvalidCharset) response.Content.Headers.ContentType!.CharSet = "utf-16";
+            if (ContentEncoding) response.Content.Headers.ContentEncoding.Add("gzip");
+            if (DeclaredOversizedResponse) response.Content.Headers.ContentLength = 16 * 1024 + 1;
             return Task.FromResult(response);
         }
     }

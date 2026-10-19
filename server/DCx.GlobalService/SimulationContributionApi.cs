@@ -385,10 +385,15 @@ internal static class SimulationContributionApi
         HttpRequest request,
         CancellationToken cancellationToken)
     {
-        var mediaType = request.ContentType is null
-            ? null
-            : MediaTypeHeaderValue.TryParse(request.ContentType, out var parsed) ? parsed.MediaType : null;
-        if (!string.Equals(mediaType, ContributionTransportCodec.MediaType, StringComparison.OrdinalIgnoreCase) ||
+        MediaTypeHeaderValue? parsed = null;
+        if (request.ContentType is null ||
+            !MediaTypeHeaderValue.TryParse(request.ContentType, out parsed) ||
+            !string.Equals(
+                parsed.MediaType,
+                ContributionTransportCodec.MediaType,
+                StringComparison.OrdinalIgnoreCase) ||
+            parsed.Parameters.Count > 0 ||
+            request.Headers.ContentEncoding.Count != 0 ||
             request.ContentLength is null ||
             request.ContentLength <= ContributionTransportCodec.HeaderBytes ||
             request.ContentLength > ContributionTransportCodec.MaximumEnvelopeBytes)
@@ -398,24 +403,35 @@ internal static class SimulationContributionApi
 
         using var output = new MemoryStream((int)request.ContentLength.Value);
         var buffer = new byte[64 * 1024];
-        while (true)
+        try
         {
-            var read = await request.Body.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-            if (read == 0) break;
-            if (output.Length + read > ContributionTransportCodec.MaximumEnvelopeBytes)
+            while (true)
             {
-                throw new InvalidDataException("The contribution request is too large.");
+                var read = await request.Body.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                if (read == 0) break;
+                if (output.Length + read > ContributionTransportCodec.MaximumEnvelopeBytes)
+                {
+                    throw new InvalidDataException("The contribution request is too large.");
+                }
+
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
             }
 
-            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-        }
+            if (output.Length != request.ContentLength)
+            {
+                throw new InvalidDataException("The contribution request length changed during transfer.");
+            }
 
-        if (output.Length != request.ContentLength)
+            return output.ToArray();
+        }
+        finally
         {
-            throw new InvalidDataException("The contribution request length changed during transfer.");
+            CryptographicOperations.ZeroMemory(buffer);
+            if (output.TryGetBuffer(out var written))
+            {
+                CryptographicOperations.ZeroMemory(written.AsSpan(0, (int)output.Length));
+            }
         }
-
-        return output.ToArray();
     }
 
     private static SimulationAuthorization Authorize(

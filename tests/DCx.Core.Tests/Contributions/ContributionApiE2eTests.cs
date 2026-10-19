@@ -129,6 +129,22 @@ public sealed class ContributionApiE2eTests : IDisposable
             {
                 await AssertErrorAsync(wrongRole, HttpStatusCode.Forbidden, "role_forbidden");
             }
+            using (var parameterizedMedia = await SendIntakeWithInvalidContentContractAsync(
+                       client, intakeUri, valid, contributorToken, charset: "utf-8"))
+            {
+                await AssertErrorAsync(
+                    parameterizedMedia,
+                    HttpStatusCode.BadRequest,
+                    "contribution_request_invalid");
+            }
+            using (var encodedMedia = await SendIntakeWithInvalidContentContractAsync(
+                       client, intakeUri, valid, contributorToken, contentEncoding: "gzip"))
+            {
+                await AssertErrorAsync(
+                    encodedMedia,
+                    HttpStatusCode.BadRequest,
+                    "contribution_request_invalid");
+            }
             var wrongIdentityCandidate = valid.Candidate with
             {
                 CandidateId = "candidate:api-wrong-identity",
@@ -455,6 +471,30 @@ public sealed class ContributionApiE2eTests : IDisposable
         };
         request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(ContributionTransportCodec.MediaType);
         if (token is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> SendIntakeWithInvalidContentContractAsync(
+        HttpClient client,
+        Uri uri,
+        PreparedContribution contribution,
+        string token,
+        string? charset = null,
+        string? contentEncoding = null)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, uri)
+        {
+            Content = new ByteArrayContent(ContributionTransportCodec.Encode(contribution)),
+        };
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue(ContributionTransportCodec.MediaType)
+        {
+            CharSet = charset,
+        };
+        if (contentEncoding is not null)
+        {
+            request.Content.Headers.ContentEncoding.Add(contentEncoding);
+        }
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return await client.SendAsync(request);
     }
 

@@ -37,6 +37,12 @@ public sealed class ContributionSubmissionClient : IDisposable
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         MaxDepth = 4,
     };
+    private static readonly JsonDocumentOptions DocumentOptions = new()
+    {
+        AllowTrailingCommas = false,
+        CommentHandling = JsonCommentHandling.Disallow,
+        MaxDepth = 4,
+    };
 
     private readonly HttpClient httpClient;
     private readonly Uri origin;
@@ -89,6 +95,8 @@ public sealed class ContributionSubmissionClient : IDisposable
         UseProxy = false,
         AutomaticDecompression = DecompressionMethods.None,
         ConnectTimeout = TimeSpan.FromSeconds(10),
+        MaxConnectionsPerServer = 2,
+        MaxResponseHeadersLength = 16,
     };
 
     public async Task<ContributionSubmissionResult> SubmitAsync(
@@ -111,8 +119,8 @@ public sealed class ContributionSubmissionClient : IDisposable
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, "api/contributions/intake");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", contributorToken);
+            var requestUri = new Uri(origin, "api/contributions/intake");
+            using var request = CreateAuthorizedRequest(HttpMethod.Post, requestUri, contributorToken);
             request.Content = new ByteArrayContent(envelope);
             request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(ContributionTransportCodec.MediaType);
             using var response = await httpClient.SendAsync(
@@ -120,7 +128,8 @@ public sealed class ContributionSubmissionClient : IDisposable
                     HttpCompletionOption.ResponseHeadersRead,
                     cancellationToken)
                 .ConfigureAwait(false);
-            EnsureResponseOrigin(response);
+            EnsureExactResponseUri(response, requestUri);
+            EnsureJsonResponse(response);
             var body = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
             try
             {
@@ -129,17 +138,7 @@ public sealed class ContributionSubmissionClient : IDisposable
                     throw new ContributionSubmissionException(ReadErrorCode(body));
                 }
 
-                EnsureJsonResponse(response);
-
-                AcceptedResponse? accepted;
-                try
-                {
-                    accepted = JsonSerializer.Deserialize<AcceptedResponse>(body, JsonOptions);
-                }
-                catch (JsonException)
-                {
-                    throw new ContributionSubmissionException("submission_response_invalid");
-                }
+                var accepted = DeserializeResponse<AcceptedResponse>(body);
 
                 if (accepted is null || accepted.SubmissionId != contribution.SubmissionId ||
                     accepted.State != ContributionState.Quarantined ||
@@ -169,16 +168,20 @@ public sealed class ContributionSubmissionClient : IDisposable
     {
         var expectedCandidateSha256 = ValidatePreparedContribution(contribution);
         ValidateToken(contributorToken);
+        var requestUri = new Uri(
+            origin,
+            $"api/contributions/{Uri.EscapeDataString(contribution.SubmissionId)}");
         using var request = CreateAuthorizedRequest(
             HttpMethod.Get,
-            $"api/contributions/{Uri.EscapeDataString(contribution.SubmissionId)}",
+            requestUri,
             contributorToken);
         using var response = await httpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken)
             .ConfigureAwait(false);
-        EnsureResponseOrigin(response);
+        EnsureExactResponseUri(response, requestUri);
+        EnsureJsonResponse(response);
         var body = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
         try
         {
@@ -187,16 +190,7 @@ public sealed class ContributionSubmissionClient : IDisposable
                 throw new ContributionSubmissionException(ReadErrorCode(body));
             }
 
-            EnsureJsonResponse(response);
-            OwnerStatusResponse? status;
-            try
-            {
-                status = JsonSerializer.Deserialize<OwnerStatusResponse>(body, JsonOptions);
-            }
-            catch (JsonException)
-            {
-                throw new ContributionSubmissionException("submission_response_invalid");
-            }
+            var status = DeserializeResponse<OwnerStatusResponse>(body);
 
             if (status is null ||
                 !string.Equals(status.SubmissionId, contribution.SubmissionId, StringComparison.Ordinal) ||
@@ -227,16 +221,20 @@ public sealed class ContributionSubmissionClient : IDisposable
     {
         var expectedCandidateSha256 = ValidatePreparedContribution(contribution);
         ValidateToken(contributorToken);
+        var requestUri = new Uri(
+            origin,
+            $"api/contributions/{Uri.EscapeDataString(contribution.SubmissionId)}/withdraw");
         using var request = CreateAuthorizedRequest(
             HttpMethod.Post,
-            $"api/contributions/{Uri.EscapeDataString(contribution.SubmissionId)}/withdraw",
+            requestUri,
             contributorToken);
         using var response = await httpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken)
             .ConfigureAwait(false);
-        EnsureResponseOrigin(response);
+        EnsureExactResponseUri(response, requestUri);
+        EnsureJsonResponse(response);
         var body = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
         try
         {
@@ -245,16 +243,7 @@ public sealed class ContributionSubmissionClient : IDisposable
                 throw new ContributionSubmissionException(ReadErrorCode(body));
             }
 
-            EnsureJsonResponse(response);
-            OwnerWithdrawalResponse? withdrawal;
-            try
-            {
-                withdrawal = JsonSerializer.Deserialize<OwnerWithdrawalResponse>(body, JsonOptions);
-            }
-            catch (JsonException)
-            {
-                throw new ContributionSubmissionException("submission_response_invalid");
-            }
+            var withdrawal = DeserializeResponse<OwnerWithdrawalResponse>(body);
 
             if (withdrawal is null ||
                 !string.Equals(withdrawal.SubmissionId, contribution.SubmissionId, StringComparison.Ordinal) ||
@@ -280,12 +269,11 @@ public sealed class ContributionSubmissionClient : IDisposable
 
     public void Dispose() => httpClient.Dispose();
 
-    private void EnsureResponseOrigin(HttpResponseMessage response)
+    private static void EnsureExactResponseUri(HttpResponseMessage response, Uri requestUri)
     {
         var responseUri = response.RequestMessage?.RequestUri;
-        if (responseUri is null || !responseUri.IsAbsoluteUri || responseUri.Scheme != Uri.UriSchemeHttp ||
-            !responseUri.IsLoopback || !string.Equals(responseUri.Host, origin.Host, StringComparison.OrdinalIgnoreCase) ||
-            responseUri.Port != origin.Port)
+        if (responseUri is null || !responseUri.IsAbsoluteUri ||
+            !string.Equals(responseUri.AbsoluteUri, requestUri.AbsoluteUri, StringComparison.Ordinal))
         {
             throw new ContributionSubmissionException("submission_response_origin_invalid");
         }
@@ -293,17 +281,28 @@ public sealed class ContributionSubmissionClient : IDisposable
 
     private static HttpRequestMessage CreateAuthorizedRequest(
         HttpMethod method,
-        string requestUri,
+        Uri requestUri,
         string contributorToken)
     {
         var request = new HttpRequestMessage(method, requestUri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", contributorToken);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("identity"));
+        request.Headers.CacheControl = new CacheControlHeaderValue { NoStore = true };
         return request;
     }
 
     private static void EnsureJsonResponse(HttpResponseMessage response)
     {
-        if (response.Content.Headers.ContentType?.MediaType is not "application/json")
+        var contentType = response.Content.Headers.ContentType;
+        var charset = contentType?.CharSet?.Trim().Trim('"');
+        if (!string.Equals(
+                contentType?.MediaType,
+                "application/json",
+                StringComparison.OrdinalIgnoreCase) ||
+            response.Content.Headers.ContentEncoding.Count != 0 ||
+            (!string.IsNullOrEmpty(charset) &&
+             !string.Equals(charset, "utf-8", StringComparison.OrdinalIgnoreCase)))
         {
             throw new ContributionSubmissionException("submission_response_invalid");
         }
@@ -369,7 +368,8 @@ public sealed class ContributionSubmissionClient : IDisposable
         HttpContent content,
         CancellationToken cancellationToken)
     {
-        if (content.Headers.ContentLength is > MaximumResponseBytes)
+        if (content.Headers.ContentLength is long contentLength &&
+            (contentLength < 0 || contentLength > MaximumResponseBytes))
         {
             throw new ContributionSubmissionException("submission_response_invalid");
         }
@@ -402,19 +402,66 @@ public sealed class ContributionSubmissionClient : IDisposable
         }
     }
 
-    private static string ReadErrorCode(ReadOnlySpan<byte> body)
+    private static string ReadErrorCode(byte[] body)
     {
         try
         {
-            var error = JsonSerializer.Deserialize<ErrorResponse>(body, JsonOptions);
+            var error = DeserializeResponse<ErrorResponse>(body);
             return error?.Code is { Length: > 0 and <= 128 } code &&
                    code.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-')
                 ? code
                 : "submission_rejected";
         }
-        catch (JsonException)
+        catch (Exception exception) when (
+            exception is JsonException or NotSupportedException or ContributionSubmissionException)
         {
             return "submission_rejected";
+        }
+    }
+
+    private static T DeserializeResponse<T>(ReadOnlyMemory<byte> body) where T : class
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body, DocumentOptions);
+            RejectDuplicateProperties(document.RootElement);
+            return document.RootElement.Deserialize<T>(JsonOptions)
+                   ?? throw new ContributionSubmissionException("submission_response_invalid");
+        }
+        catch (ContributionSubmissionException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        {
+            throw new ContributionSubmissionException("submission_response_invalid");
+        }
+    }
+
+    private static void RejectDuplicateProperties(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (!names.Add(property.Name))
+                    {
+                        throw new ContributionSubmissionException("submission_response_invalid");
+                    }
+
+                    RejectDuplicateProperties(property.Value);
+                }
+
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    RejectDuplicateProperties(item);
+                }
+
+                break;
         }
     }
 
