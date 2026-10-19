@@ -104,5 +104,6 @@
 | [0100](architecture/adr/0100-local-pilot-administration-preview.md) | Expose a zero-authority local pilot administration preview | Accepted for local fixture administration and incident dry-run evidence; deployed administration, enrollment and production activation remain blocked | 2026-10-19 |
 | [0101](architecture/adr/0101-authoritative-usage-receipt-velocity-signals.md) | Evaluate usage-receipt velocity from authoritative server time | Accepted for local contribution simulation; production fraud detection and policy approval remain blocked | 2026-10-19 |
 | [0102](architecture/adr/0102-zero-authority-staged-pilot-preview.md) | Preview staged pilot cohorts without creating enrollment authority | Accepted for blocked local readiness review; pilot enrollment and activation remain unavailable | 2026-10-19 |
+| [0103](architecture/adr/0103-explicit-webview2-prerequisite-handoff.md) | Hand off the WebView2 prerequisite without installer authority | Accepted for accessible prerequisite recovery; installation acceptance remains blocked | 2026-10-19 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
