@@ -1,7 +1,7 @@
 # P06 — Local models and resource inventory
 
 - Status: BLOCKED (real vision passes; bounded transcription/retrieval quality and concrete adapter contracts pass fixtures; approved real Whisper and embedding models remain absent)
-- Implementation commits: `463bfb6`, `b4aa4c9`, `a160435`, `21001d2`, `a41702b`, `5cdf5ec`, `ed6f001`, `2f71398`, `acc8e62`, `bcfe167`, `70f8dd7`, `abd91c0`, `7829af1`, `8783ed2`, `84de38b`, `1bb4d7e`, `efc607c`, `0381f5e`, `b7d281e`, `21d8a9d`, `89f7bb3`, `6bd7acc`, `c292a21`, `f4810e0`, `0518333`, `040fb4e`, `1a3b28e`, `15a6061`, `73c154d`, `ac6debc`, `c12606d`, `a7cbd89`, `5873218`, `b82c270`, `5cb8003`, `45f4e2b`, `2713413`, `94a0f6b`, `3435450`, `e66dc3a`, `69aabc0`, `db448a9`; validation stabilization `ff245ad`; current exact validation source `db448a9`
+- Implementation commits: `463bfb6`, `b4aa4c9`, `a160435`, `21001d2`, `a41702b`, `5cdf5ec`, `ed6f001`, `2f71398`, `acc8e62`, `bcfe167`, `70f8dd7`, `abd91c0`, `7829af1`, `8783ed2`, `84de38b`, `1bb4d7e`, `efc607c`, `0381f5e`, `b7d281e`, `21d8a9d`, `89f7bb3`, `6bd7acc`, `c292a21`, `f4810e0`, `0518333`, `040fb4e`, `1a3b28e`, `15a6061`, `73c154d`, `ac6debc`, `c12606d`, `a7cbd89`, `5873218`, `b82c270`, `5cb8003`, `45f4e2b`, `2713413`, `94a0f6b`, `3435450`, `e66dc3a`, `69aabc0`, `db448a9`; validation stabilization `ff245ad`; latest exact regression source `e3abbbf` (P06 implementation remains `db448a9`)
 - Documentation commit: recorded by the commit containing this file
 
 No model or runtime was downloaded or installed. Only generated miniature ZIP fixtures were extracted in disposable tests. The real benchmark uses only software and models already present on this Windows machine.
@@ -107,6 +107,19 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:/DCx/scripts/validate-p06-ro
 ```
 
 ## Measured result
+
+Latest regression evidence: `artifacts/test-results/p06-2646107d65d84e41b1f7cf5a017250de/` from exact source `e3abbbf` on 2026-10-19. This supersedes older measurements below where values conflict, without changing the P06 implementation or its blocked status.
+
+- Release build: 0 warnings, 0 errors. Exact P06 tests: 230 passed, 0 failed, 0 skipped.
+- Real owned Ollama gate: 63 signed CUDA-v13 runtime files, 769,163,769 bytes, exact listener PID and job containment, existing service preserved, protected approval cleared, 203,866 ms cold and 1,174 ms warm. No transfer occurred.
+- Real installed vision response: `A blue square and a red circle are displayed above the text "DCX 42".` Wall duration was 17,140 ms; exact-target unload passed.
+- Current native profile: 1,937,891,328 available system-memory bytes; 8,342,470,656 available NVIDIA bytes; 24,334,958,592 application-data-volume free bytes. The exact transfer plan requires 3,098,988,452 free bytes and reports capacity sufficient.
+- Exact plan: catalog SHA-256 `1ea3bfb04567757e0207cfd824fb5284faad2552617cbbe3330a13f66079e325`; plan SHA-256 `a0d997c6298fdf5f592241928c6fd9564c6de0c3e023c9eb69bd1df96406c286`; nine deduplicated items; 1,281,058,770 network bytes. Authority granted remained false.
+- Native Whisper/FFmpeg/benchmark/transfer UIA passed. Provider requests, payload downloads, dependency installs and dependency executions were all zero. No runnable approved Whisper backend and no embedding-capable Ollama model were present, so both real acceptance gates remain blocked.
+
+## Pending owner decision
+
+The next gate is not authorized by this document and is split into two decisions. **Approval A** permits only a refreshed HEAD-only provider-route review, transfer of the exact nine authenticated items above into private inert per-user storage, full-set reverification, and read-only archive/layer/license inspection. It may contact the reviewed GitHub, Hugging Face/CDN and Ollama registry routes and write approximately 1.281 GB plus bounded temporary/retained copies; it grants no extraction, registration, model alias, selection or execution. After reporting the actual contained notices and hashes, **Approval B** would be separately required to stage the exact Whisper archive without elevation/system installation, create only a digest-qualified local embedding alias, run generated/licensed WER/CER and Recall@K/MRR plus latency/RAM/VRAM/unload comparisons, select only a passing backend, and remove/revoke disposable approval state on failure or completion. Both stages exclude PATH/system changes, Ubuntu-server writes, real user media, provider credentials, paid APIs, publication, redistribution and production deployment.
 
 - Locked Release build: 0 warnings, 0 errors in the current recorded P06 run.
 - The three official Microsoft Learn URLs for `CreateDXGIFactory1`, `IDXGIAdapter3::QueryVideoMemoryInfo` and `DXGI_QUERY_VIDEO_MEMORY_INFO` returned HTTP 200 on 2026-10-19 and were added to `DCX_REFERENCES.md`. This documentation check transferred no model/provider payload and granted no compute authority.
