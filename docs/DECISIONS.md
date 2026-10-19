@@ -96,5 +96,6 @@
 | [0092](architecture/adr/0092-offline-first-accessible-global-replica.md) | Expose the signed global replica through an offline-first accessible surface | Accepted for local/native validation; production registry provisioning remains blocked | 2026-10-19 |
 | [0093](architecture/adr/0093-protected-explicit-global-registry-enrollment.md) | Enroll one exact global registry root and origin through explicit protected review | Accepted for per-user product composition; production registry/key deployment remains blocked | 2026-10-19 |
 | [0094](architecture/adr/0094-bounded-strict-global-registry-transport.md) | Admit global registry responses through bounded strict contracts before signature work | Accepted for client transport hardening; production registry deployment remains blocked | 2026-10-19 |
+| [0095](architecture/adr/0095-strict-contribution-transport-admission.md) | Admit contribution transport through strict unambiguous contracts | Accepted for local simulation hardening; production contribution transport remains blocked | 2026-10-19 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

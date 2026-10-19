@@ -1,7 +1,7 @@
 # P10 — Contributions, governance and provenance
 
 - Status: BLOCKED (authenticated local-simulation preparation/intake/review and server-side CCB hostile-code policy pass; production publication remains unavailable)
-- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`, `f417f6e`, `0fc2649`, `bbadbca`, `e13246b`, `bdfd922`, `e93cd0d`, `068638c`, `e02d570`; read-only environment audit `8b94159`; disabled-worker validation stabilization `0e31254`
+- Partial implementation commits: `4016c2c`, `ce8d4de`, `adbb511`, `00fedd6`, `9123a81`, `5c3611e`, `bd30319`, `f417f6e`, `0fc2649`, `bbadbca`, `e13246b`, `bdfd922`, `e93cd0d`, `068638c`, `e02d570`, `5834150`; read-only environment audit `8b94159`; disabled-worker validation stabilization `0e31254`
 - Documentation commit: recorded by the commit containing this file
 
 No contribution was sent externally or published to a production catalog.
@@ -38,7 +38,9 @@ No contribution was sent externally or published to a production catalog.
 - Five-minute leases are renewed before and after registry work. Completion rechecks owner, token and unexpired time inside the same transaction as the contribution/intent transition; an expired worker cannot complete after another process reclaims the intent.
 - Successful completion clears the active lease but retains its attempt count. Crashes leave it to expire, ordinary failures release it, malformed rows fail closed, and the twentieth failed claim produces a stable attempt-limit error rather than an unbounded loop.
 - A versioned binary contribution envelope carries strict JSON metadata plus an optional raw artifact. Unknown metadata fields fail admission; metadata is capped at 1 MiB, artifacts at 32 MiB, and Kestrel and endpoint readers enforce the same total bound and exact declared length.
+- Envelope metadata and every client response reject duplicate JSON properties recursively before materialization. Intake requires the exact parameter-free binary media type and no content encoding; server read/accumulation buffers and the bounded metadata parse copy are cleared after use.
 - The Windows simulation client accepts only a root HTTP origin on a literal loopback IP and uses only fixed intake, exact-owner-status and withdrawal routes. It disables redirects, cookies, proxies and decompression; bounds connection, overall response and body size; requires exact response origin/media type/identity/state bindings; and rejects unknown JSON response fields.
+- Client responses must match the exact requested URI and be unencoded JSON with optional UTF-8 charset under declared and streamed 16 KiB bounds. Requests select JSON/identity/no-store; the handler caps response headers and connections. Strict error parsing returns only an admitted stable code.
 - Contributor status is minimized to submission ID, candidate digest, lifecycle state, UTC lifecycle times and release sequence. It omits candidate/body/findings and contributor/reviewer identities. Withdrawal must bind the exact submission/candidate, `Withdrawn` state and a valid release descriptor.
 - The first attempted origin remains bound while the item may exist. Duplicate send is disabled until that origin reports `submission_missing`; cancellation or an invalid result clears known state and requires reconciliation. Candidate/origin/credential inputs are disabled during each request.
 - The one-action bearer token is entered through a password control, is never persisted or logged, is cleared after every attempt and must be printable bounded ASCII. Encoded metadata, client envelopes, server request/artifact arrays and bounded response buffers are zeroed where byte ownership permits. Immutable managed-string erasure is not claimed.
@@ -67,7 +69,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 - Locked native Release build: 0 warnings, 0 errors; 2.32 seconds in the recorded dedicated run.
 - P10 exact-namespace tests: passed 53, failed 0, skipped 0; about 7 seconds, with exact counters parsed from retained TRX.
-- Current expanded full suite at `e66dc3a`: passed 566, failed 0, skipped 0; zero build warnings/errors. The P10 stabilization itself remains commit `0e31254`.
+- Current expanded full suite at `5834150`: passed 611, failed 0, skipped 0; zero build warnings/errors.
 - One preceding full-suite run timed out after 30 seconds while launching the disabled-worker child fixture, despite the product gate being before service construction. The fixture now explicitly sets `DCX_GLOBAL_CONTRIBUTION_API=0` instead of depending on an inherited absence, retains `DCX_GLOBAL_CONTRIBUTION_WORKER=1`, and allows a bounded 60-second Windows startup window. Ten consecutive focused repetitions and the final full suite passed. The timeout is not represented as acceptance.
 - Eligible CKB item: quarantined, absent from catalog before review, approved into a signed release, synchronized by a client, then withdrawn/deprecated.
 - Secret/PII/dummy item: remained quarantined and reviewer publication failed closed.
@@ -76,7 +78,8 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - Native CCB UIA: type selection exposed the package controls; exact schema-v2 text, manifest identity/version and path-clearing status were accessible; the selected full path was absent after admission. The separately approved send placed the exact bytes in `Quarantined`, cleared local bytes/review text, locked candidate identity and reconciled minimized status without a body. No reviewer approval or publication was attempted.
 - WSL-hosted Ubuntu local simulation: Bubblewrap 0.6.1 SHA-256 `bf6cf3d4456665f5d80c14eb79a76e0ce87b39a0883e614a161658b4ec33492c`; static BusyBox SHA-256 `b3c1009e1b5c927e537487c80639cdf404f69e3eb49371d9be5d841672be3ff9`.
 - Benign transformation passed. Host/repository and `/etc`/`/usr` reads, an external network request, root write, inherited secret environment, outside-quarantine workspace, symlink, workspace-digest substitution, timeout and output overflow were denied.
-- Latest combined P10 evidence: `artifacts/test-results/p10-41e29a28d5eb4ed7896219d21444e337/`, generated from exact committed source `e02d570`, including `p10-contributions.trx`, `uia-ccb-package.zip` and `sandbox-evidence.json`; server capability evidence: `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` (generated and intentionally not committed).
+- Latest combined P10 evidence: `artifacts/test-results/p10-153fbaee50d2401b8e7a50f4a3cab757/`, generated from implementation committed as `5834150`, including `p10-contributions.trx`, `uia-ccb-package.zip` and `sandbox-evidence.json`; server capability evidence: `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` (generated and intentionally not committed).
+- Nineteen focused policy/client/API cases include a real child Kestrel service and prove duplicate envelope/response denial, parameterized/encoded request denial, exact response-route binding, media/charset/encoding and declared/streamed size admission, stable errors, role isolation and cancellation.
 - Post-run scanning found neither ephemeral bearer token in server diagnostics, application data or retained P10 evidence.
 - Schema-v2 success path executed two declared tests, persisted two passing evidence rows, published the exact artifact into a signed release, synchronized it to a separate global replica and lazily retrieved byte-identical content.
 - Denial coverage includes missing executor, package/digest/metadata mismatch, undeclared files/fields, invalid UTF-8/base64/null input, malicious entrypoint or test-input text, expected-output mismatch and post-intake quarantine tampering.
@@ -97,6 +100,9 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 ## Changed files in the latest milestone
 
+- Strict envelope/response JSON, exact request/response contracts and buffer clearing: `src/DCx.Core/Contributions/ContributionTransportCodec.cs`, `src/DCx.Core/Contributions/ContributionSubmissionClient.cs`, `server/DCx.GlobalService/SimulationContributionApi.cs`.
+- Hostile duplicate/media/encoding/origin/size tests and real-process intake cases: `tests/DCx.Core.Tests/Contributions/ContributionPolicyTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionSubmissionClientTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionApiE2eTests.cs`.
+- Decision and security/privacy boundaries: `docs/architecture/adr/0095-strict-contribution-transport-admission.md`, `docs/security/THREAT_MODEL.md`, `docs/privacy/PRIVACY_MODEL.md`, `docs/DECISIONS.md`.
 - Deterministic disabled-worker startup validation: `tests/DCx.Core.Tests/Contributions/ContributionApiE2eTests.cs` (`0e31254`).
 - Exact authoritative identity binding and bounded HMAC/schema verification: `src/DCx.Core/Contributions/UsageReceiptPolicy.cs`, `server/DCx.GlobalService/ContributionGovernanceService.cs`.
 - Cross-instance immediate transaction and hostile substitution/replay/cap tests: `tests/DCx.Core.Tests/Contributions/ContributionPolicyTests.cs`, `tests/DCx.Core.Tests/Contributions/ContributionGovernanceTests.cs`.
