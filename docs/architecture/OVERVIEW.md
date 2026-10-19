@@ -22,6 +22,7 @@ The owner's Ubuntu server is not a development scratch host. Deployment requires
 - **Storage:** SQLite metadata, content-addressed artifacts, private vector index, separate signed global replica with replica-scoped cross-process operation serialization and explicitly reviewed Credential-Manager-protected root/origin enrollment, append-only local event journal.
 - **Media/document services:** safe parsers, OCR, export validators, FFmpeg, PDF rendering, local transcription, image/video-frame analysis.
 - **Owned local-inference host:** separately protected approval for an already-installed signed Ollama tree/model root, random PID-proven loopback process, one exact digest-bound resident model, serialized requests and job-bound teardown on failure, revocation or app exit. It is not isolation from malicious same-user code.
+- **Controlled-update review:** provider-neutral signed-manifest review followed by separately approved, fresh-manifest-bound inert staging. Normal composition is unconfigured and has no origin, trust root or installer. The accessible fixture is isolated, synthetic and zero-network; activation is a separate absent authority.
 
 ## Dependency direction
 

@@ -21,6 +21,10 @@ Accessibility failures are release blockers, not enhancement requests.
 
 Automated P00 UIA smoke evidence does not satisfy the human screen-reader gate.
 
+## P13 controlled updates
+
+The native controlled-update window begins at a focusable heading and exposes Check, a separately default-unchecked approval, Stage and Close through distinct access keys. Review details are read-only and include exact versions, UTC validity, manifest/package addresses, package identity, publisher, length and three labeled SHA-256 values. Check requests no package. Denied Stage moves focus to approval and creates no storage. Successful fixture staging moves focus to updated details, resets approval, disables replay until a fresh check and announces network, execution, installer, elevation, activation, restart and production effects. Normal product composition reports `not_configured` and infers no update. Automated and outstanding human rows are recorded in `P13_CONTROLLED_UPDATE_CHECKLIST.md`.
+
 ## P11 failed-payout hold review
 
 The generated-data CARE operations fixture exposes a privacy-minimized failed-payout hold through stable UIA names and distinct access keys. Approval begins unchecked. Denial returns focus to approval; an accepted non-financial intent returns focus to updated details, disables replay and announces provider calls, financial mutations, payout attempts and notification transports as zero. The read-only contributor period list adds fixed local status notices, and a separate labeled list exposes subject-bound failed-payout notice records. Each notice says that it is local, no external message was sent and no automatic retry occurs. Automated details and the outstanding human JAWS/NVDA/Narrator rows are recorded in `P11_FAILED_PAYOUT_HOLD_CHECKLIST.md`.

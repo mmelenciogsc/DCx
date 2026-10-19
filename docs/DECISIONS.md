@@ -110,5 +110,6 @@
 | [0106](architecture/adr/0106-durable-opaque-failed-payout-holds.md) | Persist opaque failed-payout holds and zero-authority decisions | Accepted durable-state foundation; authenticated local composition is governed by 0107 | 2026-10-19 |
 | [0107](architecture/adr/0107-authenticated-durable-failed-payout-hold-composition.md) | Compose durable failed-payout holds through the authenticated local operator boundary | Accepted for controlled local validation only; production identity and external notification remain blocked | 2026-10-19 |
 | [0108](architecture/adr/0108-subject-bound-local-failed-payout-notices.md) | Project failed-payout decisions as subject-bound local notices | Accepted for controlled local validation only; external delivery and production identity remain blocked | 2026-10-19 |
+| [0109](architecture/adr/0109-review-controlled-updates-before-inert-staging.md) | Review controlled updates before inert staging | Accepted for local inert staging; production update service and activation remain blocked | 2026-10-19 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
