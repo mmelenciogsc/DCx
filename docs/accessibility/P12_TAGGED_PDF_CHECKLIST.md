@@ -13,6 +13,7 @@ Automated structure and extraction checks do not substitute for PDF/UA validatio
 - [x] The generated PDF contains `/StructTreeRoot` and `/MarkInfo`.
 - [x] Test-only PdfPig extracts `DCX ACCESSIBLE 42` and confirms the reviewed normalized position on one page.
 - [x] The OCR-reviewed source SHA-256 is reverified under the render read lease; the generated PDF contains one high-resolution source raster at its original aspect and text coordinates transformed into the same placement.
+- [x] Mutating the source after OCR review denies export before replacement, leaves the prior destination unchanged, and permits export only after restoring the exact reviewed bytes.
 - [x] The UI identifies the result as non-editable and announces completion/failure through an accessible status.
 - [x] Test-only PdfPig is excluded from the shipped P13 SBOM.
 

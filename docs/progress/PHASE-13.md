@@ -1,7 +1,7 @@
 # P13 — Packaging, security and reliability
 
 - Status: BLOCKED (substantial local reliability, self-contained unsigned-MSIX staging, Defender and dependency-advisory checks pass; signed installer, clean-VM, independent security and human-AT gates remain absent)
-- Implementation commits through current exact validation source: `1528e60` (tagged flattened PDF `3b35701`; aspect-preserved visual layer `1528e60`; strict local QuickBooks XLSX `da4187a`; prior strict CARE change `4acac23`)
+- Implementation commits through current exact validation source: `b9c4cad` (tagged flattened PDF `3b35701`; aspect-preserved visual layer `1528e60`; changed-source denial gate `b9c4cad`; strict local QuickBooks XLSX `da4187a`; prior strict CARE change `4acac23`)
 - Documentation commit: recorded by the commit containing this file
 
 The generated ZIP and synthetic-identity MSIX are unsigned self-contained x64 local-validation artifacts. Neither is an installer or production release.
@@ -48,22 +48,22 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 ## Measured result
 
-Recorded evidence directory: `artifacts/test-results/p13-c22d414a7d7f4accb440005818866e0c/` (generated from exact clean validation source `1528e60`; evidence is intentionally not committed).
+Recorded evidence directory: `artifacts/test-results/p13-9741cf57170b4964b1e97556773c7c6e/` (generated from exact clean validation source `b9c4cad`; evidence is intentionally not committed).
 
 - Locked Release build: 0 warnings, 0 errors.
 - Reliability tests: passed 23, failed 0, skipped 0; exact counters parsed from the retained TRX.
 - Package trust tests: passed 21, failed 0, skipped 0; exact counters parsed from the retained TRX. The native Windows probe denied the complete unsigned local-validation package; positive `Valid` composition used an injected fixture only.
 - Current product full suite: passed 641, failed 0, skipped 0; native Windows with zero build warnings/errors.
 - Publish trees: 419 files, 178,643,776 bytes each; no path/length/SHA-256 differences. They embed .NET Core and Windows Desktop 10.0.12 plus the reviewed P09–P12 product contracts. Microsoft Open XML SDK and PdfPig remain test-only and are absent from the nine-component shipped SBOM. No authority, protected state or production endpoint is bundled.
-- Reproducible staging ZIP SHA-256: `9d54a4e58bb75cbd1a7926752d198a522fe83c28199dccde3d0079174d0c824a`.
-- Reproducible unsigned MSIX: 73,401,989 bytes; SHA-256 `2b7e31762b912d93f8673ffb9fe42603aaa7371254355f554b7fa20909d36b44`; synthetic identity `DCx.AgenticBrowser.LocalValidation`, publisher `CN=DCx Local Validation`, version `1.0.0.0`, x64. MakeAppx semantic pack and exact post-canonicalization unpack passed; real Windows trust returned `NotSigned` and denied it. Signing/install attempts and production actions: 0.
+- Reproducible staging ZIP SHA-256: `7e9ee6669372b87cc8b601d40fc2894f87a6790f77982d950a1d4f1844d9c48b`.
+- Reproducible unsigned MSIX: 73,401,972 bytes; SHA-256 `e758d16bfa0b49ff19571dff52d5fbe809c190c240033b6fc7d4083bdd56a3a3`; synthetic identity `DCx.AgenticBrowser.LocalValidation`, publisher `CN=DCx Local Validation`, version `1.0.0.0`, x64. MakeAppx semantic pack and exact post-canonicalization unpack passed; real Windows trust returned `NotSigned` and denied it. Signing/install attempts and production actions: 0.
 - Trusted MakeAppx version `10.0.19041.5609 (WinBuild.160101.0800)`; executable SHA-256 `f6901ebd5818a623b08a2306499f09334c7dab14bf9c9381814506aa80475f78`; signer-certificate SHA-256 `da209e0fe8bf6363318b5a41e5b65f3391d17bcb8b99b91c320ad2d22ef3469f`.
 - CycloneDX components: 9; third-party license records: 9. Three embedded-runtime notice files were copied and hashed.
 - Unexpected secret matches: 0 across repository source and 12 selected DCx-owned/published-text files; exact synthetic scanner-fixture matches: 2.
 - Microsoft Defender antivirus and real-time protection: enabled; signatures current at version `1.461.98.0`, updated `2026-10-18T21:24:00Z`; publish-tree, ZIP and unsigned-MSIX no-remediation scans returned clean. Trusted scanner SHA-256: `a4291c5b4325895d13d32e232bf50c1b41356306803ac5dc75bba9aecb021141`; signer-certificate SHA-256: `06d10a20570d92f56d784ecf2e50b1277b855e55d19841633b107c27dd5ca778`.
 - Official NuGet direct/transitive vulnerability audit: 0 advisories; sole source `https://api.nuget.org/v3/index.json`.
 - Authenticode: `NotSigned`.
-- Offline UIA heading: `DCx is ready offline`; startup 2,388 ms; working set 465.2 MiB under the provisional 1 GiB ceiling.
+- Offline UIA heading: `DCx is ready offline`; startup 8,744 ms; working set 478.3 MiB under the provisional 1 GiB ceiling.
 - Installed Stable/Evergreen normal browsing passed the P01 native UIA gate. The separately environment-gated missing-runtime fixture was denied when launched without its gate; with the gate, UIA exposed `WebView2 Runtime required`, moved keyboard focus to the heading, disabled browser commands, kept the file/media viewer enabled, exposed only the reviewed official address/copy action and local recheck, created no WebView2 profile, and attempted 0 downloads, 0 installs and 0 production actions.
 - Crash-diagnostics UIA heading: `Privacy and crash diagnostics`; consent defaulted unchecked, explicit opt-in persisted notice version 1, purge preserved enabled consent, opt-out disabled and purged, and network transfers remained zero.
 - Recovery UIA heading: `DCx backup and recovery`; main-app launcher, path input, create, default-unchecked approval, restore and assertive status are exposed.

@@ -1,6 +1,6 @@
 # ADR 0097: Replace reviewed document exports atomically with explicit semantics
 
-- Status: Accepted for semantic HTML/DOCX local export; saved accessible PDF remains blocked
+- Status: Accepted for semantic HTML/DOCX local export; flattened PDF is governed by ADR 0099, while PDF/UA and human acceptance remain blocked
 - Date: 2026-10-19
 
 ## Context
