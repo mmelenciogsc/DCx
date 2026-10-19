@@ -1,8 +1,8 @@
 # P14 — Pilot and release readiness
 
 - Status: BLOCKED / NO_GO (local readiness controls pass; pilot and production activation are off)
-- Product implementation commits: local consent `9745e33`; local pilot administration preview `4ff1a38`; staged cohort preview `98f2306`; accessible zero-authority transaction validation `63100d1`; positive Windows signature-probe evidence `eb6b769`; keyboard-focused denial validation `69a069b`
-- Evidence-retention commit: `7f6e707`; current exact validation source: `69a069b`
+- Product implementation commits: local consent `9745e33`; local pilot administration preview `4ff1a38`; staged cohort preview `98f2306`; accessible zero-authority transaction validation `63100d1`; positive Windows signature-probe evidence `eb6b769`; keyboard-focused denial validation `69a069b`; explicit application close/relaunch requirements `7569673`
+- Evidence-retention commit: `7f6e707`; current exact validation source: `7569673`
 - Documentation commit: recorded by the commit containing this file
 
 No pilot was started, no telemetry was collected, no user was enrolled, and no production service or payment was activated.
@@ -40,7 +40,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 exact-namespace release/readiness tests: passed 17, failed 0, skipped 0. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
-- Current product expanded full suite at `69a069b`: passed 683, failed 0, skipped 0; native Windows with zero build warnings/errors.
+- Current product expanded full suite at `7569673`: passed 683, failed 0, skipped 0; native Windows with zero build warnings/errors.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -49,7 +49,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled/zero-bucket consent state, blocker/metric/recent-aggregate lists and refresh action. It proved separate initially unchecked opt-in and stop/purge approvals, successful local enable, focused completion, approval reset, successful stop/purge back to zero buckets, focused purge completion, six distinct access keys, the zero-authority administration boundary, four read-only future cohort list items and a focused seven-scenario incident dry-run. The validator confirmed that no control named `Enroll pilot`, `Send metrics` or `Activate production` exists.
 - The P11 readiness gate was rerun after composing the default-off contributor process transport with the native dashboard under a separate validation-only startup gate. It proves a read-only digest-authenticated token-to-subject mapping, operator/contributor role separation, hardened literal-loopback transport, real ledger projection and native focus/keyboard behavior. P11 remains blocking because this is not production contributor identity, MFA/TLS/credential rotation/multi-subject authorization/deployment, and production close/adjustment/hold/dispute/tax authority, exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider plus closure/requeue policy, centralized audit, deployed distributed fencing, external alert delivery/human acknowledgment/escalation and authorized provider acceptance remain absent.
-- Evidence: `artifacts/test-results/p14-add665c23ffd4620aa89bb2f91929ad7/`, generated from exact source `69a069b` and intentionally not committed. It contains `go-no-go.json`, `p14-readiness.trx` and schema-v3 `native-readiness-uia.json` consent/focus/access-key/privacy/administration/cohort/incident-boundary evidence. The current product expanded full suite passes 683/683 at the same source with zero build warnings/errors. P13's real positive evidence covers only the read-only Windows signature probe; `signed_msix_positive_acceptance` remains false. The accessible transaction fixture remains a zero-authority `ValidationNoOp`; it did not alter the seven blockers, `NO_GO` or production-activation false result, and the real package API was not invoked.
+- Evidence: `artifacts/test-results/p14-9f497a55a8ef481ba16b29c617bb4065/`, generated from exact source `7569673` and intentionally not committed. It contains `go-no-go.json`, `p14-readiness.trx` and schema-v3 `native-readiness-uia.json` consent/focus/access-key/privacy/administration/cohort/incident-boundary evidence. The current product expanded full suite passes 683/683 at the same source with zero build warnings/errors. P13's real positive evidence covers only the read-only Windows signature probe; `signed_msix_positive_acceptance` remains false. The accessible transaction fixture remains a zero-authority `ValidationNoOp` with no application close/relaunch requirement or action; it did not alter the seven blockers, `NO_GO` or production-activation false result, and the real package API was not invoked.
 
 ## Changed files in the latest milestone
 

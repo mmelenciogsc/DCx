@@ -1,6 +1,6 @@
 # P13 controlled-update accessibility checklist
 
-Automated Windows UIA evidence: PASS at exact validation source `69a069b`, in `artifacts/test-results/p13-f4cb4cdf196f41c0820a394b22335dfe/controlled-update-ui/validation.json`. Close follows staging, final review and synthetic transaction validation in XAML reading/tab order. Eight distinct access keys pass. Stage, final review and transaction validation each receive keyboard focus before invocation; denial then focuses the corresponding unchecked approval. One approved validation reports `ValidationNoOp`, zero PackageManager calls/no registration/restart, unchanged staged-file hashes and all authority counters zero, then resets. The isolated hardened native workflow passed once and then five consecutive repetitions before the final integrated pass. The validation-only executor cannot reference the internal Windows adapter. Normal composition remains `not_configured`, and the real Windows package API was not invoked. A signed lifecycle, real activation workflow and separate human-AT gate remain blocked.
+Automated Windows UIA evidence: PASS at exact validation source `7569673`, in `artifacts/test-results/p13-4a21a909355743e5ac1a7952c9987897/controlled-update-ui/validation.json`. Close follows staging, final review and synthetic transaction validation in XAML reading/tab order. Eight distinct access keys pass. Stage, final review and transaction validation each receive keyboard focus before invocation; denial then focuses the corresponding unchecked approval. One approved validation reports `ValidationNoOp`, zero PackageManager calls/no registration/OS restart, application close required no, relaunch required no, close requests 0, relaunch attempts 0, unchanged staged-file hashes and all authority counters zero, then resets. The validation-only executor cannot reference the internal Windows adapter. Normal composition remains `not_configured`, and the real Windows package API was not invoked. A signed lifecycle, actual close/relaunch workflow and separate human-AT gate remain blocked.
 
 | Scenario | Automated UIA | Human JAWS/NVDA/Narrator |
 |---|---|---|
@@ -18,7 +18,7 @@ Automated Windows UIA evidence: PASS at exact validation source `69a069b`, in `a
 | Approved final review announces one bound digest and every zero-authority counter | Pass | Not run |
 | Final-integrity request resets and cannot be replayed without a fresh staged result | Pass | Not run |
 | Transaction-validation approval starts unchecked; denial focuses it | Pass | Not run |
-| Approved transaction validation reports `ValidationNoOp`, zero PackageManager calls, no registration/restart and unchanged staged hashes | Pass | Not run |
+| Approved transaction validation reports `ValidationNoOp`, zero PackageManager calls, no registration/OS restart, no close/relaunch requirement or action and unchanged staged hashes | Pass | Not run |
 | Transaction-validation approval resets after one attempt | Pass | Not run |
 | Approval resets and stage replay remains disabled until a fresh check | Pass | Not run |
 | Normal product reports `not_configured`, makes zero requests and infers no update | Pass | Not run |
