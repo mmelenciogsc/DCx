@@ -299,6 +299,7 @@ public partial class LocalModelsWindow : Window
             await UpdateOllamaRuntimeSelectionAsync();
             SetStatus(
                 "Protected approval for the exact signed DCx-owned runtime was saved. Refreshing model inventory through a temporary owned process; no model will be loaded.");
+            LoadHardwareProfile();
             await RefreshAsync();
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
