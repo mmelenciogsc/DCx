@@ -1,6 +1,6 @@
 # ADR 0099: Bound URL intake and tagged flattened PDF export
 
-- Status: Accepted for automated local fixture validation; PDF/UA, independent pixel comparison and human acceptance remain blocked
+- Status: Accepted for automated local fixture validation; representative pixel comparison is extended by ADR 0104, while PDF/UA and human acceptance remain blocked
 - Date: 2026-10-19
 
 ## Context
@@ -22,13 +22,13 @@ WebView2's supported `PrintToPdfAsync` API produced a complete fixture PDF but n
 
 ## Validation
 
-Implementation commits `3b35701` and `1528e60`, plus changed-source denial validator `b9c4cad`, pass 23/23 focused document/download cases. Exact clean P07 evidence `artifacts/test-results/p07-a01721b39d604f3a8958bf82b83d1b1e/` records tagged structure, marked-content metadata, one 2550-by-1020 aspect-preserved raster, three extracted words, transformed-coordinate validation, changed-source denial with prior-destination preservation, atomic replacement and private-temporary cleanup. Exact clean P12 evidence `artifacts/test-results/p12-cb3b45848cb6429c9e887f2ba4909779/` passes all nine fixtures with zero production actions at `b9c4cad`. Current full native CI passes 645/645. P13 `artifacts/test-results/p13-c0ce8c6ea1fd4fbf8c56cc7b308b4ee7/` retains nine shipped components, proving test-only PdfPig did not enter the desktop SBOM.
+Implementation commits `3b35701` and `1528e60`, plus changed-source denial validator `b9c4cad`, pass 23/23 focused document/download cases. ADR 0104 implementation `7998482` extends the gate with a generated-golden pixel comparison. Exact clean P07 evidence `artifacts/test-results/p07-d1c732be63154c8abc23ac1bfad42052/` records tagged structure, marked-content metadata, one 2550-by-1020 aspect-preserved raster, three extracted words, transformed-coordinate validation, changed-source denial with prior-destination preservation, atomic replacement, pixel metrics and private-temporary cleanup. Exact clean P12 evidence `artifacts/test-results/p12-38abeba3f6c34151b2f43fbbc9bac8b2/` passes all nine fixtures with zero production actions at `7998482`. Current full native CI passes 652/652 on the accepted unchanged rerun. P13 `artifacts/test-results/p13-f67dfe0a77c14a06ba356877c0701654/` confirms test-only PdfPig did not enter the desktop SBOM.
 
 ## Consequences and residual risk
 
 - The local automated URL-to-tagged-flattened-PDF branch is implemented; it is no longer listed as a missing P12 fixture.
-- The output embeds the Windows-rendered source page at preserved aspect and aligns reviewed OCR text/semantics to that placement. The automated gate does not independently compare decoded source/output pixels or cover representative complex/color/multipage scans, does not emit fillable AcroForm fields, and does not claim PDF/UA.
+- The output embeds the Windows-rendered source page at preserved aspect and aligns reviewed OCR text/semantics to that placement. This original gate did not independently compare decoded source/output pixels; ADR 0104 later adds that comparison for one generated golden fixture. Representative complex/color/multipage scans remain uncovered, fillable AcroForm fields are not emitted, and PDF/UA is not claimed.
 - `generateTaggedPDF` is an experimental DevTools parameter. WebView2/Chromium behavior may change and must remain gated by exact output validation.
 - The DevTools result necessarily creates immutable managed JSON/base64 strings; secure erasure is not claimed. Decoded owned bytes are zeroed, while filesystem journals, backups, recovery tools and same-user observers can retain or observe source/output data.
 - Public-address filtering reduces SSRF risk but does not establish safety of Windows PDF/OCR, WebView2/Chromium or test-inspector parsers against every malicious PDF. Same-user directory/reparse races and malicious local processes remain residual risks.
-- Adobe Reader inspection, approved PDF/UA/conformance validation, source-image visual comparison and human JAWS/NVDA/Narrator acceptance remain blocked.
+- Representative source-image visual comparison, Adobe Reader inspection, approved PDF/UA/conformance validation and human JAWS/NVDA/Narrator acceptance remain blocked. ADR 0104 closes only the generated golden-fixture pixel check.

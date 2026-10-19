@@ -13,6 +13,7 @@ Automated structure and extraction checks do not substitute for PDF/UA validatio
 - [x] The generated PDF contains `/StructTreeRoot` and `/MarkInfo`.
 - [x] Test-only PdfPig extracts `DCX ACCESSIBLE 42` and confirms the reviewed normalized position on one page.
 - [x] The OCR-reviewed source SHA-256 is reverified under the render read lease; the generated PDF contains one high-resolution source raster at its original aspect and text coordinates transformed into the same placement.
+- [x] Test-only independent decode/reference comparison passes bounded RMSE and changed-pixel thresholds for the generated golden scan, while a materially altered negative control is rejected.
 - [x] Mutating the source after OCR review denies export before replacement, leaves the prior destination unchanged, and permits export only after restoring the exact reviewed bytes.
 - [x] The UI identifies the result as non-editable and announces completion/failure through an accessible status.
 - [x] Test-only PdfPig is excluded from the shipped P13 SBOM.
@@ -29,7 +30,8 @@ Automated structure and extraction checks do not substitute for PDF/UA validatio
 
 ## Deliberate current limits
 
-- [ ] Establish a reviewed tolerance and independent raster-comparison method rather than relying only on embedded-image dimensions, placement and aspect.
+- [x] Establish bounded positive and negative raster-comparison thresholds for the generated golden fixture rather than relying only on embedded-image dimensions, placement and aspect.
+- [ ] Establish reviewed thresholds across a representative complex/color/multipage corpus and supported WebView2/PDF-decoder versions.
 - [ ] Implement fillable AcroForm fields if product requirements select a fillable rather than flattened derivative.
 
-The passing fixture supports a tagged flattened derivative with one aspect-preserved rendered source raster. It must not be represented as PDF/UA-conformant, independently pixel-validated, fillable or human accepted.
+The passing fixture supports a tagged flattened derivative with one aspect-preserved rendered source raster and independent pixel evidence for that generated scan. It must not be represented as representative complex-document fidelity, PDF/UA-conformant, fillable or human accepted.

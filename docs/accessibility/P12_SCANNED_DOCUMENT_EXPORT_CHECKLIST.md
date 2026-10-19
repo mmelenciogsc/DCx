@@ -27,7 +27,8 @@ Automated Windows UIA status does not substitute for a human screen-reader or do
 
 - [x] Admit a strictly bounded URL and delete the private downloaded temporary after wizard close.
 - [x] Produce an atomically replaced tagged flattened PDF with digest-bound aspect-preserved source raster, extracted-text, coordinate, `/StructTreeRoot` and `/MarkInfo` evidence.
-- [ ] Independently compare representative source/output pixels and provide fillable AcroForm fields if that branch is selected.
+- [x] Independently decode and compare the generated single-page golden scan, including a materially altered negative control.
+- [ ] Compare a representative complex/color/multipage source corpus and provide fillable AcroForm fields if that branch is selected.
 - [ ] Pass an approved PDF/UA/accessibility validator and human Adobe Reader/assistive-technology review.
 
-See `P12_TAGGED_PDF_CHECKLIST.md`. Automated PDF success must not be cited as PDF/UA conformance, independent pixel fidelity, fillability or human acceptance.
+See `P12_TAGGED_PDF_CHECKLIST.md`. Automated PDF success proves bounded pixel fidelity only for the generated golden fixture; it must not be cited as representative visual equivalence, PDF/UA conformance, fillability or human acceptance.
