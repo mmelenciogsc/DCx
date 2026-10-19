@@ -1,0 +1,162 @@
+<Window x:Class="DCx.Desktop.GlobalRegistryEnrollmentWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Global registry enrollment — DCx"
+        Width="760"
+        Height="680"
+        MinWidth="620"
+        MinHeight="500"
+        AutomationProperties.AutomationId="GlobalRegistryEnrollmentWindow"
+        AutomationProperties.Name="Global registry enrollment">
+    <DockPanel Margin="20">
+        <TextBlock x:Name="StatusText"
+                   DockPanel.Dock="Bottom"
+                   Margin="0,16,0,0"
+                   Padding="10"
+                   Text="No registry enrollment action has occurred."
+                   TextWrapping="Wrap"
+                   Background="#F3F3F3"
+                   AutomationProperties.AutomationId="GlobalRegistryEnrollmentStatus"
+                   AutomationProperties.Name="No registry enrollment action has occurred."
+                   AutomationProperties.LiveSetting="Assertive" />
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Focusable="False">
+            <StackPanel>
+                <TextBlock x:Name="Heading"
+                           FontSize="26"
+                           FontWeight="SemiBold"
+                           Text="Global registry enrollment"
+                           Focusable="True"
+                           AutomationProperties.AutomationId="GlobalRegistryEnrollmentHeading"
+                           AutomationProperties.Name="Global registry enrollment" />
+                <TextBlock Margin="0,10,0,0"
+                           TextWrapping="Wrap"
+                           Text="Enroll one exact public P-256 trust root and one exact registry base address. Review the SHA-256 fingerprint independently before approval. Saving, clearing, opening, and searching do not contact the registry. Synchronization remains a separate action in Global knowledge." />
+                <Border Margin="0,14,0,0"
+                        Padding="10"
+                        Background="#FFF4CE"
+                        BorderBrush="#8A6D00"
+                        BorderThickness="1">
+                    <TextBlock x:Name="BoundaryText"
+                               TextWrapping="Wrap"
+                               Text="This per-user trust decision is stored in Windows Credential Manager. HTTPS is mandatory except for literal-loopback HTTP validation. Do not approve a root or address received through an unverified channel. Production key custody and server deployment are not established by this action."
+                               AutomationProperties.AutomationId="GlobalRegistryEnrollmentBoundary"
+                               AutomationProperties.Name="This per-user trust decision is stored in Windows Credential Manager. HTTPS is mandatory except for literal-loopback HTTP validation. Do not approve a root or address received through an unverified channel. Production key custody and server deployment are not established by this action." />
+                </Border>
+
+                <GroupBox Margin="0,18,0,0" Header="Candidate">
+                    <StackPanel Margin="12,8">
+                        <Label Target="{Binding ElementName=TrustRootPathBox}"
+                               Content="Trust root _file" />
+                        <DockPanel>
+                            <Button x:Name="BrowseButton"
+                                    DockPanel.Dock="Right"
+                                    Width="110"
+                                    MinHeight="34"
+                                    Margin="8,0,0,0"
+                                    Content="_Browse"
+                                    AutomationProperties.AutomationId="BrowseGlobalTrustRootButton"
+                                    AutomationProperties.Name="Browse for global trust root"
+                                    Click="OnBrowseClick" />
+                            <TextBox x:Name="TrustRootPathBox"
+                                     MaxLength="2048"
+                                     MinHeight="34"
+                                     Padding="6"
+                                     TextChanged="OnCandidateChanged"
+                                     AutomationProperties.AutomationId="GlobalTrustRootPath"
+                                     AutomationProperties.Name="Global trust root file path" />
+                        </DockPanel>
+                        <Label Margin="0,8,0,0"
+                               Target="{Binding ElementName=RegistryBaseUriBox}"
+                               Content="_Registry base address" />
+                        <TextBox x:Name="RegistryBaseUriBox"
+                                 MaxLength="2048"
+                                 MinHeight="34"
+                                 Padding="6"
+                                 TextChanged="OnCandidateChanged"
+                                 AutomationProperties.AutomationId="GlobalRegistryBaseUri"
+                                 AutomationProperties.Name="Global registry base address" />
+                        <Button x:Name="ReviewButton"
+                                Width="170"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="Re_view candidate"
+                                AutomationProperties.AutomationId="ReviewGlobalRegistryEnrollmentButton"
+                                AutomationProperties.Name="Review global registry enrollment candidate"
+                                Click="OnReviewClick" />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Margin="0,18,0,0" Header="Exact review and approval">
+                    <StackPanel Margin="12,8">
+                        <TextBox x:Name="ReviewText"
+                                 MinHeight="150"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="No candidate has been reviewed."
+                                 AutomationProperties.AutomationId="GlobalRegistryEnrollmentReview"
+                                 AutomationProperties.Name="No candidate has been reviewed." />
+                        <Button x:Name="ChangeCandidateButton"
+                                Width="190"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="C_hange candidate"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="ChangeGlobalRegistryEnrollmentCandidateButton"
+                                AutomationProperties.Name="Change global registry enrollment candidate"
+                                Click="OnChangeCandidateClick" />
+                        <CheckBox x:Name="ApproveBox"
+                                  Margin="0,12,0,0"
+                                  Content="_Approve this exact trust root and registry address"
+                                  IsEnabled="False"
+                                  Checked="OnApprovalChanged"
+                                  Unchecked="OnApprovalChanged"
+                                  AutomationProperties.AutomationId="ApproveGlobalRegistryEnrollmentBox"
+                                  AutomationProperties.Name="Approve this exact global trust root and registry address" />
+                        <Button x:Name="SaveButton"
+                                Width="190"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="_Save enrollment"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="SaveGlobalRegistryEnrollmentButton"
+                                AutomationProperties.Name="Save approved global registry enrollment"
+                                Click="OnSaveClick" />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Margin="0,18,0,0" Header="Remove enrollment">
+                    <StackPanel Margin="12,8">
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="Removing enrollment revokes future registry synchronization authority. Cached signed generations remain on disk but are unavailable until the same root is enrolled again. No remote request or content deletion occurs." />
+                        <CheckBox x:Name="ConfirmClearBox"
+                                  Margin="0,12,0,0"
+                                  Content="_Confirm removal of registry authority"
+                                  Checked="OnClearApprovalChanged"
+                                  Unchecked="OnClearApprovalChanged"
+                                  AutomationProperties.AutomationId="ConfirmClearGlobalRegistryEnrollmentBox"
+                                  AutomationProperties.Name="Confirm removal of global registry authority" />
+                        <Button x:Name="ClearButton"
+                                Width="190"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="C_lear enrollment"
+                                IsEnabled="False"
+                                AutomationProperties.AutomationId="ClearGlobalRegistryEnrollmentButton"
+                                AutomationProperties.Name="Clear global registry enrollment"
+                                Click="OnClearClick" />
+                    </StackPanel>
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

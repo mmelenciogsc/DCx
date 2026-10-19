@@ -31,6 +31,7 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
     private const string WebView2DownloadPage = "https://developer.microsoft.com/microsoft-edge/webview2/";
 
     private readonly IWebView2RuntimeProbe _webView2RuntimeProbe;
+    private readonly IGlobalRegistryEnrollmentStore _globalRegistryEnrollmentStore;
     private readonly AddressNavigationPolicy _navigationPolicy = new();
     private readonly BrowserProfilePaths _profilePaths = new();
     private readonly BrowserHistoryStore _historyStore;
@@ -60,6 +61,7 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
     private ContentViewerWindow? _contentViewerWindow;
     private ContributionsWindow? _contributionsWindow;
     private GlobalKnowledgeWindow? _globalKnowledgeWindow;
+    private bool _globalKnowledgeOpening;
     private CareRecipientsWindow? _careRecipientsWindow;
     private CareOperationsWindow? _careOperationsWindow;
     private CareContributorDashboardWindow? _careContributorDashboardWindow;
@@ -74,13 +76,25 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
     private Uri? _pausedWebVideoPage;
     private bool _browserStartupInProgress;
 
-    public MainWindow() : this(new InstalledWebView2RuntimeProbe())
+    public MainWindow()
+        : this(
+            new InstalledWebView2RuntimeProbe(),
+            new WindowsGlobalRegistryEnrollmentStore())
     {
     }
 
     internal MainWindow(IWebView2RuntimeProbe webView2RuntimeProbe)
+        : this(webView2RuntimeProbe, new WindowsGlobalRegistryEnrollmentStore())
+    {
+    }
+
+    internal MainWindow(
+        IWebView2RuntimeProbe webView2RuntimeProbe,
+        IGlobalRegistryEnrollmentStore globalRegistryEnrollmentStore)
     {
         _webView2RuntimeProbe = webView2RuntimeProbe ?? throw new ArgumentNullException(nameof(webView2RuntimeProbe));
+        _globalRegistryEnrollmentStore = globalRegistryEnrollmentStore ??
+            throw new ArgumentNullException(nameof(globalRegistryEnrollmentStore));
         _domAdapter = new BrowserDomAdapter(_controlCoordinator);
         var metadataPaths = new BrowserMetadataPaths();
         _historyStore = new BrowserHistoryStore(metadataPaths.HistoryFile);
@@ -1270,7 +1284,7 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
         _contributionsWindow.Show();
     }
 
-    private void OnGlobalKnowledgeClick(object sender, RoutedEventArgs e)
+    private async void OnGlobalKnowledgeClick(object sender, RoutedEventArgs e)
     {
         SetStatus("Opening the separate read-only global knowledge replica. No synchronization will occur automatically.");
         if (_globalKnowledgeWindow is { IsVisible: true })
@@ -1278,13 +1292,50 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
             _globalKnowledgeWindow.Activate();
             return;
         }
-
-        _globalKnowledgeWindow = new GlobalKnowledgeWindow(
-            new UnavailableGlobalKnowledgeViewSource(),
-            GlobalKnowledgeSourceKind.Unavailable)
+        if (_globalKnowledgeOpening)
         {
-            Owner = this,
-        };
+            SetStatus("Global knowledge is already opening.");
+            return;
+        }
+
+        _globalKnowledgeOpening = true;
+        GlobalKnowledgeButton.IsEnabled = false;
+        GlobalKnowledgeSourceConfiguration? configuration = null;
+        try
+        {
+            configuration = await GlobalKnowledgeSourceFactory.CreateAsync(
+                ApplicationDataRoot.Resolve(),
+                _globalRegistryEnrollmentStore);
+            _globalKnowledgeWindow = new GlobalKnowledgeWindow(
+                configuration.Source,
+                configuration.IsEnrolled
+                    ? GlobalKnowledgeSourceKind.ConfiguredReplica
+                    : GlobalKnowledgeSourceKind.Unavailable,
+                _globalRegistryEnrollmentStore)
+            {
+                Owner = this,
+            };
+        }
+        catch
+        {
+            if (configuration?.Source is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+            _globalKnowledgeWindow = new GlobalKnowledgeWindow(
+                new UnavailableGlobalKnowledgeViewSource(),
+                GlobalKnowledgeSourceKind.EnrollmentInvalid,
+                _globalRegistryEnrollmentStore)
+            {
+                Owner = this,
+            };
+            SetStatus("Protected global registry enrollment could not be opened safely. No remote state was inferred.");
+        }
+        finally
+        {
+            _globalKnowledgeOpening = false;
+            GlobalKnowledgeButton.IsEnabled = true;
+        }
         _globalKnowledgeWindow.Closed += (_, _) => _globalKnowledgeWindow = null;
         _globalKnowledgeWindow.Show();
     }

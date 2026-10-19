@@ -61,6 +61,16 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 1 &&
+            string.Equals(
+                e.Args[0],
+                "--global-registry-enrollment-fixture",
+                StringComparison.Ordinal))
+        {
+            StartGlobalRegistryEnrollmentFixture();
+            return;
+        }
+
         if (e.Args.Length == 1 && string.Equals(e.Args[0], "--recovery", StringComparison.Ordinal))
         {
             MainWindow = new RecoveryWindow();
@@ -76,6 +86,26 @@ public partial class App : Application
         }
 
         IWebView2RuntimeProbe? webView2RuntimeProbe = null;
+        IGlobalRegistryEnrollmentStore globalRegistryEnrollmentStore =
+            new WindowsGlobalRegistryEnrollmentStore();
+        var useUnconfiguredGlobalKnowledgeFixture = e.Args.Length == 1 &&
+            string.Equals(
+                e.Args[0],
+                "--global-knowledge-unconfigured-fixture",
+                StringComparison.Ordinal);
+        if (useUnconfiguredGlobalKnowledgeFixture &&
+            !string.Equals(
+                Environment.GetEnvironmentVariable("DCX_GLOBAL_KNOWLEDGE_UNCONFIGURED_FIXTURE"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            Shutdown(2);
+            return;
+        }
+        if (useUnconfiguredGlobalKnowledgeFixture)
+        {
+            globalRegistryEnrollmentStore = new FixtureGlobalRegistryEnrollmentStore();
+        }
         if (e.Args.Length == 1 &&
             string.Equals(e.Args[0], "--webview2-unavailable-fixture", StringComparison.Ordinal))
         {
@@ -94,11 +124,19 @@ public partial class App : Application
         try
         {
             var applicationDataRoot = ApplicationDataRoot.Resolve();
+            if (useUnconfiguredGlobalKnowledgeFixture &&
+                !IsWithinFixtureRoot(
+                    applicationDataRoot,
+                    "DCX_GLOBAL_KNOWLEDGE_UNCONFIGURED_FIXTURE_ROOT"))
+            {
+                throw new InvalidOperationException(
+                    "The unconfigured global knowledge fixture storage is outside its root.");
+            }
             runtimeLease = ApplicationDataOperationLease.Acquire(applicationDataRoot, "starting DCx");
             TryInitializeCrashDiagnostics(applicationDataRoot);
-            MainWindow = webView2RuntimeProbe is null
-                ? new MainWindow()
-                : new MainWindow(webView2RuntimeProbe);
+            MainWindow = new MainWindow(
+                webView2RuntimeProbe ?? new InstalledWebView2RuntimeProbe(),
+                globalRegistryEnrollmentStore);
             MainWindow.Show();
         }
         catch (ApplicationDataInUseException exception)
@@ -524,6 +562,44 @@ public partial class App : Application
         }
     }
 
+    private void StartGlobalRegistryEnrollmentFixture()
+    {
+        try
+        {
+            if (!string.Equals(
+                    Environment.GetEnvironmentVariable("DCX_GLOBAL_REGISTRY_ENROLLMENT_FIXTURE"),
+                    "1",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The global registry enrollment fixture is disabled.");
+            }
+
+            var applicationDataRoot = ApplicationDataRoot.Resolve();
+            if (!IsWithinFixtureRoot(
+                    applicationDataRoot,
+                    "DCX_GLOBAL_REGISTRY_ENROLLMENT_FIXTURE_ROOT"))
+            {
+                throw new InvalidOperationException(
+                    "Global registry enrollment fixture storage is outside its root.");
+            }
+
+            runtimeLease = ApplicationDataOperationLease.Acquire(
+                applicationDataRoot,
+                "starting the global registry enrollment fixture");
+            MainWindow = new GlobalRegistryEnrollmentWindow(
+                new FixtureGlobalRegistryEnrollmentStore(),
+                validationFixture: true);
+            MainWindow.Show();
+        }
+        catch
+        {
+            runtimeLease?.Dispose();
+            runtimeLease = null;
+            Shutdown(2);
+        }
+    }
+
     private static bool IsWithinFixtureRoot(string path, string environmentVariable)
     {
         var configuredRoot = Environment.GetEnvironmentVariable(environmentVariable);
@@ -616,6 +692,40 @@ public partial class App : Application
         {
             cancellationToken.ThrowIfCancellationRequested();
             anchors[anchor.TrustRootSha256] = anchor;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FixtureGlobalRegistryEnrollmentStore : IGlobalRegistryEnrollmentStore
+    {
+        public Task<GlobalRegistryEnrollment?> ReadAsync(
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<GlobalRegistryEnrollment?>(null);
+        }
+
+        public Task SaveAsync(
+            GlobalRegistryEnrollmentReview review,
+            bool explicitlyApproved,
+            DateTimeOffset approvedUtc,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(review);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!explicitlyApproved || review.ReviewedUtc == default ||
+                approvedUtc.ToUniversalTime() < review.ReviewedUtc)
+            {
+                throw new GlobalReplicaException(
+                    "The validation enrollment requires an approved current review.");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task ClearAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             return Task.CompletedTask;
         }
     }

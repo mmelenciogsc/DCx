@@ -19,17 +19,20 @@ public interface IGlobalKnowledgeViewSource
     Task<GlobalSyncResult> SynchronizeAsync(CancellationToken cancellationToken = default);
 }
 
-public sealed class GlobalReplicaViewSource : IGlobalKnowledgeViewSource
+public sealed class GlobalReplicaViewSource : IGlobalKnowledgeViewSource, IDisposable
 {
     private readonly GlobalReplicaClient client;
     private readonly IGlobalRegistryTransport? transport;
+    private readonly IDisposable? lifetime;
 
     public GlobalReplicaViewSource(
         GlobalReplicaClient client,
-        IGlobalRegistryTransport? transport = null)
+        IGlobalRegistryTransport? transport = null,
+        IDisposable? lifetime = null)
     {
         this.client = client ?? throw new ArgumentNullException(nameof(client));
         this.transport = transport;
+        this.lifetime = lifetime;
     }
 
     public async Task<GlobalKnowledgeViewStatus> GetStatusAsync(
@@ -56,6 +59,8 @@ public sealed class GlobalReplicaViewSource : IGlobalKnowledgeViewSource
             ? Task.FromException<GlobalSyncResult>(
                 new GlobalReplicaException("Global synchronization is not configured."))
             : client.SynchronizeAsync(transport, cancellationToken);
+
+    public void Dispose() => lifetime?.Dispose();
 }
 
 public sealed class UnavailableGlobalKnowledgeViewSource : IGlobalKnowledgeViewSource

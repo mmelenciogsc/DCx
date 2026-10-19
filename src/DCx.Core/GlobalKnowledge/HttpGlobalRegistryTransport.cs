@@ -18,16 +18,7 @@ public sealed class HttpGlobalRegistryTransport : IGlobalRegistryTransport
     public HttpGlobalRegistryTransport(HttpClient httpClient, Uri endpoint)
     {
         this.httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        ArgumentNullException.ThrowIfNull(endpoint);
-        if (!endpoint.IsAbsoluteUri || !string.IsNullOrEmpty(endpoint.UserInfo) ||
-            !string.IsNullOrEmpty(endpoint.Query) || !string.IsNullOrEmpty(endpoint.Fragment) ||
-            (endpoint.Scheme != Uri.UriSchemeHttps &&
-             !(endpoint.Scheme == Uri.UriSchemeHttp && IPAddress.TryParse(endpoint.Host, out var address) && IPAddress.IsLoopback(address))))
-        {
-            throw new GlobalReplicaException("A registry endpoint must be HTTPS, or loopback HTTP for local simulation.");
-        }
-
-        this.endpoint = new Uri(endpoint.AbsoluteUri.TrimEnd('/') + "/", UriKind.Absolute);
+        this.endpoint = GlobalRegistryEndpointPolicy.Normalize(endpoint);
     }
 
     public async Task<GlobalReleaseDescriptor?> GetLatestReleaseAsync(CancellationToken cancellationToken)
@@ -155,5 +146,28 @@ public sealed class HttpGlobalRegistryTransport : IGlobalRegistryTransport
         }
 
         return output.ToArray();
+    }
+}
+
+public static class GlobalRegistryEndpointPolicy
+{
+    public const int MaximumEndpointCharacters = 2048;
+
+    public static Uri Normalize(Uri endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        if (!endpoint.IsAbsoluteUri || endpoint.AbsoluteUri.Length > MaximumEndpointCharacters ||
+            !string.IsNullOrEmpty(endpoint.UserInfo) || !string.IsNullOrEmpty(endpoint.Query) ||
+            !string.IsNullOrEmpty(endpoint.Fragment) ||
+            (endpoint.Scheme != Uri.UriSchemeHttps &&
+             !(endpoint.Scheme == Uri.UriSchemeHttp &&
+               IPAddress.TryParse(endpoint.Host, out var address) &&
+               IPAddress.IsLoopback(address))))
+        {
+            throw new GlobalReplicaException(
+                "A registry endpoint must be bounded HTTPS, or literal-loopback HTTP for local simulation.");
+        }
+
+        return new Uri(endpoint.AbsoluteUri.TrimEnd('/') + "/", UriKind.Absolute);
     }
 }

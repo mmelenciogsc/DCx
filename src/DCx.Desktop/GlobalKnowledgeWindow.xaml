@@ -86,6 +86,15 @@
                                     AutomationProperties.AutomationId="CancelGlobalKnowledgeButton"
                                     AutomationProperties.Name="Cancel global knowledge operation"
                                     Click="OnCancelClick" />
+                            <Button x:Name="EnrollmentButton"
+                                    Width="180"
+                                    MinHeight="36"
+                                    Margin="0,0,8,8"
+                                    Content="Registry _enrollment"
+                                    AutomationProperties.AutomationId="GlobalRegistryEnrollmentButton"
+                                    AutomationProperties.Name="Open global registry enrollment"
+                                    AutomationProperties.HelpText="Review, approve, replace or clear the exact protected trust root and registry base address. This action does not contact the registry."
+                                    Click="OnEnrollmentClick" />
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>

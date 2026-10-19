@@ -11,17 +11,22 @@ internal enum GlobalKnowledgeSourceKind
     Unavailable,
     LocalValidationFixture,
     ConfiguredReplica,
+    EnrollmentInvalid,
 }
 
 public partial class GlobalKnowledgeWindow : Window
 {
     private readonly IGlobalKnowledgeViewSource source;
     private readonly GlobalKnowledgeSourceKind sourceKind;
+    private readonly IGlobalRegistryEnrollmentStore? enrollmentStore;
     private readonly CancellationTokenSource lifetime = new();
     private CancellationTokenSource? operation;
     private bool configured;
     private bool canSynchronize;
+    private bool enrollmentEditing;
+    private bool enrollmentChanged;
     private bool closed;
+    private GlobalRegistryEnrollmentWindow? enrollmentWindow;
 
     public GlobalKnowledgeWindow()
         : this(new UnavailableGlobalKnowledgeViewSource(), GlobalKnowledgeSourceKind.Unavailable)
@@ -30,10 +35,12 @@ public partial class GlobalKnowledgeWindow : Window
 
     internal GlobalKnowledgeWindow(
         IGlobalKnowledgeViewSource source,
-        GlobalKnowledgeSourceKind sourceKind)
+        GlobalKnowledgeSourceKind sourceKind,
+        IGlobalRegistryEnrollmentStore? enrollmentStore = null)
     {
         this.source = source ?? throw new ArgumentNullException(nameof(source));
         this.sourceKind = sourceKind;
+        this.enrollmentStore = enrollmentStore;
         InitializeComponent();
         BoundaryText.Text = sourceKind switch
         {
@@ -41,10 +48,15 @@ public partial class GlobalKnowledgeWindow : Window
                 "Deterministic local validation fixture. The catalog is signed and stored in a separate global replica. The resources are synthetic. Network requests, private-knowledge access, contributions and publication are unavailable.",
             GlobalKnowledgeSourceKind.ConfiguredReplica =>
                 "Configured signature-verified global replica. Search is local and offline. Synchronization occurs only after you invoke it; private knowledge, contribution and publication are outside this window.",
+            GlobalKnowledgeSourceKind.EnrollmentInvalid =>
+                "Protected global registry enrollment could not be opened safely. No trust root, endpoint, remote state or empty catalog is inferred. Review or clear enrollment before retrying.",
             _ =>
                 "No trusted global registry is configured. No remote content or empty catalog is inferred. Synchronization, contribution and publication are unavailable.",
         };
         AutomationProperties.SetName(BoundaryText, BoundaryText.Text);
+        EnrollmentButton.Visibility = enrollmentStore is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         Loaded += OnLoaded;
         Closed += OnClosed;
     }
@@ -140,6 +152,56 @@ public partial class GlobalKnowledgeWindow : Window
 
     private void OnCancelClick(object sender, RoutedEventArgs e) => operation?.Cancel();
 
+    private void OnEnrollmentClick(object sender, RoutedEventArgs e)
+    {
+        if (enrollmentStore is null || operation is not null || enrollmentChanged) return;
+        if (enrollmentWindow is { IsVisible: true })
+        {
+            enrollmentWindow.Activate();
+            return;
+        }
+
+        enrollmentEditing = true;
+        RefreshControls();
+        enrollmentWindow = new GlobalRegistryEnrollmentWindow(enrollmentStore)
+        {
+            Owner = this,
+        };
+        enrollmentWindow.EnrollmentChanged += OnEnrollmentChanged;
+        enrollmentWindow.Closed += (_, _) =>
+        {
+            if (enrollmentWindow is not null)
+            {
+                enrollmentWindow.EnrollmentChanged -= OnEnrollmentChanged;
+            }
+            enrollmentWindow = null;
+            enrollmentEditing = false;
+            if (!closed)
+            {
+                RefreshControls();
+                if (enrollmentChanged)
+                {
+                    Heading.Focus();
+                }
+                else
+                {
+                    EnrollmentButton.Focus();
+                }
+            }
+        };
+        enrollmentWindow.Show();
+    }
+
+    private void OnEnrollmentChanged(object? sender, EventArgs e)
+    {
+        enrollmentChanged = true;
+        configured = false;
+        canSynchronize = false;
+        ResultsList.ItemsSource = null;
+        SetStatus("Registry enrollment changed. Search and synchronization are disabled in this window. Close and reopen Global knowledge to load the exact protected enrollment.");
+        RefreshControls();
+    }
+
     private async Task RefreshAsync(bool moveFocus)
     {
         var token = BeginOperation("Reading the verified local global replica status.");
@@ -223,12 +285,13 @@ public partial class GlobalKnowledgeWindow : Window
 
     private void RefreshControls()
     {
-        var idle = operation is null;
+        var idle = operation is null && !enrollmentEditing && !enrollmentChanged;
         RefreshButton.IsEnabled = idle;
         SearchButton.IsEnabled = idle && configured;
         SynchronizeButton.IsEnabled = idle && configured && canSynchronize;
         CancelButton.IsEnabled = !idle;
         QueryBox.IsEnabled = idle && configured;
+        EnrollmentButton.IsEnabled = operation is null && !enrollmentChanged;
     }
 
     private void SetStatus(string value)
@@ -241,8 +304,10 @@ public partial class GlobalKnowledgeWindow : Window
     {
         closed = true;
         lifetime.Cancel();
+        enrollmentWindow?.Close();
         operation?.Cancel();
         operation?.Dispose();
+        if (source is IDisposable disposable) disposable.Dispose();
         lifetime.Dispose();
     }
 
