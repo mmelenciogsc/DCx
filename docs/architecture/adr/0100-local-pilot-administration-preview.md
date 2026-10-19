@@ -20,7 +20,7 @@ A locally testable administration boundary can still provide useful evidence wit
 
 ## Validation
 
-Implementation commit `4ff1a38` passes 15/15 P14 release tests, including hostile persisted-row denial and the seven-scenario zero-authority policy. Native UIA evidence at `artifacts/test-results/p14-0777d7de1de24fca855e5957b54934e9/` proves the boundary text, empty recent-aggregate view, focused dry-run result, six distinct access keys, zero enrollment/event/transport/activation controls, seven blockers and `NO_GO`. Current full native CI passes 652/652 on the accepted unchanged rerun at `7998482`. Current P13 evidence at `artifacts/test-results/p13-f67dfe0a77c14a06ba356877c0701654/` packages and scans the implementation with zero unexpected secrets or NuGet advisories.
+Implementation commit `4ff1a38` passes 15/15 P14 release tests, including hostile persisted-row denial and the seven-scenario zero-authority policy. Native UIA evidence at `artifacts/test-results/p14-0777d7de1de24fca855e5957b54934e9/` proves the boundary text, empty recent-aggregate view, focused dry-run result, six distinct access keys, zero enrollment/event/transport/activation controls, seven blockers and `NO_GO`. Current full native CI passes 652/652 at `5d17960`. Current P13 evidence at `artifacts/test-results/p13-f67dfe0a77c14a06ba356877c0701654/` packages and scans the implementation with zero unexpected secrets or NuGet advisories.
 
 ## Consequences and residual risk
 
