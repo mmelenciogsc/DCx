@@ -124,7 +124,7 @@ public static class CurrentReleaseReadiness
             Issue("p11-paypal", "PayPal sandbox eligibility and reconciliation", ReadinessSeverity.Critical,
                 "Finance platform and owner", "Provide approved sandbox credentials, exact US$3 plan/product configuration, merchant/payout eligibility evidence and an approved provider-verification policy for protected recipient snapshots; approve production blocked-event closure/requeue, external notification and escalation policy, then deploy and run credentialed event/payout acceptance.", "docs/progress/PHASE-11.md"),
             Issue("p12-live-acceptance", "Incomplete vertical, live-provider and human acceptance scenarios", ReadinessSeverity.Major,
-                "Quality and accessibility", "Implement and validate URL-to-fillable-or-flattened-PDF; then run separately authorized QuickBooks sandbox OAuth/API retrieval plus Facebook, QuickBooks, YouTube, installer and assistive-technology acceptance.", "docs/progress/PHASE-12.md"),
+                "Quality and accessibility", "Run separately authorized QuickBooks sandbox OAuth/API retrieval plus Facebook, QuickBooks, YouTube, installer, Adobe Reader/PDF-conformance and assistive-technology acceptance.", "docs/progress/PHASE-12.md"),
             Issue("p13-signed-installer", "Signed installer and clean-VM lifecycle", ReadinessSeverity.Critical,
                 "Release and security engineering", "Build a signed MSIX and pass install, upgrade, rollback, uninstall, AV and vulnerability checks.", "docs/progress/PHASE-13.md"),
             Issue("p14-policy-approvals", "Privacy, terms, CARE and provider distribution approvals", ReadinessSeverity.Critical,

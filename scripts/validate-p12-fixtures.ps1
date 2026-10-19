@@ -56,7 +56,6 @@ $manifest = [ordered]@{
     blocked_scenarios = @(
         "live Facebook authenticated search and human acceptance",
         "real QuickBooks sandbox OAuth/API retrieval and human Excel/assistive-technology acceptance",
-        "URL download through the inaccessible-PDF wizard to a verified fillable or flattened saved PDF",
         "live YouTube provider playback/frame-Q&A and human acceptance",
         "real signed package installation and clean-VM acceptance",
         "Docker Compose global-service run",
