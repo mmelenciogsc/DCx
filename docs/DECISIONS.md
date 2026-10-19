@@ -121,5 +121,6 @@
 | [0117](architecture/adr/0117-constrain-uninstall-to-the-calling-package.md) | Constrain current-user uninstall to the calling package | Accepted for an internal uncomposed adapter; API seam amended by ADR 0118; actual uninstall remains blocked | 2026-10-20 |
 | [0118](architecture/adr/0118-accessible-exact-current-package-uninstall-review.md) | Expose an accessible exact current-package uninstall review without granting removal authority | Accepted for local validation; production uninstall remains blocked | 2026-10-20 |
 | [0119](architecture/adr/0119-open-recovery-without-creating-backup-or-uninstall-authority.md) | Open exact recovery mode without creating backup or uninstall authority | Accepted for local user-mode handoff; backup completion and production uninstall remain blocked | 2026-10-20 |
+| [0120](architecture/adr/0120-return-to-normal-dcx-only-after-successful-recovery.md) | Return to normal DCx only after successful recovery | Accepted for local post-operation handoff; production lifecycle and human AT acceptance remain blocked | 2026-10-20 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

@@ -54,6 +54,18 @@ These window-local access keys are available only in **Local models**. Approval 
 
 Route observation creates only a non-persisted two-hour exact query-free review. Payload approval remains separately unchecked. These actions do not install, register, select or execute transferred content. Human JAWS/NVDA/Narrator conflict testing remains required.
 
+## Backup and recovery access keys
+
+These window-local keys are available in **DCx backup and recovery**.
+
+| Shortcut | Action |
+|---|---|
+| `Alt+C` | Create a verified backup after DCx releases the data lease. |
+| `Alt+R` | Restore the selected backup after separate replacement approval. |
+| `Alt+T` | Return to normal DCx after a backup or restore succeeds. This starts the same executable with no arguments and closes Recovery. |
+
+Return begins disabled and receives focus only after a successful operation. Human JAWS/NVDA/Narrator conflict and announcement testing remains required.
+
 ## Release readiness privacy access keys
 
 These window-local keys are available only in **Release readiness**. Both approvals start unchecked and reset after use.

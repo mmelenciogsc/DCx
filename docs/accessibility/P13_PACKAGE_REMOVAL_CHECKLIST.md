@@ -1,6 +1,6 @@
 # P13 accessible package-removal review checklist
 
-Automated native Windows UIA evidence: PASS at `211c204`. Human assistive-technology acceptance: NOT RUN and release-blocking.
+Automated native Windows UIA evidence: PASS and revalidated at exact source `2b8df20`. Human assistive-technology acceptance: NOT RUN and release-blocking.
 
 | Check | Automated result | Human result |
 |---|---|---|
