@@ -98,14 +98,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "QuickBooks XLSX or historical-post policy tests failed with exit code $LASTEXITCODE." }
     [xml]$integrationReport = Get-Content -LiteralPath (Join-Path $runRoot "p12-integrations.trx") -Raw
     $integrationCounters = $integrationReport.TestRun.ResultSummary.Counters
-    if ([int]$integrationCounters.passed -ne 17 -or
-        [int]$integrationCounters.total -ne 17 -or
-        [int]$integrationCounters.executed -ne 17 -or
+    if ([int]$integrationCounters.passed -ne 24 -or
+        [int]$integrationCounters.total -ne 24 -or
+        [int]$integrationCounters.executed -ne 24 -or
         [int]$integrationCounters.failed -ne 0 -or
         [int]$integrationCounters.error -ne 0 -or
         [int]$integrationCounters.timeout -ne 0 -or
         [int]$integrationCounters.aborted -ne 0) {
-        throw "P12 integration TRX counters did not prove the exact 17 selected tests passed."
+        throw "P12 integration TRX counters did not prove the exact 24 selected tests passed."
     }
 
     $fixturePort = Get-FreePort
@@ -247,20 +247,30 @@ try {
         surface = "native shared WebView2 historical-post finder"
         fixture_disclosure = "not Facebook; accepts no real credential"
         policy_tests_passed = 15
-        selected_integration_tests_passed = 17
+        quickbooks_fixture_tests_passed = 9
+        selected_integration_tests_passed = 24
+        quickbooks_spreadsheet_table = $true
+        quickbooks_openxml_schema = "Office 2007 via Microsoft Open XML SDK 3.5.1"
+        quickbooks_trusted_subtotal_formula = $true
+        quickbooks_typed_dates_and_usd_currency = $true
+        quickbooks_formula_looking_labels_remain_text = $true
         manual_login_handoff = $true
         inspected_current_address = $verifiedAddress
         blocked_site_result_address = $clearedAddress
         blocked_site_no_fabrication = $true
         keyboard_access_keys = $accessKeys.Count
         real_facebook_requests = 0
+        real_quickbooks_requests = 0
         credentials_read = 0
         cookies_copied = 0
         production_actions = 0
     }
-    $evidence | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot "facebook-post-search-uia.json") -Encoding utf8
+    $evidence | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot "p12-integrations.json") -Encoding utf8
 
-    "QuickBooks sandbox-shaped report to real XLSX=PASS"
+    "QuickBooks sandbox-shaped report to real XLSX table=PASS"
+    "QuickBooks Microsoft Open XML schema validation=PASS"
+    "QuickBooks trusted subtotal formula=PASS"
+    "QuickBooks typed dates and USD currency=PASS"
     "QuickBooks formula-looking label exported as text=PASS"
     "Local social fixture disclosure=not Facebook"
     "Manual login field exposed=$accountName"
