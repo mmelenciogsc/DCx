@@ -99,5 +99,6 @@
 | [0095](architecture/adr/0095-strict-contribution-transport-admission.md) | Admit contribution transport through strict unambiguous contracts | Accepted for local simulation hardening; production contribution transport remains blocked | 2026-10-19 |
 | [0096](architecture/adr/0096-strict-local-care-transport-admission.md) | Admit local CARE traffic through exact strict contracts | Accepted for local sandbox hardening; production finance transport remains blocked | 2026-10-19 |
 | [0097](architecture/adr/0097-atomic-semantic-document-exports.md) | Replace reviewed document exports atomically with explicit semantics | Accepted for semantic HTML/DOCX local export; saved accessible PDF remains blocked | 2026-10-19 |
+| [0098](architecture/adr/0098-strict-quickbooks-spreadsheetml-export.md) | Export QuickBooks-shaped reports as strict local SpreadsheetML tables | Accepted for local sandbox-shaped workbook conformance; live QuickBooks and human acceptance remain blocked | 2026-10-19 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
