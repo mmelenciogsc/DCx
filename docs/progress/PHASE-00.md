@@ -100,7 +100,7 @@ Final locked CI-equivalent run on Windows 11 build 26200.9457:
 
 The GitHub Actions workflow was not remotely executed because no remote repository exists. Its native Windows commands are the same commands that passed through `scripts/verify-p00.sh`; this limitation is not represented as a remote-CI pass.
 
-Current cross-phase regression at exact clean source `c3360af`: `./scripts/verify-p00.sh` restored locked dependencies, built native Windows Release with 0 warnings/errors and passed 621/621 tests. TRX: `artifacts/test-results/p00-tests.trx` (ignored evidence, intentionally not committed). The remote workflow remains unrun.
+Current cross-phase regression at exact clean source `99affbe`: `./scripts/verify-p00.sh` restored locked dependencies, built native Windows Release with 0 warnings/errors and passed 621/621 tests. TRX: `artifacts/test-results/p00-tests.trx` (ignored evidence, intentionally not committed). The remote workflow remains unrun.
 
 ## Changed files
 
