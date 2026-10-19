@@ -961,6 +961,8 @@ public sealed class ControlledUpdateStagerTests : IDisposable
                 ControlledUpdateActivationExecutionStatus.ValidationNoOp,
                 PackageManagerInvocations: 0,
                 IsRegistered: false,
+                ApplicationCloseRequired: false,
+                ApplicationRelaunchRequired: false,
                 RestartRequired: false,
                 RequestsElevation: false,
                 InstallerProcessesStarted: 0);

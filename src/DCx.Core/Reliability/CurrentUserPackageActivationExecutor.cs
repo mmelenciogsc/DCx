@@ -102,6 +102,8 @@ public sealed class CurrentUserPackageActivationExecutor(
             ControlledUpdateActivationExecutionStatus.Registered,
             PackageManagerInvocations: 1,
             IsRegistered: true,
+            ApplicationCloseRequired: true,
+            ApplicationRelaunchRequired: true,
             RestartRequired: false,
             RequestsElevation: false,
             InstallerProcessesStarted: 0);

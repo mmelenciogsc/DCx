@@ -42,6 +42,8 @@ public sealed class CurrentUserPackageActivationExecutorTests : IDisposable
         Assert.Equal(ControlledUpdateActivationExecutionStatus.Registered, result.Status);
         Assert.Equal(1, result.PackageManagerInvocations);
         Assert.True(result.IsRegistered);
+        Assert.True(result.ApplicationCloseRequired);
+        Assert.True(result.ApplicationRelaunchRequired);
         Assert.False(result.RestartRequired);
         Assert.False(result.RequestsElevation);
         Assert.Equal(0, result.InstallerProcessesStarted);
@@ -151,18 +153,32 @@ public sealed class CurrentUserPackageActivationExecutorTests : IDisposable
             ControlledUpdateActivationExecutionStatus.Registered,
             PackageManagerInvocations: 1,
             IsRegistered: true,
+            ApplicationCloseRequired: true,
+            ApplicationRelaunchRequired: true,
             RestartRequired: false,
             RequestsElevation: false,
             InstallerProcessesStarted: 0);
         ControlledUpdateActivationExecutionPolicy.Require(valid);
+        var deferred = valid with
+        {
+            Status = ControlledUpdateActivationExecutionStatus.RegistrationDeferred,
+            IsRegistered = false,
+            RestartRequired = true,
+        };
+        ControlledUpdateActivationExecutionPolicy.Require(deferred);
         var invalidResults = new[]
         {
             valid with { PackageManagerInvocations = 0 },
             valid with { IsRegistered = false },
+            valid with { ApplicationCloseRequired = false },
+            valid with { ApplicationRelaunchRequired = false },
             valid with { RestartRequired = true },
             valid with { RequestsElevation = true },
             valid with { InstallerProcessesStarted = 1 },
             valid with { Status = (ControlledUpdateActivationExecutionStatus)99 },
+            deferred with { ApplicationCloseRequired = false },
+            deferred with { ApplicationRelaunchRequired = false },
+            deferred with { RestartRequired = false },
         };
         foreach (var result in invalidResults)
         {

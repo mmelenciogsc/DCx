@@ -774,7 +774,11 @@ try {
         $controlledUpdateEvidence.activation_validation_execution_status -ne "validation_no_op" -or
         $controlledUpdateEvidence.activation_validation_package_manager_invocations -ne 0 -or
         $controlledUpdateEvidence.activation_validation_registered -or
+        $controlledUpdateEvidence.activation_validation_application_close_required -or
+        $controlledUpdateEvidence.activation_validation_application_relaunch_required -or
         $controlledUpdateEvidence.activation_validation_restart_required -or
+        $controlledUpdateEvidence.activation_validation_application_close_requests -ne 0 -or
+        $controlledUpdateEvidence.activation_validation_application_relaunch_attempts -ne 0 -or
         -not $controlledUpdateEvidence.activation_validation_staged_set_unchanged -or
         $controlledUpdateEvidence.staged_file_count -ne 2 -or
         $controlledUpdateEvidence.staged_package_count -ne 1 -or
@@ -875,7 +879,11 @@ try {
         controlled_update_activation_validation_status = [string]$controlledUpdateEvidence.activation_validation_execution_status
         controlled_update_activation_validation_package_manager_invocations = [int]$controlledUpdateEvidence.activation_validation_package_manager_invocations
         controlled_update_activation_validation_registered = [bool]$controlledUpdateEvidence.activation_validation_registered
+        controlled_update_activation_validation_application_close_required = [bool]$controlledUpdateEvidence.activation_validation_application_close_required
+        controlled_update_activation_validation_application_relaunch_required = [bool]$controlledUpdateEvidence.activation_validation_application_relaunch_required
         controlled_update_activation_validation_restart_required = [bool]$controlledUpdateEvidence.activation_validation_restart_required
+        controlled_update_activation_validation_application_close_requests = [int]$controlledUpdateEvidence.activation_validation_application_close_requests
+        controlled_update_activation_validation_application_relaunch_attempts = [int]$controlledUpdateEvidence.activation_validation_application_relaunch_attempts
         controlled_update_activation_validation_staged_set_unchanged = [bool]$controlledUpdateEvidence.activation_validation_staged_set_unchanged
         controlled_update_staged_files = [int]$controlledUpdateEvidence.staged_file_count
         controlled_update_atomic_published_set = [bool]$controlledUpdateEvidence.atomic_published_set

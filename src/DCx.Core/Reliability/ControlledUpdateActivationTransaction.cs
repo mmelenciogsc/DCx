@@ -21,6 +21,8 @@ public sealed record ControlledUpdateActivationExecutionResult(
     ControlledUpdateActivationExecutionStatus Status,
     int PackageManagerInvocations,
     bool IsRegistered,
+    bool ApplicationCloseRequired,
+    bool ApplicationRelaunchRequired,
     bool RestartRequired,
     bool RequestsElevation,
     int InstallerProcessesStarted);
@@ -40,12 +42,15 @@ public static class ControlledUpdateActivationExecutionPolicy
         {
             ControlledUpdateActivationExecutionStatus.ValidationNoOp =>
                 result.PackageManagerInvocations == 0 && !result.IsRegistered &&
+                !result.ApplicationCloseRequired && !result.ApplicationRelaunchRequired &&
                 !result.RestartRequired,
             ControlledUpdateActivationExecutionStatus.Registered =>
                 result.PackageManagerInvocations == 1 && result.IsRegistered &&
+                result.ApplicationCloseRequired && result.ApplicationRelaunchRequired &&
                 !result.RestartRequired,
             ControlledUpdateActivationExecutionStatus.RegistrationDeferred =>
                 result.PackageManagerInvocations == 1 && !result.IsRegistered &&
+                result.ApplicationCloseRequired && result.ApplicationRelaunchRequired &&
                 result.RestartRequired,
             _ => false,
         };

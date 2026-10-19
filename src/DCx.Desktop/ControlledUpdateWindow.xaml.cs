@@ -291,13 +291,20 @@ public partial class ControlledUpdateWindow : Window
                 $"Execution status: {result.ExecutionStatus}. " +
                 $"PackageManager invocations {result.PackageManagerInvocations}. " +
                 $"Registered {(result.IsRegistered ? "yes" : "no")}. " +
+                $"Application close required {(result.ApplicationCloseRequired ? "yes" : "no")}. " +
+                $"Application relaunch required {(result.ApplicationRelaunchRequired ? "yes" : "no")}. " +
                 $"Restart required {(result.RestartRequired ? "yes" : "no")}. " +
+                $"Application close requests {result.ApplicationCloseRequests}. " +
+                $"Application relaunch attempts {result.ApplicationRelaunchAttempts}. " +
                 $"Network requests {result.NetworkRequests}. Installer processes {result.InstallerProcessesStarted}. " +
                 $"Elevation requests {result.ElevationRequests}. Activation attempts {result.ActivationAttempts}. " +
                 $"Restart attempts {result.RestartAttempts}. Production actions {result.ProductionActions}.");
             SetStatus(
                 $"Version {result.Version} completed lease-held activation transaction validation. " +
-                $"PackageManager invocations {result.PackageManagerInvocations}. Registered no. Restart required no. " +
+                $"PackageManager invocations {result.PackageManagerInvocations}. Registered no. " +
+                "Application close required no. Application relaunch required no. Restart required no. " +
+                $"Application close requests {result.ApplicationCloseRequests}. " +
+                $"Application relaunch attempts {result.ApplicationRelaunchAttempts}. " +
                 $"Installer processes {result.InstallerProcessesStarted}. Elevation requests {result.ElevationRequests}. " +
                 $"Activation attempts {result.ActivationAttempts}. Restart attempts {result.RestartAttempts}. " +
                 $"Production actions {result.ProductionActions}.");

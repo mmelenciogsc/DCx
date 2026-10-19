@@ -361,7 +361,7 @@ try {
 
     $activationValidationToggle.Toggle()
     $activationValidation.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
-    $expectedActivationValidationStatus = "Version 1.1.0.0 completed lease-held activation transaction validation. PackageManager invocations 0. Registered no. Restart required no. Installer processes 0. Elevation requests 0. Activation attempts 0. Restart attempts 0. Production actions 0."
+    $expectedActivationValidationStatus = "Version 1.1.0.0 completed lease-held activation transaction validation. PackageManager invocations 0. Registered no. Application close required no. Application relaunch required no. Restart required no. Application close requests 0. Application relaunch attempts 0. Installer processes 0. Elevation requests 0. Activation attempts 0. Restart attempts 0. Production actions 0."
     $null = Wait-For {
         $status.Current.Name -eq $expectedActivationValidationStatus
     } "The synthetic activation transaction did not complete with an exact zero-authority status."
@@ -380,7 +380,11 @@ try {
         "Execution status: ValidationNoOp.",
         "PackageManager invocations 0.",
         "Registered no.",
+        "Application close required no.",
+        "Application relaunch required no.",
         "Restart required no.",
+        "Application close requests 0.",
+        "Application relaunch attempts 0.",
         "Network requests 0.",
         "Installer processes 0.",
         "Elevation requests 0.",
@@ -476,7 +480,11 @@ try {
         activation_validation_execution_status = "validation_no_op"
         activation_validation_package_manager_invocations = 0
         activation_validation_registered = $false
+        activation_validation_application_close_required = $false
+        activation_validation_application_relaunch_required = $false
         activation_validation_restart_required = $false
+        activation_validation_application_close_requests = 0
+        activation_validation_application_relaunch_attempts = 0
         activation_validation_staged_set_unchanged = $true
         staged_file_count = $stagedFiles.Count
         staged_package_count = 1

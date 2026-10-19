@@ -42,7 +42,11 @@ public sealed record ControlledUpdateActivationValidationResult(
     ControlledUpdateActivationExecutionStatus ExecutionStatus,
     int PackageManagerInvocations,
     bool IsRegistered,
+    bool ApplicationCloseRequired,
+    bool ApplicationRelaunchRequired,
     bool RestartRequired,
+    int ApplicationCloseRequests,
+    int ApplicationRelaunchAttempts,
     int ManifestRequests,
     int PackageRequests,
     int NetworkRequests,
@@ -193,7 +197,9 @@ public static class ControlledUpdateReviewSourcePolicy
             !string.Equals(result.Version, review.CandidateVersion, StringComparison.Ordinal) ||
             result.ExecutionStatus != ControlledUpdateActivationExecutionStatus.ValidationNoOp ||
             result.PackageManagerInvocations != 0 || result.IsRegistered ||
+            result.ApplicationCloseRequired || result.ApplicationRelaunchRequired ||
             result.RestartRequired ||
+            result.ApplicationCloseRequests != 0 || result.ApplicationRelaunchAttempts != 0 ||
             result.ManifestRequests is < 2 or > MaximumRequestCount ||
             result.PackageRequests is < 1 or > MaximumRequestCount ||
             result.NetworkRequests is < 0 or > MaximumRequestCount ||
