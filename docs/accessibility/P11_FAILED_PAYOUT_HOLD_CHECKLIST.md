@@ -1,6 +1,6 @@
 # P11 failed-payout hold accessibility checklist
 
-Generated UI evidence source: `a49ff3c`. Schema-v15 durability is implemented at `1e3596a`; default-off authenticated durable transport/native composition is implemented at `a297811` and hardened at `a23207d`. Human assistive-technology rows remain release-blocking until performed by a person.
+Generated UI evidence source: `a49ff3c`. Schema-v15 durability is implemented at `1e3596a`; default-off authenticated durable transport/native composition is implemented at `a297811` and hardened at `a23207d`; subject-bound local failed-payout notices are implemented at `8ee6370`. Human assistive-technology rows remain release-blocking until performed by a person.
 
 | Check | Automated result | Human result |
 |---|---|---|
@@ -16,9 +16,12 @@ Generated UI evidence source: `a49ff3c`. Schema-v15 durability is implemented at
 | The authenticated boundary is disclosed as synthetic local validation rather than production authentication | Pass | Not run |
 | The ephemeral validation signing key is deleted before evidence is retained | Pass | Not run |
 | Five fixed contributor-facing local notices are present in the read-only period list | Pass | Not run |
+| A separate labeled read-only list exposes the subject-bound failed-payout notice | Pass | Not run |
+| The local notice excludes operator review, batch, snapshot, destination and provider bindings | Pass | Not run |
+| The notice states that no external message was sent and no automatic retry occurs | Pass | Not run |
 | 200% text scaling and high contrast preserve labels, controls and focus indication | Not automated | Not run |
 | JAWS 2025 reads review, approval, denial, success and local notices without duplicate verbosity | Not automated | Not run |
 | NVDA 2026.1.1 reads review, approval, denial, success and local notices without duplicate verbosity | Not automated | Not run |
 | Narrator reads review, approval, denial, success and local notices without duplicate verbosity | Not automated | Not run |
 
-Current automated evidence is `artifacts/test-results/p11-9cb78d51e3e747a0a08d5758544bd0b8/recipient-snapshot-uia.json` for the generated surface and `operations-loopback-uia.json` for the real child-Kestrel/SQLite composition. It proves authenticated local synthetic-ledger behavior with zero provider/financial/payout/notification authority; it does not prove production authentication, external notification delivery or human comprehension.
+Current automated evidence is `artifacts/test-results/p11-52464659d2984fd09cc2a9b52a7d3af0/recipient-snapshot-uia.json` for the generated surface and `operations-loopback-uia.json` for the real child-Kestrel/SQLite composition. It proves one subject-bound local notice after an authenticated operator decision, with zero provider/financial/payout/notification authority; it does not prove production authentication, external notification delivery or human comprehension.
