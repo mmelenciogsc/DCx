@@ -1,6 +1,6 @@
 # P13 controlled-update accessibility checklist
 
-Automated Windows UIA evidence: PASS at exact validation source `63100d1`, in `artifacts/test-results/p13-c18e4b6bf1c5409fbb65dbc0f5422026/controlled-update-ui/validation.json`. Close follows staging, final review and synthetic transaction validation in XAML reading/tab order. Eight distinct access keys pass. The new transaction-validation approval defaults unchecked, denial focuses it, one approved validation reports `ValidationNoOp`, zero PackageManager calls/no registration/restart, unchanged staged-file hashes and all authority counters zero, then resets. The validation-only executor cannot reference the internal Windows adapter. Normal composition remains `not_configured`, and the real Windows package API was not invoked. A signed lifecycle, real activation workflow and separate human-AT gate remain blocked.
+Automated Windows UIA evidence: PASS at exact validation source `69a069b`, in `artifacts/test-results/p13-f4cb4cdf196f41c0820a394b22335dfe/controlled-update-ui/validation.json`. Close follows staging, final review and synthetic transaction validation in XAML reading/tab order. Eight distinct access keys pass. Stage, final review and transaction validation each receive keyboard focus before invocation; denial then focuses the corresponding unchecked approval. One approved validation reports `ValidationNoOp`, zero PackageManager calls/no registration/restart, unchanged staged-file hashes and all authority counters zero, then resets. The isolated hardened native workflow passed once and then five consecutive repetitions before the final integrated pass. The validation-only executor cannot reference the internal Windows adapter. Normal composition remains `not_configured`, and the real Windows package API was not invoked. A signed lifecycle, real activation workflow and separate human-AT gate remain blocked.
 
 | Scenario | Automated UIA | Human JAWS/NVDA/Narrator |
 |---|---|---|
@@ -11,6 +11,7 @@ Automated Windows UIA evidence: PASS at exact validation source `63100d1`, in `a
 | Exact current/candidate versions, UTC validity, addresses, identity, publisher, length and three SHA-256 values are readable | Pass | Not run |
 | Check requests no package and announces that nothing was staged or installed | Pass | Not run |
 | Unapproved staging is denied before storage and focus moves to approval | Pass | Not run |
+| Each denied action originates from confirmed keyboard focus before focus moves to its approval | Pass | Not run |
 | Approved inert staging announces every zero-authority counter and moves focus to updated details | Pass | Not run |
 | Published staging contains one exact two-file directory and leaves no loose or incoming item | Pass | Not run |
 | Final-integrity request starts unchecked; denial moves focus to it | Pass | Not run |
