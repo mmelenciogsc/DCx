@@ -38,6 +38,8 @@ Local aggregate recording defaults off. The privacy group states the exact notic
 
 These controls do not connect a product event source, export, transport, pilot enrollment or production activation. Do not add any of those paths without approved privacy/retention policy, explicit scope-specific consent, security review, human JAWS/NVDA/Narrator acceptance and a revised P14 gate.
 
+The same window includes a **Local pilot administration preview**. It lists only strictly revalidated aggregate buckets from the most recent 30 UTC days and can run a seven-scenario in-memory incident stop drill with `Alt+D`. The drill stores nothing and performs no external action. The preview is not a deployed operator console: it has no participant roster, event source, remote transport, feature-flag mutation, incident closure or production activation authority.
+
 ## Global knowledge development surface
 
 Open **Global knowledge** from the main window to inspect the separate signed global replica. Without enrollment, search and synchronization remain disabled, and that state must not be described as an empty authoritative catalog. No synchronization occurs on open, registry enrollment review/save/clear, refresh or search.

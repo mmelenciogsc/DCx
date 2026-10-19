@@ -64,6 +64,7 @@ These window-local keys are available only in **Release readiness**. Both approv
 | `Alt+E` | Enable local aggregate recording after consent. This connects no event source or transport. |
 | `Alt+A` | Check or clear the separate permanent-purge acknowledgment. |
 | `Alt+S` | Stop local recording and permanently purge retained aggregate buckets after acknowledgment. |
+| `Alt+D` | Run the seven-scenario local incident stop drill. This changes no state and performs no external action. |
 | `Alt+R` | Refresh the read-only release decision, blockers, metric definitions and local consent state. |
 
 No key enrolls a pilot, sends metrics or activates production. Human JAWS/NVDA/Narrator conflict testing remains required.

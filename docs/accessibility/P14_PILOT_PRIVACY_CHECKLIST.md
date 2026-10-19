@@ -19,8 +19,10 @@ For each screen reader:
 5. Use `Alt+I`, then `Alt+E`. Confirm the enabled result receives focus, the one-use approval resets, the status says notice version 1 and zero buckets, and nothing implies pilot enrollment or production activation.
 6. Use `Alt+A`, then `Alt+S`. Confirm the permanent-deletion wording is announced before action, the completion receives focus, the approval resets, and status returns to disabled with zero buckets.
 7. Use `Alt+R`. Confirm refresh preserves the disabled/zero-bucket state and does not move focus unexpectedly or repeat the full lists.
-8. Confirm no control named **Activate production**, **Enroll in pilot**, **Send metrics** or equivalent exists. Confirm no login, credential, destination or account field appears.
-9. Repeat with keyboard only, 200% scaling and Windows High Contrast. Check that notices reflow, controls remain visible/reachable, focus is clear, lists remain navigable and color is not the only state cue.
-10. Record any delayed/duplicate live announcement, inaccessible disabled-state explanation, focus loss, access-key conflict or ambiguous purge language as a release-blocking defect.
+8. Read the **Local pilot administration preview** status. Confirm it clearly says enrollment, product event sources, network metric transport and production activation are unavailable. Confirm the recent aggregate list exposes only day/key/dimension/count/sum/minimum/maximum values.
+9. Use `Alt+D`. Confirm the seven-scenario incident stop drill result receives focus, says external actions zero and requires a fresh readiness decision. Review the results list without losing position.
+10. Confirm no control named **Activate production**, **Enroll pilot**, **Send metrics** or equivalent exists. Confirm no login, credential, destination, participant or account field appears.
+11. Repeat with keyboard only, 200% scaling and Windows High Contrast. Check that notices reflow, all content remains reachable through the scroll viewer, focus is clear, lists remain navigable and color is not the only state cue.
+12. Record any delayed/duplicate live announcement, inaccessible disabled-state explanation, focus loss, access-key conflict, ambiguous purge language or preview language that implies real pilot authority as a release-blocking defect.
 
-P14 remains `NO_GO` until this human gate and the separate policy, enrollment, administration, incident-readiness and production-approval gates pass.
+P14 remains `NO_GO` until this human gate and the separate policy, enrollment, deployed-administration, human incident-readiness and production-approval gates pass.

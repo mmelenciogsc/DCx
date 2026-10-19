@@ -25,7 +25,7 @@ The dashboard continues to expose no production-activation control. The release 
 ## Consequences
 
 - Users can grant and revoke the already-defined local storage consent without implying participation in a pilot.
-- Native UIA proves default-off state, separate approvals, focused results, five distinct access keys, zero retained buckets after purge and continued absence of production activation.
+- Native UIA proves default-off state, separate approvals, focused results, six distinct privacy/administration/refresh access keys, zero retained buckets after purge and continued absence of production activation. ADR 0100 adds the local administration preview without expanding consent authority.
 - Local consent is not consent to future event sources, metric transport, support access, export, provider use or policy changes. Each requires a separately reviewed boundary and, where applicable, new user approval.
 - The SQLite file remains local per-user state. Same-user tampering and final retention/legal policy remain release concerns, and human JAWS/NVDA/Narrator testing remains blocked.
 

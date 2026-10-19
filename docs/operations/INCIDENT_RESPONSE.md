@@ -22,6 +22,10 @@ This runbook is preparatory. No production service or pilot is active.
 
 Record incident ID, time, product version, stable issue codes, affected capability, decisions, hashes and remediation state. Do not record secrets, prompt/output bodies, browser history, file paths, account identifiers or assistive-technology speech content unless a separately approved, minimized collection is essential.
 
-## Exercises still required
+## Automated local dry-run evidence
 
-Before a pilot, conduct signing-key compromise, malicious global update, private-data exposure, inaccessible takeover, payout duplicate/reconciliation, updater rollback and backup-restore exercises. Assign named on-call contacts and legally reviewed notification timelines.
+The native local administration preview deterministically evaluates the seven scenarios below against the current `NO_GO` state. It returns only product-owned stop/preserve/fresh-readiness steps, stores no result and performs zero external actions. Native UIA proves a focused seven-scenario result and continued absence of enrollment, transport and activation controls.
+
+## Human and operational exercises still required
+
+Before a pilot, conduct human tabletop and operational signing-key compromise, malicious global update, private-data exposure, inaccessible takeover, payout duplicate/reconciliation, updater rollback and backup-restore exercises. Exercise real approved containment mechanisms without production side effects. Assign named on-call contacts and legally reviewed notification timelines.

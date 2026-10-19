@@ -20,4 +20,4 @@ ADR 0087 later permits only local aggregate-consent enable and atomic stop/purge
 - The native view and generated report cannot silently diverge in their current blockers.
 - Users and testers can inspect `NO_GO`, assigned next actions, evidence references and privacy-reviewed metric definitions without enabling any external effect.
 - UI Automation validates the decision, counts, consent state, lists, refresh control and absence of an activation control.
-- This is not a pilot administration console. Enrollment, consent/withdrawal UX, provider approval, support operations and production activation remain blocked and separately governed.
+- This decision did not create a pilot administration console. ADRs 0087 and 0100 later add local consent controls and a zero-authority local administration preview; deployed administration, enrollment, provider approval, support operations and production activation remain blocked and separately governed.

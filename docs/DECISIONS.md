@@ -101,5 +101,6 @@
 | [0097](architecture/adr/0097-atomic-semantic-document-exports.md) | Replace reviewed document exports atomically with explicit semantics | Accepted for semantic HTML/DOCX local export; flattened PDF is governed by 0099, while PDF/UA and human acceptance remain blocked | 2026-10-19 |
 | [0098](architecture/adr/0098-strict-quickbooks-spreadsheetml-export.md) | Export QuickBooks-shaped reports as strict local SpreadsheetML tables | Accepted for local sandbox-shaped workbook conformance; live QuickBooks and human acceptance remain blocked | 2026-10-19 |
 | [0099](architecture/adr/0099-bounded-tagged-flattened-pdf-export.md) | Bound URL intake and tagged flattened PDF export | Accepted for automated local fixture validation; PDF/UA, independent pixel comparison and human acceptance remain blocked | 2026-10-19 |
+| [0100](architecture/adr/0100-local-pilot-administration-preview.md) | Expose a zero-authority local pilot administration preview | Accepted for local fixture administration and incident dry-run evidence; deployed administration, enrollment and production activation remain blocked | 2026-10-19 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
