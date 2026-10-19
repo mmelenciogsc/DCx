@@ -541,6 +541,7 @@ try {
         if ($value -like "*Contributor pseudonym: contributor:dashboard-fixture.*" -and
             $value -like "*Currency: USD.*" -and
             $value -like "*Periods: 5.*" -and
+            $value -like "*Local failed-payout notices: 1.*" -and
             $value -like "*Allocated: USD 25.00.*" -and
             $value -like "*Paid: USD 4.00.*" -and
             $value -like "*Outstanding or held: USD 21.00.*" -and
@@ -582,11 +583,24 @@ try {
         $periodText -like "*account*" -or $periodText -like "*recipient*") {
         throw "The CARE contributor period history exposed recipient or provider-account data."
     }
+    $dashboardNotices = Find-ById $dashboardWindow "CareContributorNoticesList"
+    $noticeItems = Wait-For {
+        $items = $dashboardNotices.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition)
+        if ($items.Count -eq 1) { $items }
+    } "The generated local failed-payout notice was not exposed."
+    $noticeText = [string]$noticeItems[0].Current.Name
+    if ($noticeText -notlike "*care:2026-05.*Amount USD 7.00.*Payout recipient information needs review.*failed amount remains held*no automatic retry occurs.*local dashboard notice*No external message was sent.*" -or
+        $noticeText -like "*snapshot:*" -or $noticeText -like "*batch:*" -or
+        $noticeText -like "*personal.example*" -or $noticeText -like "*PayPal*") {
+        throw "The generated failed-payout notice was incomplete or disclosed a forbidden binding."
+    }
     Invoke-ById $dashboardWindow "RefreshCareContributorDashboardButton" | Out-Null
     $dashboardStatus = Wait-For {
         $status = Find-ById $dashboardWindow "CareContributorDashboardStatus"
         if ($null -ne $status -and $status.Current.Name -eq
-            "Loaded 5 generated CARE periods. This dashboard is read-only. Network requests 0. Payout attempts 0.") { $status }
+            "Loaded 5 generated CARE periods and 1 local failed-payout notice record. This dashboard is read-only. Network requests 0. Notification transports 0. Payout attempts 0.") { $status }
     } "The read-only CARE contributor dashboard refresh was not announced."
     $null = Wait-For {
         $summary = Find-ById $dashboardWindow "CareContributorDashboardSummary"
@@ -641,6 +655,8 @@ try {
         contributor_dashboard_fixture_boundary = $dashboardBoundary.Current.Name
         contributor_dashboard_summary = $dashboardSummary
         contributor_dashboard_periods = $periodItems.Count
+        contributor_dashboard_failed_payout_notices = $noticeItems.Count
+        contributor_dashboard_notice_privacy_minimized = $true
         contributor_dashboard_statuses = @(
             "withheld", "held_below_threshold", "pending", "partially_paid", "paid")
         contributor_dashboard_local_status_notices = $true
@@ -658,7 +674,7 @@ try {
     "P11 CARE operations default-off local cycle and focus=PASS"
     "P11 accessible blocked-case review and non-financial disposition=PASS"
     "P11 accessible failed-payout hold review and zero-authority disposition=PASS"
-    "P11 contributor-facing local status notices=PASS external notification transports=0"
+    "P11 contributor-facing period and failed-payout local notices=PASS external notification transports=0"
     "P11 accessible privacy-minimized contributor dashboard=PASS"
     "P11 CARE operations aggregate-only provider calls=0 production actions=0"
     "P11 recipient UI network requests=0 payout attempts=0"

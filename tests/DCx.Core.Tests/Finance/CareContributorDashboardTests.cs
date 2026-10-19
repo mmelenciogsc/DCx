@@ -11,7 +11,7 @@ public sealed class CareContributorDashboardTests
     public void Contract_IsBoundedAndExcludesProviderRecipientAndAccountFields()
     {
         Assert.Equal(
-            ["StatusCode", "ContributorPseudonym", "Currency", "GeneratedUtc", "Periods"],
+            ["StatusCode", "ContributorPseudonym", "Currency", "GeneratedUtc", "Periods", "Notices"],
             typeof(CareContributorDashboardSnapshot)
                 .GetProperties()
                 .Select(property => property.Name)
@@ -25,15 +25,79 @@ public sealed class CareContributorDashboardTests
                 .GetProperties()
                 .Select(property => property.Name)
                 .ToArray());
+        Assert.Equal(
+            ["NoticeId", "PeriodId", "AmountCents", "NoticeCode", "RecordedUtc"],
+            typeof(CareContributorLocalNotice)
+                .GetProperties()
+                .Select(property => property.Name)
+                .ToArray());
         var propertyNames = string.Join(
             ' ',
             typeof(CareContributorDashboardSnapshot).GetProperties()
                 .Concat(typeof(CareContributorPeriodStatus).GetProperties())
+                .Concat(typeof(CareContributorLocalNotice).GetProperties())
                 .Select(property => property.Name));
         Assert.DoesNotContain("Email", propertyNames, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("PayPal", propertyNames, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Account", propertyNames, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Recipient", propertyNames, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Policy_AcceptsBoundedOrderedSubjectLocalNoticesAndRejectsSubstitution()
+    {
+        var period = Period(
+            2026, 1, 500, 0, 500, CareContributorDashboardPolicy.Eligible);
+        var latest = new CareContributorLocalNotice(
+            new string('a', 64),
+            period.PeriodId,
+            300,
+            CareContributorDashboardPolicy.RecipientUpdateRequested,
+            Now.AddMinutes(-1));
+        var earlier = new CareContributorLocalNotice(
+            new string('b', 64),
+            period.PeriodId,
+            200,
+            CareContributorDashboardPolicy.FailedPayoutHoldRetained,
+            Now.AddMinutes(-2));
+        var exact = Snapshot([period], [latest, earlier]);
+
+        CareContributorDashboardPolicy.RequireSnapshot(exact);
+        Assert.Throws<InvalidOperationException>(() =>
+            CareContributorDashboardPolicy.RequireSnapshot(exact with
+            {
+                Notices = [latest, latest],
+            }));
+        Assert.Throws<InvalidOperationException>(() =>
+            CareContributorDashboardPolicy.RequireSnapshot(exact with
+            {
+                Notices = [earlier, latest],
+            }));
+        Assert.Throws<InvalidOperationException>(() =>
+            CareContributorDashboardPolicy.RequireSnapshot(exact with
+            {
+                Notices = [latest with { PeriodId = "care:2025-12" }],
+            }));
+        Assert.Throws<InvalidOperationException>(() =>
+            CareContributorDashboardPolicy.RequireSnapshot(exact with
+            {
+                Notices = [latest with { NoticeId = new string('g', 64) }],
+            }));
+        Assert.Throws<InvalidOperationException>(() =>
+            CareContributorDashboardPolicy.RequireSnapshot(exact with
+            {
+                Notices = [latest with { AmountCents = 501 }],
+            }));
+        Assert.Throws<InvalidOperationException>(() =>
+            CareContributorDashboardPolicy.RequireSnapshot(exact with
+            {
+                Notices = [latest with { NoticeCode = "external_message_sent" }],
+            }));
+        Assert.Throws<InvalidOperationException>(() =>
+            CareContributorDashboardPolicy.RequireSnapshot(exact with
+            {
+                Notices = [latest with { RecordedUtc = Now.AddMinutes(1) }],
+            }));
     }
 
     [Fact]
@@ -96,6 +160,7 @@ public sealed class CareContributorDashboardTests
         Assert.Equal(CareContributorDashboardPolicy.NotConfigured, snapshot.StatusCode);
         Assert.Null(snapshot.ContributorPseudonym);
         Assert.Empty(snapshot.Periods);
+        Assert.Empty(snapshot.Notices);
     }
 
     [Fact]
@@ -110,7 +175,18 @@ public sealed class CareContributorDashboardTests
         "contributor:fixture",
         "USD",
         Now,
-        periods);
+        periods,
+        []);
+
+    private static CareContributorDashboardSnapshot Snapshot(
+        IReadOnlyList<CareContributorPeriodStatus> periods,
+        IReadOnlyList<CareContributorLocalNotice> notices) => new(
+        CareContributorDashboardPolicy.Available,
+        "contributor:fixture",
+        "USD",
+        Now,
+        periods,
+        notices);
 
     private static CareContributorPeriodStatus Period(
         int year,

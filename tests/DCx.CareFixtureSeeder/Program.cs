@@ -103,6 +103,7 @@ Console.WriteLine(JsonSerializer.Serialize(new
     review.HoldCode,
     review.NoticeCode,
     review.DispositionCode,
+    noticeContributorPseudonym = usage[1].ContributorPseudonym,
     providerRequests = 0,
     payoutAttempts = 0,
     notificationTransports = 0,

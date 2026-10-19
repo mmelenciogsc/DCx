@@ -22,17 +22,22 @@ $signingKeyPath = Join-Path $runRoot "operations-loopback-signing-key.pk8"
 $evidencePath = Join-Path $runRoot "operations-loopback-uia.json"
 $fixtureSuffix = [Guid]::NewGuid().ToString("N")
 $token = "care-operator-loopback-uia-$fixtureSuffix"
+$contributorToken = "care-contributor-loopback-uia-$fixtureSuffix"
 $operatorPseudonymBytes = [Text.Encoding]::UTF8.GetBytes(
     "care-operator-loopback-uia-identity-$fixtureSuffix")
 $tokenBytes = [Text.Encoding]::UTF8.GetBytes($token)
+$contributorTokenBytes = [Text.Encoding]::UTF8.GetBytes($contributorToken)
 try {
     $tokenDigest = [Convert]::ToHexString(
         [Security.Cryptography.SHA256]::HashData($tokenBytes)).ToLowerInvariant()
+    $contributorTokenDigest = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData($contributorTokenBytes)).ToLowerInvariant()
     $operatorPseudonymDigest = [Convert]::ToHexString(
         [Security.Cryptography.SHA256]::HashData($operatorPseudonymBytes)).ToLowerInvariant()
 }
 finally {
     [Array]::Clear($tokenBytes, 0, $tokenBytes.Length)
+    [Array]::Clear($contributorTokenBytes, 0, $contributorTokenBytes.Length)
     [Array]::Clear($operatorPseudonymBytes, 0, $operatorPseudonymBytes.Length)
 }
 
@@ -157,6 +162,7 @@ try {
         $seed.AmountCents -ne 700 -or $seed.FailureCode -cne "provider_rejected" -or
         $seed.HoldCode -cne "failed_item_hold" -or $seed.NoticeCode -cne "not_ready" -or
         $seed.DispositionCode -cne "unreviewed" -or $seed.providerRequests -ne 0 -or
+        $seed.noticeContributorPseudonym -cne "contributor:fixture-two" -or
         $seed.payoutAttempts -ne 0 -or $seed.notificationTransports -ne 0 -or
         $seed.productionActions -ne 0) {
         throw "The CARE operations validation ledger seed exceeded its synthetic boundary."
@@ -178,6 +184,11 @@ try {
     $serverStart.Environment["DCX_GLOBAL_CARE_OPERATOR_TOKEN_SHA256"] = $tokenDigest
     $serverStart.Environment["DCX_GLOBAL_CARE_OPERATOR_PSEUDONYM_SHA256"] =
         $operatorPseudonymDigest
+    $serverStart.Environment["DCX_GLOBAL_CARE_CONTRIBUTOR_DASHBOARD_API"] = "1"
+    $serverStart.Environment["DCX_GLOBAL_CARE_CONTRIBUTOR_TOKEN_SHA256"] =
+        $contributorTokenDigest
+    $serverStart.Environment["DCX_GLOBAL_CARE_CONTRIBUTOR_PSEUDONYM"] =
+        [string]$seed.noticeContributorPseudonym
     $serverStart.Environment["Logging__LogLevel__Default"] = "Warning"
     $serverProcess = [Diagnostics.Process]::Start($serverStart)
     $serverOutputTask = $serverProcess.StandardOutput.ReadToEndAsync()
@@ -198,7 +209,8 @@ try {
                 if ($health.careOperationsApi -eq $true -and
                     $health.careOperationsProcessing -eq $false -and
                     $health.careOperationsRateLimit -eq $true -and
-                    $health.careContributorDashboardApi -eq $false) { return $health }
+                    $health.careContributorDashboardApi -eq $true -and
+                    $health.careContributorDashboardRateLimit -eq $true) { return $health }
             }
             finally {
                 $response.Dispose()
@@ -349,6 +361,46 @@ try {
         $request.Dispose()
     }
 
+    $contributorRequest = [Net.Http.HttpRequestMessage]::new(
+        [Net.Http.HttpMethod]::Get,
+        $origin + "api/care/contributor-dashboard")
+    $contributorRequest.Headers.Authorization =
+        [Net.Http.Headers.AuthenticationHeaderValue]::new(
+            "Bearer", $contributorToken)
+    $contributorResponse = $httpClient.SendAsync(
+        $contributorRequest).GetAwaiter().GetResult()
+    try {
+        if (-not $contributorResponse.IsSuccessStatusCode -or
+            -not $contributorResponse.Headers.CacheControl.NoStore) {
+            throw "The subject-bound local failed-payout notice was unavailable or cacheable."
+        }
+        $rawContributor = $contributorResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ($rawContributor.Contains([string]$seed.ReviewId, [StringComparison]::Ordinal) -or
+            $rawContributor -like "*batch:loopback*" -or
+            $rawContributor -like "*snapshot:*" -or
+            $rawContributor -like "*personal.example*" -or
+            $rawContributor.Contains($operatorPseudonymDigest, [StringComparison]::Ordinal)) {
+            throw "The subject-bound local notice disclosed an operator or recipient binding."
+        }
+        $contributorProjection = $rawContributor | ConvertFrom-Json
+        $localNotices = @($contributorProjection.notices)
+        if ($contributorProjection.contributorPseudonym -cne
+                [string]$seed.noticeContributorPseudonym -or
+            @($contributorProjection.periods).Count -ne 1 -or
+            $localNotices.Count -ne 1 -or
+            $localNotices[0].periodId -cne "care:2026-05" -or
+            $localNotices[0].amountCents -ne 700 -or
+            $localNotices[0].noticeCode -cne "recipient_update_requested" -or
+            ([string]$localNotices[0].noticeId).Length -ne 64) {
+            throw "The exact failed-payout decision did not reach the authenticated contributor dashboard."
+        }
+        $contributorNoticeIdLength = ([string]$localNotices[0].noticeId).Length
+    }
+    finally {
+        $contributorResponse.Dispose()
+        $contributorRequest.Dispose()
+    }
+
     Remove-Item -LiteralPath $signingKeyPath -Force
     if (Test-Path -LiteralPath $signingKeyPath) {
         throw "The ephemeral CARE operations fixture signing key was retained."
@@ -366,6 +418,10 @@ try {
         denied_attempt_focus_return = $true
         disposition = "request_recipient_update"
         local_notice = "local_dashboard_notice_ready"
+        subject_bound_contributor_notice_count = $localNotices.Count
+        subject_bound_contributor_notice_code = [string]$localNotices[0].noticeCode
+        subject_bound_notice_reference_length = $contributorNoticeIdLength
+        operator_review_reference_disclosed_to_contributor = $false
         replay_enabled_after_decision = $false
         provider_requests = 0
         disposition_financial_mutations = 0
@@ -391,10 +447,12 @@ finally {
         $diagnostics = $serverOutputTask.GetAwaiter().GetResult() +
             $serverErrorTask.GetAwaiter().GetResult()
         if ($diagnostics.Contains($token, [StringComparison]::Ordinal) -or
+            $diagnostics.Contains($contributorToken, [StringComparison]::Ordinal) -or
             $diagnostics.Contains("contributor:fixture", [StringComparison]::Ordinal) -or
             $diagnostics.Contains("personal.example", [StringComparison]::Ordinal)) {
             throw "CARE operations loopback diagnostics disclosed a token or source identity."
         }
     }
     if ($null -ne $httpClient) { $httpClient.Dispose() }
+    $contributorToken = $null
 }

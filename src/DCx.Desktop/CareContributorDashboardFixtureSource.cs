@@ -23,6 +23,14 @@ internal sealed class CareContributorDashboardFixtureSource : ICareContributorDa
                 Period(2026, 3, 500, 0, 500, CareContributorDashboardPolicy.Pending),
                 Period(2026, 2, 400, 100, 300, CareContributorDashboardPolicy.PartiallyPaid),
                 Period(2026, 1, 300, 300, 0, CareContributorDashboardPolicy.Paid),
+            ],
+            [
+                new CareContributorLocalNotice(
+                    new string('a', 64),
+                    "care:2026-05",
+                    700,
+                    CareContributorDashboardPolicy.RecipientUpdateRequested,
+                    DateTimeOffset.Parse("2026-10-18T01:20:00Z")),
             ]);
         CareContributorDashboardPolicy.RequireSnapshot(snapshot);
         return Task.FromResult(snapshot);

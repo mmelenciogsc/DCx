@@ -1427,6 +1427,8 @@ public sealed class DurableCareRepositoryTests : IDisposable
         Assert.DoesNotContain("contributor:", json, StringComparison.Ordinal);
         Assert.DoesNotContain("personal.example", json, StringComparison.Ordinal);
         Assert.DoesNotContain("snapshot:", json, StringComparison.Ordinal);
+        Assert.Empty((await repository.GetContributorDashboardAsync(
+            "contributor:two", now)).Notices);
 
         var source = new DurableCareFailedPayoutReviewSource(
             repository,
@@ -1456,9 +1458,30 @@ public sealed class DurableCareRepositoryTests : IDisposable
         Assert.Equal(new string('a', 64), audit.OperatorPseudonymSha256);
         Assert.Equal(request.ReviewedSha256, audit.ReviewedSha256);
 
+        var contributorSnapshot = await repository.GetContributorDashboardAsync(
+            "contributor:two", now.AddMinutes(2));
+        var notice = Assert.Single(contributorSnapshot.Notices);
+        Assert.Equal(payout.CarePeriodId, notice.PeriodId);
+        Assert.Equal(700, notice.AmountCents);
+        Assert.Equal(
+            CareContributorDashboardPolicy.RecipientUpdateRequested,
+            notice.NoticeCode);
+        Assert.Equal(now.AddMinutes(1), notice.RecordedUtc);
+        Assert.Equal(64, notice.NoticeId.Length);
+        var noticeJson = JsonSerializer.Serialize(notice);
+        Assert.DoesNotContain(review.ReviewId, noticeJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("batch:hold-review-source", noticeJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("contributor:", noticeJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("personal.example", noticeJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("snapshot:", noticeJson, StringComparison.Ordinal);
+
         var reopened = await DurableCareRepository.OpenAsync(root);
         var persisted = Assert.Single(await reopened.ListFailedPayoutReviewsAsync());
         Assert.Equal(updated, persisted);
+        Assert.Equal(
+            notice,
+            Assert.Single((await reopened.GetContributorDashboardAsync(
+                "contributor:two", now.AddMinutes(2))).Notices));
         Assert.Equal(-700, await reopened.BalanceAsync(LedgerAccount.ContributorPayable));
         Assert.Equal(-500, await reopened.BalanceAsync(LedgerAccount.Cash));
         Assert.True(await reopened.ReconcilesAsync());
@@ -1532,6 +1555,9 @@ public sealed class DurableCareRepositoryTests : IDisposable
             firstRepository.GetFailedPayoutDispositionAuditAsync());
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             firstRepository.ListFailedPayoutReviewsAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            firstRepository.GetContributorDashboardAsync(
+                "contributor:two", now.AddMinutes(2)));
     }
 
     [Fact]

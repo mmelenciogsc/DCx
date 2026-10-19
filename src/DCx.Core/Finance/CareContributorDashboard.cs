@@ -9,12 +9,20 @@ public sealed record CareContributorPeriodStatus(
     long OutstandingCents,
     string StatusCode);
 
+public sealed record CareContributorLocalNotice(
+    string NoticeId,
+    string PeriodId,
+    long AmountCents,
+    string NoticeCode,
+    DateTimeOffset RecordedUtc);
+
 public sealed record CareContributorDashboardSnapshot(
     string StatusCode,
     string? ContributorPseudonym,
     string Currency,
     DateTimeOffset GeneratedUtc,
-    IReadOnlyList<CareContributorPeriodStatus> Periods);
+    IReadOnlyList<CareContributorPeriodStatus> Periods,
+    IReadOnlyList<CareContributorLocalNotice> Notices);
 
 public interface ICareContributorDashboardSource
 {
@@ -25,6 +33,7 @@ public interface ICareContributorDashboardSource
 public static class CareContributorDashboardPolicy
 {
     public const int MaximumPeriods = 120;
+    public const int MaximumNotices = 120;
     public const string NotConfigured = "not_configured";
     public const string Available = "available";
     public const string HeldBelowThreshold = "held_below_threshold";
@@ -33,22 +42,28 @@ public static class CareContributorDashboardPolicy
     public const string Pending = "pending";
     public const string PartiallyPaid = "partially_paid";
     public const string Paid = "paid";
+    public const string FailedPayoutHoldRetained = "failed_payout_hold_retained";
+    public const string RecipientUpdateRequested = "recipient_update_requested";
+    public const string RetryIntentCancelled = "retry_intent_cancelled";
 
     public static void RequireSnapshot(CareContributorDashboardSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(snapshot.Periods);
+        ArgumentNullException.ThrowIfNull(snapshot.Notices);
         if (snapshot.StatusCode is not (NotConfigured or Available) ||
             !string.Equals(snapshot.Currency, "USD", StringComparison.Ordinal) ||
             snapshot.GeneratedUtc.Offset != TimeSpan.Zero ||
-            snapshot.Periods.Count > MaximumPeriods)
+            snapshot.Periods.Count > MaximumPeriods ||
+            snapshot.Notices.Count > MaximumNotices)
         {
             throw new InvalidOperationException("The CARE contributor dashboard contract is invalid.");
         }
 
         if (snapshot.StatusCode == NotConfigured)
         {
-            if (snapshot.ContributorPseudonym is not null || snapshot.Periods.Count != 0)
+            if (snapshot.ContributorPseudonym is not null || snapshot.Periods.Count != 0 ||
+                snapshot.Notices.Count != 0)
             {
                 throw new InvalidOperationException(
                     "An unavailable CARE contributor dashboard cannot imply contributor state.");
@@ -65,6 +80,7 @@ public static class CareContributorDashboardPolicy
         PayPalSandboxValidation.RequireContributorPseudonym(snapshot.ContributorPseudonym);
 
         var periodIds = new HashSet<string>(StringComparer.Ordinal);
+        var periodsById = new Dictionary<string, CareContributorPeriodStatus>(StringComparer.Ordinal);
         DateOnly? priorClose = null;
         foreach (var period in snapshot.Periods)
         {
@@ -101,31 +117,60 @@ public static class CareContributorDashboardPolicy
                     "The CARE contributor period status conflicts with its amounts or eligibility date.");
             }
 
+            periodsById.Add(period.PeriodId, period);
             priorClose = period.EarningPeriodClose;
+        }
+
+        var noticeIds = new HashSet<string>(StringComparer.Ordinal);
+        CareContributorLocalNotice? priorNotice = null;
+        foreach (var notice in snapshot.Notices)
+        {
+            ArgumentNullException.ThrowIfNull(notice);
+            PayoutContractValidation.RequireCarePeriodId(notice.PeriodId);
+            var knownPeriod = periodsById.GetValueOrDefault(notice.PeriodId);
+            if (!PayoutContractValidation.IsLowerSha256(notice.NoticeId) ||
+                !noticeIds.Add(notice.NoticeId) || knownPeriod is null ||
+                notice.AmountCents <= 0 || notice.AmountCents > knownPeriod.AllocationCents ||
+                notice.NoticeCode is not (
+                    FailedPayoutHoldRetained or
+                    RecipientUpdateRequested or
+                    RetryIntentCancelled) ||
+                notice.RecordedUtc == default || notice.RecordedUtc.Offset != TimeSpan.Zero ||
+                notice.RecordedUtc > snapshot.GeneratedUtc ||
+                priorNotice is not null &&
+                (notice.RecordedUtc > priorNotice.RecordedUtc ||
+                 notice.RecordedUtc == priorNotice.RecordedUtc &&
+                 string.CompareOrdinal(notice.NoticeId, priorNotice.NoticeId) <= 0))
+            {
+                throw new InvalidOperationException(
+                    "The CARE contributor local-notice contract is invalid.");
+            }
+
+            priorNotice = notice;
         }
     }
 
     private static bool StatusMatches(
         CareContributorPeriodStatus period,
         DateTimeOffset generatedUtc) => period.StatusCode switch
-    {
-        HeldBelowThreshold or Withheld =>
-            period.PaidCents == 0 && period.OutstandingCents == period.AllocationCents,
-        Eligible =>
-            period.PaidCents == 0 &&
-            period.OutstandingCents == period.AllocationCents &&
-            DateOnly.FromDateTime(generatedUtc.UtcDateTime) >= period.Net60EligibilityDate,
-        Pending =>
-            period.OutstandingCents > 0 &&
-            DateOnly.FromDateTime(generatedUtc.UtcDateTime) >= period.Net60EligibilityDate,
-        PartiallyPaid =>
-            period.PaidCents > 0 && period.OutstandingCents > 0 &&
-            DateOnly.FromDateTime(generatedUtc.UtcDateTime) >= period.Net60EligibilityDate,
-        Paid =>
-            period.PaidCents == period.AllocationCents && period.OutstandingCents == 0 &&
-            DateOnly.FromDateTime(generatedUtc.UtcDateTime) >= period.Net60EligibilityDate,
-        _ => false,
-    };
+        {
+            HeldBelowThreshold or Withheld =>
+                period.PaidCents == 0 && period.OutstandingCents == period.AllocationCents,
+            Eligible =>
+                period.PaidCents == 0 &&
+                period.OutstandingCents == period.AllocationCents &&
+                DateOnly.FromDateTime(generatedUtc.UtcDateTime) >= period.Net60EligibilityDate,
+            Pending =>
+                period.OutstandingCents > 0 &&
+                DateOnly.FromDateTime(generatedUtc.UtcDateTime) >= period.Net60EligibilityDate,
+            PartiallyPaid =>
+                period.PaidCents > 0 && period.OutstandingCents > 0 &&
+                DateOnly.FromDateTime(generatedUtc.UtcDateTime) >= period.Net60EligibilityDate,
+            Paid =>
+                period.PaidCents == period.AllocationCents && period.OutstandingCents == 0 &&
+                DateOnly.FromDateTime(generatedUtc.UtcDateTime) >= period.Net60EligibilityDate,
+            _ => false,
+        };
 }
 
 public sealed class UnavailableCareContributorDashboardSource : ICareContributorDashboardSource
@@ -145,6 +190,7 @@ public sealed class UnavailableCareContributorDashboardSource : ICareContributor
             null,
             "USD",
             DateTimeOffset.UtcNow,
+            [],
             []));
     }
 }

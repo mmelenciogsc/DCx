@@ -52,7 +52,7 @@ public sealed class LoopbackCareContributorDashboardSourceTests
                 request.Headers.Accept,
                 value => value.MediaType == "application/json");
             Assert.Contains(request.Headers.AcceptEncoding, value => value.Value == "identity");
-            return Json(request, Snapshot());
+            return Json(request, SnapshotWithNotice());
         });
         using var source = new LoopbackCareContributorDashboardSource(
             handler, Origin, Token, Contributor);
@@ -60,7 +60,11 @@ public sealed class LoopbackCareContributorDashboardSourceTests
         var snapshot = await source.LoadAsync();
 
         Assert.Equal(Contributor, snapshot.ContributorPseudonym);
-        Assert.Empty(snapshot.Periods);
+        Assert.Single(snapshot.Periods);
+        var notice = Assert.Single(snapshot.Notices);
+        Assert.Equal(
+            CareContributorDashboardPolicy.RecipientUpdateRequested,
+            notice.NoticeCode);
     }
 
     [Theory]
@@ -72,13 +76,13 @@ public sealed class LoopbackCareContributorDashboardSourceTests
         var body = caseName switch
         {
             "unknown" => """
-                         {"statusCode":"available","contributorPseudonym":"contributor:loopback-fixture","currency":"USD","generatedUtc":"2026-10-18T12:00:00+00:00","periods":[],"providerAccount":"must-not-cross-boundary"}
+                         {"statusCode":"available","contributorPseudonym":"contributor:loopback-fixture","currency":"USD","generatedUtc":"2026-10-18T12:00:00+00:00","periods":[],"notices":[],"providerAccount":"must-not-cross-boundary"}
                          """,
             "subject" => """
-                         {"statusCode":"available","contributorPseudonym":"contributor:substituted","currency":"USD","generatedUtc":"2026-10-18T12:00:00+00:00","periods":[]}
+                         {"statusCode":"available","contributorPseudonym":"contributor:substituted","currency":"USD","generatedUtc":"2026-10-18T12:00:00+00:00","periods":[],"notices":[]}
                          """,
             _ => """
-                 {"statusCode":"available","statusCode":"not_configured","contributorPseudonym":"contributor:loopback-fixture","currency":"USD","generatedUtc":"2026-10-18T12:00:00+00:00","periods":[]}
+                 {"statusCode":"available","statusCode":"not_configured","contributorPseudonym":"contributor:loopback-fixture","currency":"USD","generatedUtc":"2026-10-18T12:00:00+00:00","periods":[],"notices":[]}
                  """,
         };
         var handler = new StaticHandler(request => Json(request, body));
@@ -217,7 +221,36 @@ public sealed class LoopbackCareContributorDashboardSourceTests
         Contributor,
         "USD",
         new DateTimeOffset(2026, 10, 18, 12, 0, 0, TimeSpan.Zero),
+        [],
         []);
+
+    private static CareContributorDashboardSnapshot SnapshotWithNotice()
+    {
+        var close = new DateOnly(2026, 5, 31);
+        return new CareContributorDashboardSnapshot(
+            CareContributorDashboardPolicy.Available,
+            Contributor,
+            "USD",
+            new DateTimeOffset(2026, 10, 18, 12, 0, 0, TimeSpan.Zero),
+            [
+                new CareContributorPeriodStatus(
+                    "care:2026-05",
+                    close,
+                    close.AddDays(60),
+                    700,
+                    0,
+                    700,
+                    CareContributorDashboardPolicy.Eligible),
+            ],
+            [
+                new CareContributorLocalNotice(
+                    new string('a', 64),
+                    "care:2026-05",
+                    700,
+                    CareContributorDashboardPolicy.RecipientUpdateRequested,
+                    new DateTimeOffset(2026, 10, 18, 11, 0, 0, TimeSpan.Zero)),
+            ]);
+    }
 
     private static HttpResponseMessage Json(
         HttpRequestMessage request,

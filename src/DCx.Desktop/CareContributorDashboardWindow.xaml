@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="CARE contributor dashboard — DCx"
         Width="760"
-        Height="620"
+        Height="720"
         MinWidth="620"
         MinHeight="460"
         AutomationProperties.AutomationId="CareContributorDashboardWindow"
@@ -79,6 +79,17 @@
                              DisplayMemberPath="Display"
                              AutomationProperties.AutomationId="CareContributorPeriodsList"
                              AutomationProperties.Name="CARE monthly allocation history" />
+                </GroupBox>
+
+                <GroupBox Margin="0,18,0,0" Header="Local failed-payout notices">
+                    <ListBox x:Name="NoticesList"
+                             MinHeight="100"
+                             MaxHeight="220"
+                             Margin="12,8"
+                             DisplayMemberPath="Display"
+                             AutomationProperties.AutomationId="CareContributorNoticesList"
+                             AutomationProperties.Name="CARE local failed-payout notices"
+                             AutomationProperties.HelpText="Read-only local notices. No external message, payout retry, or provider request occurs." />
                 </GroupBox>
             </StackPanel>
         </ScrollViewer>

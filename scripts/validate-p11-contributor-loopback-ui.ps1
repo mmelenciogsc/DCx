@@ -218,6 +218,7 @@ try {
         $value = Get-Value $window "CareContributorDashboardSummary"
         if ($value -like "*Contributor pseudonym: $contributorPseudonym.*" -and
             $value -like "*Periods: 0.*" -and
+            $value -like "*Local failed-payout notices: 0.*" -and
             $value -like "*Allocated: USD 0.00.*" -and
             $value -like "*Paid: USD 0.00.*" -and
             $value -like "*Outstanding or held: USD 0.00.*" -and
@@ -232,6 +233,13 @@ try {
     if ($periodItems.Count -ne 0) {
         throw "The empty authoritative contributor history invented a period."
     }
+    $notices = Find-ById $window "CareContributorNoticesList"
+    $noticeItems = $notices.FindAll(
+        [System.Windows.Automation.TreeScope]::Children,
+        [System.Windows.Automation.Condition]::TrueCondition)
+    if ($noticeItems.Count -ne 0) {
+        throw "The empty authoritative contributor history invented a local notice."
+    }
     $refresh = Find-ById $window "RefreshCareContributorDashboardButton"
     if ($null -eq $refresh -or -not $refresh.Current.IsKeyboardFocusable -or
         [string]::IsNullOrWhiteSpace($refresh.Current.AccessKey)) {
@@ -241,7 +249,7 @@ try {
     $status = Wait-For {
         $element = Find-ById $window "CareContributorDashboardStatus"
         if ($null -ne $element -and $element.Current.Name -eq
-            "Loaded 0 CARE periods from the authenticated local ledger fixture. This dashboard is read-only. Provider requests 0. Payout attempts 0.") {
+            "Loaded 0 CARE periods and 0 local failed-payout notice records from the authenticated local ledger fixture. This dashboard is read-only. Provider requests 0. Notification transports 0. Payout attempts 0.") {
             return $element
         }
     } "The authenticated contributor refresh was not announced truthfully."
@@ -273,6 +281,7 @@ try {
         boundary = $boundaryName
         contributor_pseudonym = $contributorPseudonym
         periods = 0
+        local_failed_payout_notices = 0
         allocated_cents = 0
         paid_cents = 0
         outstanding_cents = 0

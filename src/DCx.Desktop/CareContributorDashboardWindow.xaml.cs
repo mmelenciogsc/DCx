@@ -85,8 +85,8 @@ public partial class CareContributorDashboardWindow : Window
             {
                 SetSnapshot(snapshot);
                 SetStatus(sourceKind == CareContributorDashboardSourceKind.GeneratedFixture
-                    ? $"Loaded {snapshot.Periods.Count} generated CARE periods. This dashboard is read-only. Network requests 0. Payout attempts 0."
-                    : $"Loaded {snapshot.Periods.Count} CARE periods from the authenticated local ledger fixture. This dashboard is read-only. Provider requests 0. Payout attempts 0.");
+                    ? $"Loaded {snapshot.Periods.Count} generated CARE periods and {FormatNoticeCount(snapshot.Notices.Count)}. This dashboard is read-only. Network requests 0. Notification transports 0. Payout attempts 0."
+                    : $"Loaded {snapshot.Periods.Count} CARE periods and {FormatNoticeCount(snapshot.Notices.Count)} from the authenticated local ledger fixture. This dashboard is read-only. Provider requests 0. Notification transports 0. Payout attempts 0.");
             }
 
             if (moveFocus) SummaryText.Focus();
@@ -119,6 +119,7 @@ public partial class CareContributorDashboardWindow : Window
             $"Currency: {snapshot.Currency}.{Environment.NewLine}" +
             $"Generated UTC: {snapshot.GeneratedUtc:O}.{Environment.NewLine}" +
             $"Periods: {snapshot.Periods.Count}.{Environment.NewLine}" +
+            $"Local failed-payout notices: {snapshot.Notices.Count}.{Environment.NewLine}" +
             $"Allocated: {FormatCents(allocated)}.{Environment.NewLine}" +
             $"Paid: {FormatCents(paid)}.{Environment.NewLine}" +
             $"Outstanding or held: {FormatCents(outstanding)}.{Environment.NewLine}" +
@@ -126,6 +127,9 @@ public partial class CareContributorDashboardWindow : Window
         AutomationProperties.SetName(SummaryText, SummaryText.Text);
         PeriodsList.ItemsSource = snapshot.Periods
             .Select(item => new ContributorPeriodListItem(item))
+            .ToArray();
+        NoticesList.ItemsSource = snapshot.Notices
+            .Select(item => new ContributorNoticeListItem(item))
             .ToArray();
     }
 
@@ -135,6 +139,7 @@ public partial class CareContributorDashboardWindow : Window
             "CARE contributor status is unavailable. No empty history or zero balance is inferred.";
         AutomationProperties.SetName(SummaryText, SummaryText.Text);
         PeriodsList.ItemsSource = null;
+        NoticesList.ItemsSource = null;
     }
 
     private void SetStatus(string value)
@@ -145,6 +150,9 @@ public partial class CareContributorDashboardWindow : Window
 
     private static string FormatCents(decimal cents) =>
         string.Create(CultureInfo.InvariantCulture, $"USD {cents / 100:0.00}");
+
+    private static string FormatNoticeCount(int count) =>
+        $"{count} local failed-payout notice {(count == 1 ? "record" : "records")}";
 
     private string GetDataSourceLabel() => sourceKind switch
     {
@@ -179,6 +187,28 @@ public partial class CareContributorDashboardWindow : Window
             CareContributorDashboardPolicy.Paid =>
                 "Notice: This allocation was paid.",
             _ => "Notice: No payout state is inferred.",
+        };
+    }
+
+    private sealed class ContributorNoticeListItem(CareContributorLocalNotice notice)
+    {
+        public string Display { get; } =
+            $"{notice.PeriodId}. Recorded UTC {notice.RecordedUtc:O}. " +
+            $"Amount {FormatCents(notice.AmountCents)}. " +
+            GetNoticeText(notice.NoticeCode) +
+            " This is a local dashboard notice. No external message was sent.";
+
+        public override string ToString() => Display;
+
+        private static string GetNoticeText(string noticeCode) => noticeCode switch
+        {
+            CareContributorDashboardPolicy.FailedPayoutHoldRetained =>
+                "Notice: A failed payout remains held. No automatic retry occurs.",
+            CareContributorDashboardPolicy.RecipientUpdateRequested =>
+                "Notice: Payout recipient information needs review. The failed amount remains held, and no automatic retry occurs.",
+            CareContributorDashboardPolicy.RetryIntentCancelled =>
+                "Notice: Retry intent was cancelled. The failed amount remains held.",
+            _ => "Notice: No failed-payout state is inferred.",
         };
     }
 }

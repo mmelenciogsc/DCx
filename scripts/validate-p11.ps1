@@ -44,6 +44,7 @@ try {
         "DCx.Core.Tests.Finance.DurableCareRepositoryTests.FailedPayoutHoldReview_SerializesReplayAndRejectsConflictAndTamper",
         "DCx.Core.Tests.Finance.CareContributorDashboardTests.Contract_IsBoundedAndExcludesProviderRecipientAndAccountFields",
         "DCx.Core.Tests.Finance.CareContributorDashboardTests.Policy_AcceptsOrderedHeldEligiblePendingPartialAndPaidHistory",
+        "DCx.Core.Tests.Finance.CareContributorDashboardTests.Policy_AcceptsBoundedOrderedSubjectLocalNoticesAndRejectsSubstitution",
         "DCx.Core.Tests.Finance.CareContributorDashboardTests.UnavailableSource_DoesNotInventContributorOrPeriodState",
         "DCx.Core.Tests.Finance.DurableCareRepositoryTests.ContributorDashboard_DerivesWithheldEligiblePendingPartialAndPaidState",
         "DCx.Core.Tests.Finance.DurableCareRepositoryTests.ContributorDashboard_PreservesThresholdHoldAndDeniesAllocationTamper",
@@ -110,6 +111,7 @@ try {
     "Authenticated default-off loopback CARE operations API strict transport and replay gates=PASS"
     "Authenticated durable failed-payout hold transport and native desktop composition=PASS"
     "Authenticated default-off loopback contributor dashboard subject origin and privacy gates=PASS"
+    "Subject-bound durable failed-payout local notice projection=PASS external transports=0"
     "Chained privacy-minimized append-only CARE operator decision audit=PASS"
     "Default-off read-only aggregate CARE transition monitor=PASS"
     "Durable chained aggregate alert outbox and at-least-once delivery receipts=PASS"

@@ -404,12 +404,21 @@ public sealed partial class DurableCareRepository
                     status));
             }
 
+            var notices = await ReadContributorLocalNoticesAsync(
+                    connection,
+                    transaction,
+                    contributorPseudonym,
+                    periods,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
             var snapshot = new CareContributorDashboardSnapshot(
                 CareContributorDashboardPolicy.Available,
                 contributorPseudonym,
                 "USD",
                 now,
-                periods);
+                periods,
+                notices);
             CareContributorDashboardPolicy.RequireSnapshot(snapshot);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return snapshot;
@@ -418,6 +427,113 @@ public sealed partial class DurableCareRepository
         {
             mutationLock.Release();
         }
+    }
+
+    private static async Task<IReadOnlyList<CareContributorLocalNotice>>
+        ReadContributorLocalNoticesAsync(
+            SqliteConnection connection,
+            SqliteTransaction transaction,
+            string contributorPseudonym,
+            IReadOnlyList<CareContributorPeriodStatus> periods,
+            CancellationToken cancellationToken)
+    {
+        if (periods.Count == 0) return [];
+
+        var audit = await ReadAndVerifyFailedPayoutDispositionAuditAsync(
+                connection, transaction, cancellationToken)
+            .ConfigureAwait(false);
+        var auditByReview = audit.ToDictionary(item => item.ReviewId, StringComparer.Ordinal);
+        var periodIds = periods.Select(item => item.PeriodId).ToHashSet(StringComparer.Ordinal);
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT hold.review_id, binding.period_id, item.amount_cents,
+                   disposition.occurred_utc, disposition.disposition_code,
+                   disposition.record_sha256
+            FROM care_failed_payout_dispositions AS disposition
+            INNER JOIN care_failed_payout_holds AS hold
+                ON hold.review_id = disposition.review_id
+            INNER JOIN payout_item_results AS item
+                ON item.batch_id = hold.source_batch_id
+               AND item.ordinal = hold.source_ordinal
+            INNER JOIN payout_allocation_bindings AS binding
+                ON binding.batch_id = hold.source_batch_id
+               AND binding.ordinal = hold.source_ordinal
+            WHERE binding.contributor_pseudonym = $contributor
+              AND item.succeeded = 0
+              AND binding.period_id IN (
+                  SELECT allocation.period_id
+                  FROM care_contributor_allocations AS allocation
+                  INNER JOIN care_periods AS period
+                      ON period.period_id = allocation.period_id
+                  WHERE allocation.contributor_pseudonym = $contributor
+                    AND allocation.allocation_cents > 0
+                  ORDER BY period.period_close DESC
+                  LIMIT $period_limit)
+            ORDER BY disposition.occurred_utc DESC, hold.review_id
+            LIMIT $notice_limit;
+            """;
+        command.Parameters.AddWithValue("$contributor", contributorPseudonym);
+        command.Parameters.AddWithValue(
+            "$period_limit", CareContributorDashboardPolicy.MaximumPeriods);
+        command.Parameters.AddWithValue(
+            "$notice_limit", CareContributorDashboardPolicy.MaximumNotices + 1);
+        var notices = new List<CareContributorLocalNotice>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken)
+            .ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var reviewId = reader.GetString(0);
+            var periodId = reader.GetString(1);
+            var amountCents = reader.GetInt64(2);
+            var recordedUtc = DateTimeOffset.Parse(
+                reader.GetString(3), CultureInfo.InvariantCulture);
+            var dispositionCode = reader.GetString(4);
+            var recordSha256 = reader.GetString(5);
+            if (!periodIds.Contains(periodId) ||
+                !auditByReview.TryGetValue(reviewId, out var auditRecord) ||
+                auditRecord.OccurredUtc != recordedUtc ||
+                !string.Equals(
+                    auditRecord.DispositionCode, dispositionCode, StringComparison.Ordinal) ||
+                !string.Equals(
+                    auditRecord.RecordSha256, recordSha256, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The CARE contributor local notice failed audit binding validation.");
+            }
+
+            var noticeCode = dispositionCode switch
+            {
+                CareFailedPayoutReviewPolicy.RetainHold =>
+                    CareContributorDashboardPolicy.FailedPayoutHoldRetained,
+                CareFailedPayoutReviewPolicy.RequestRecipientUpdate =>
+                    CareContributorDashboardPolicy.RecipientUpdateRequested,
+                CareFailedPayoutReviewPolicy.CancelRetryIntent =>
+                    CareContributorDashboardPolicy.RetryIntentCancelled,
+                _ => throw new InvalidOperationException(
+                    "The CARE contributor local notice has an unsupported decision."),
+            };
+            notices.Add(new CareContributorLocalNotice(
+                Digest(
+                    "care-contributor-failed-payout-notice-v1",
+                    reviewId,
+                    recordSha256),
+                periodId,
+                amountCents,
+                noticeCode,
+                recordedUtc));
+        }
+
+        if (notices.Count > CareContributorDashboardPolicy.MaximumNotices)
+        {
+            throw new InvalidOperationException(
+                "The CARE contributor local-notice history exceeds its dashboard bound.");
+        }
+
+        return notices
+            .OrderByDescending(item => item.RecordedUtc)
+            .ThenBy(item => item.NoticeId, StringComparer.Ordinal)
+            .ToArray();
     }
 
     private static async Task<ContributorPayoutProjection> ReadValidatedContributorPayoutAsync(

@@ -67,6 +67,7 @@ internal static class SimulationCareContributorDashboardApi
         {
             response.Headers.CacheControl = "no-store";
             response.Headers.Pragma = "no-cache";
+            response.Headers.Vary = "Authorization";
             var error = Authorize(request, options);
             if (error is not null) return error;
 

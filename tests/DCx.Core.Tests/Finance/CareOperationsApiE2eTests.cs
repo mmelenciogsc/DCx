@@ -26,7 +26,7 @@ public sealed class CareOperationsApiE2eTests : IDisposable
         var operatorToken = $"care-operator-{Guid.NewGuid():N}";
         var wrongToken = $"wrong-operator-{Guid.NewGuid():N}";
         var contributorToken = $"care-contributor-{Guid.NewGuid():N}";
-        const string contributorPseudonym = "contributor:care-api-fixture";
+        const string contributorPseudonym = "contributor:hold-two";
         var operatorPseudonymSha256 = Digest("care-operator-fixture");
         var dataRoot = Path.Combine(root, "server");
         var careRoot = Path.Combine(dataRoot, "care");
@@ -124,6 +124,10 @@ public sealed class CareOperationsApiE2eTests : IDisposable
                     HttpStatusCode.Unauthorized,
                     "authentication_required");
                 Assert.True(missingContributorAuth.Headers.CacheControl?.NoStore);
+                Assert.Contains(
+                    "Authorization",
+                    missingContributorAuth.Headers.Vary,
+                    StringComparer.OrdinalIgnoreCase);
             }
             using (var operatorCannotReadContributor = await SendAuthorizedAsync(
                        client, HttpMethod.Get, contributorUri, operatorToken))
@@ -145,6 +149,7 @@ public sealed class CareOperationsApiE2eTests : IDisposable
                     contributorSnapshot.StatusCode);
                 Assert.Equal(contributorPseudonym, contributorSnapshot.ContributorPseudonym);
                 Assert.Empty(contributorSnapshot.Periods);
+                Assert.Empty(contributorSnapshot.Notices);
             }
             using (var substitutedSubjectSource = new LoopbackCareContributorDashboardSource(
                        endpoint,
@@ -424,6 +429,30 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             Assert.Equal(
                 payableBeforeDecision,
                 await repository.BalanceAsync(LedgerAccount.ContributorPayable));
+            using (var contributorSource = new LoopbackCareContributorDashboardSource(
+                       endpoint,
+                       contributorToken,
+                       contributorPseudonym,
+                       TimeSpan.FromSeconds(5)))
+            {
+                var contributorSnapshot = await contributorSource.LoadAsync();
+                var contributorPeriod = Assert.Single(contributorSnapshot.Periods);
+                Assert.Equal(failedPayout.CarePeriodId, contributorPeriod.PeriodId);
+                var localNotice = Assert.Single(contributorSnapshot.Notices);
+                Assert.Equal(failedPayout.CarePeriodId, localNotice.PeriodId);
+                Assert.Equal(700, localNotice.AmountCents);
+                Assert.Equal(
+                    CareContributorDashboardPolicy.RecipientUpdateRequested,
+                    localNotice.NoticeCode);
+                var serializedNotice = JsonSerializer.Serialize(localNotice);
+                Assert.DoesNotContain(hold.ReviewId, serializedNotice, StringComparison.Ordinal);
+                Assert.DoesNotContain("batch:care-api-hold", serializedNotice, StringComparison.Ordinal);
+                Assert.DoesNotContain("contributor:", serializedNotice, StringComparison.Ordinal);
+                Assert.DoesNotContain("personal.example", serializedNotice, StringComparison.Ordinal);
+                Assert.DoesNotContain("snapshot:", serializedNotice, StringComparison.Ordinal);
+                Assert.DoesNotContain(
+                    operatorPseudonymSha256, serializedNotice, StringComparison.Ordinal);
+            }
             Assert.Equal(16, providerHandler.Calls);
         }
         finally
