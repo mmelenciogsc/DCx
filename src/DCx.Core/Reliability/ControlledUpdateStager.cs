@@ -243,62 +243,201 @@ public sealed class ControlledUpdateStager(
         Directory.CreateDirectory(packages);
         RejectReparsePoint(packages);
         var stem = $"{manifest.Version}-{manifest.PackageSha256}";
-        var packagePath = Path.Combine(packages, stem + ".msix");
-        var signedManifestPath = Path.Combine(packages, stem + ".manifest.json");
+        var publishedDirectory = Path.Combine(packages, stem);
+        var packagePath = Path.Combine(publishedDirectory, "package.msix");
+        var signedManifestPath = Path.Combine(publishedDirectory, "manifest.json");
 
-        if (File.Exists(packagePath))
+        if (File.Exists(publishedDirectory))
         {
-            RejectReparsePoint(packagePath);
-            await VerifyPackageAsync(packagePath, manifest, cancellationToken).ConfigureAwait(false);
+            throw new ControlledUpdateException("update_storage_invalid");
         }
-        else
+
+        if (Directory.Exists(publishedDirectory))
         {
-            var temporary = Path.Combine(packages, $".{stem}.{Guid.NewGuid():N}.tmp.msix");
+            return await VerifyPublishedSetAsync(
+                    downloaded,
+                    publishedDirectory,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var incomingDirectory = Path.Combine(packages, $".incoming-{Guid.NewGuid():N}");
+        var incomingPackage = Path.Combine(incomingDirectory, "package.msix");
+        var incomingManifest = Path.Combine(incomingDirectory, "manifest.json");
+        try
+        {
+            Directory.CreateDirectory(incomingDirectory);
+            RejectReparsePoint(incomingDirectory);
+            long downloadedBytes;
+            await using (var output = new FileStream(
+                             incomingPackage,
+                             FileMode.CreateNew,
+                             FileAccess.Write,
+                             FileShare.None,
+                             64 * 1024,
+                             FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                downloadedBytes = await transport.DownloadPackageAsync(
+                        packageUri,
+                        output,
+                        manifest.PackageLength,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (downloadedBytes != manifest.PackageLength)
+            {
+                throw new ControlledUpdateException("update_package_integrity_invalid");
+            }
+
+            await VerifyPackageAsync(incomingPackage, manifest, cancellationToken)
+                .ConfigureAwait(false);
+            await WriteAtomicAsync(
+                    incomingManifest,
+                    downloaded.EnvelopeBytes,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await VerifyEnvelopeAsync(
+                    incomingManifest,
+                    downloaded.EnvelopeBytes,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
             try
             {
-                long downloadedBytes;
-                await using (var output = new FileStream(
-                                 temporary,
-                                 FileMode.CreateNew,
-                                 FileAccess.Write,
-                                 FileShare.None,
-                                 64 * 1024,
-                                 FileOptions.Asynchronous | FileOptions.WriteThrough))
-                {
-                    downloadedBytes = await transport.DownloadPackageAsync(
-                            packageUri,
-                            output,
-                            manifest.PackageLength,
-                            cancellationToken)
-                        .ConfigureAwait(false);
-                    await output.FlushAsync(cancellationToken).ConfigureAwait(false);
-                }
-
-                if (downloadedBytes != manifest.PackageLength)
-                {
-                    throw new ControlledUpdateException("update_package_integrity_invalid");
-                }
-
-                await VerifyPackageAsync(temporary, manifest, cancellationToken).ConfigureAwait(false);
-                File.Move(temporary, packagePath, overwrite: false);
+                Directory.Move(incomingDirectory, publishedDirectory);
             }
-            finally
+            catch (IOException)
             {
-                if (File.Exists(temporary)) File.Delete(temporary);
-            }
-        }
+                if (!Directory.Exists(publishedDirectory))
+                {
+                    throw new ControlledUpdateException("update_storage_invalid");
+                }
 
-        await WriteAtomicAsync(
+                return await VerifyPublishedSetAsync(
+                        downloaded,
+                        publishedDirectory,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            return await VerifyPublishedSetAsync(
+                    downloaded,
+                    publishedDirectory,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            CleanupIncomingDirectory(incomingDirectory);
+        }
+    }
+
+    private async Task<ControlledUpdateAdmission> VerifyPublishedSetAsync(
+        DownloadedReview downloaded,
+        string publishedDirectory,
+        CancellationToken cancellationToken)
+    {
+        RejectReparsePoint(publishedDirectory);
+        var packagePath = Path.Combine(publishedDirectory, "package.msix");
+        var signedManifestPath = Path.Combine(publishedDirectory, "manifest.json");
+        RequireExactSetEntries(publishedDirectory, packagePath, signedManifestPath);
+        await VerifyPackageAsync(packagePath, downloaded.Manifest, cancellationToken)
+            .ConfigureAwait(false);
+        await VerifyEnvelopeAsync(
                 signedManifestPath,
                 downloaded.EnvelopeBytes,
                 cancellationToken)
             .ConfigureAwait(false);
+        RequireExactSetEntries(publishedDirectory, packagePath, signedManifestPath);
         return new ControlledUpdateAdmission(
-            manifest.Version,
+            downloaded.Manifest.Version,
             packagePath,
             signedManifestPath,
-            manifest.PackageSha256,
-            manifest.PackageLength);
+            downloaded.Manifest.PackageSha256,
+            downloaded.Manifest.PackageLength);
+    }
+
+    private static void RequireExactSetEntries(
+        string publishedDirectory,
+        string packagePath,
+        string signedManifestPath)
+    {
+        if (!File.Exists(packagePath) || !File.Exists(signedManifestPath) ||
+            Directory.Exists(packagePath) || Directory.Exists(signedManifestPath))
+        {
+            throw new ControlledUpdateException("update_staged_set_invalid");
+        }
+
+        RejectReparsePoint(packagePath);
+        RejectReparsePoint(signedManifestPath);
+        var entries = Directory.EnumerateFileSystemEntries(publishedDirectory).ToArray();
+        if (entries.Length != 2 ||
+            !entries.Contains(packagePath, StringComparer.OrdinalIgnoreCase) ||
+            !entries.Contains(signedManifestPath, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new ControlledUpdateException("update_staged_set_invalid");
+        }
+    }
+
+    private static async Task VerifyEnvelopeAsync(
+        string path,
+        byte[] expected,
+        CancellationToken cancellationToken)
+    {
+        RejectReparsePoint(path);
+        await using var input = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            16 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        if (input.Length != expected.LongLength)
+        {
+            throw new ControlledUpdateException("update_staged_manifest_invalid");
+        }
+
+        var actualDigest = await SHA256.HashDataAsync(input, cancellationToken)
+            .ConfigureAwait(false);
+        var expectedDigest = SHA256.HashData(expected);
+        if (!CryptographicOperations.FixedTimeEquals(actualDigest, expectedDigest))
+        {
+            throw new ControlledUpdateException("update_staged_manifest_invalid");
+        }
+    }
+
+    private static void CleanupIncomingDirectory(string incomingDirectory)
+    {
+        if (!Directory.Exists(incomingDirectory)) return;
+        try
+        {
+            RejectReparsePoint(incomingDirectory);
+            foreach (var name in new[] { "package.msix", "manifest.json" })
+            {
+                var path = Path.Combine(incomingDirectory, name);
+                if (!File.Exists(path)) continue;
+                RejectReparsePoint(path);
+                File.Delete(path);
+            }
+
+            if (Directory.EnumerateFileSystemEntries(incomingDirectory).Any())
+            {
+                throw new ControlledUpdateException("update_storage_invalid");
+            }
+
+            Directory.Delete(incomingDirectory);
+        }
+        catch (ControlledUpdateException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            throw new ControlledUpdateException("update_storage_invalid");
+        }
     }
 
     private async Task VerifyPackageAsync(

@@ -742,6 +742,9 @@ try {
         $controlledUpdateEvidence.staged_file_count -ne 2 -or
         $controlledUpdateEvidence.staged_package_count -ne 1 -or
         $controlledUpdateEvidence.staged_signed_manifest_count -ne 1 -or
+        -not $controlledUpdateEvidence.atomic_published_set -or
+        $controlledUpdateEvidence.published_set_directories -ne 1 -or
+        $controlledUpdateEvidence.residual_incoming_directories -ne 0 -or
         $controlledUpdateEvidence.manifest_requests -ne 2 -or
         $controlledUpdateEvidence.package_requests -ne 1 -or
         $controlledUpdateEvidence.network_requests -ne 0 -or
@@ -820,6 +823,8 @@ try {
         controlled_update_unapproved_stage_denied_before_storage = [bool]$controlledUpdateEvidence.unapproved_stage_denied_before_storage
         controlled_update_approval_reset = [bool]$controlledUpdateEvidence.approval_reset_and_replay_denied
         controlled_update_staged_files = [int]$controlledUpdateEvidence.staged_file_count
+        controlled_update_atomic_published_set = [bool]$controlledUpdateEvidence.atomic_published_set
+        controlled_update_residual_incoming_directories = [int]$controlledUpdateEvidence.residual_incoming_directories
         controlled_update_manifest_requests = [int]$controlledUpdateEvidence.manifest_requests
         controlled_update_package_requests = [int]$controlledUpdateEvidence.package_requests
         controlled_update_network_requests = [int]$controlledUpdateEvidence.network_requests

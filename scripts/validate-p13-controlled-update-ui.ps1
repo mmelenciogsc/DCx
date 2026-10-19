@@ -219,9 +219,16 @@ try {
         throw "The exact staging approval remained reusable without a fresh review."
     }
     $stagedFiles = @(Get-ChildItem -LiteralPath $stagingRoot -File -Recurse)
+    $packagesRoot = Join-Path $stagingRoot "packages"
+    $publishedDirectories = @(Get-ChildItem -LiteralPath $packagesRoot -Directory)
+    $incomingDirectories = @($publishedDirectories | Where-Object Name -Like '.incoming-*')
     if ($stagedFiles.Count -ne 2 -or
         @($stagedFiles | Where-Object Extension -eq '.msix').Count -ne 1 -or
-        @($stagedFiles | Where-Object Name -like '*.manifest.json').Count -ne 1) {
+        @($stagedFiles | Where-Object Name -eq 'manifest.json').Count -ne 1 -or
+        $publishedDirectories.Count -ne 1 -or
+        $incomingDirectories.Count -ne 0 -or
+        @(Get-ChildItem -LiteralPath $packagesRoot -File).Count -ne 0 -or
+        @(Get-ChildItem -LiteralPath $publishedDirectories[0].FullName -File).Count -ne 2) {
         throw "The inert staging directory did not contain exactly one package and one signed manifest."
     }
     if (@(Get-ChildProcesses $fixtureProcess.Id).Count -ne 0) {
@@ -278,6 +285,9 @@ try {
         staged_file_count = $stagedFiles.Count
         staged_package_count = 1
         staged_signed_manifest_count = 1
+        atomic_published_set = $true
+        published_set_directories = $publishedDirectories.Count
+        residual_incoming_directories = $incomingDirectories.Count
         manifest_requests = 2
         package_requests = 1
         network_requests = 0
