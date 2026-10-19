@@ -2,7 +2,7 @@
 
 Status: draft only. The current automated decision is `NO_GO`; no pilot enrollment or telemetry collection is authorized.
 
-The implemented native readiness dashboard consumes the same read-only blocker policy as the JSON report. Its separate local privacy group can enable the existing aggregate-only store or stop and purge it after distinct unchecked approvals. A local administration preview can inspect strictly revalidated recent aggregate buckets and run a seven-scenario in-memory incident stop drill. Those settings and preview actions cannot activate a pilot or production, enroll a participant, collect an event by themselves, transmit data, publish content or initiate a payment.
+The implemented native readiness dashboard consumes the same read-only blocker policy as the JSON report. Its separate local privacy group can enable the existing aggregate-only store or stop and purge it after distinct unchecked approvals. A local administration preview can inspect strictly revalidated recent aggregate buckets, display four ordered future cohort stages and run a seven-scenario in-memory incident stop drill. It reports `blocked-not-enrolled`; cohort size and schedule are unapproved. Those settings and preview actions cannot activate a pilot or production, enroll a participant, collect an event by themselves, transmit data, publish content or initiate a payment.
 
 ## Entry conditions
 
@@ -14,10 +14,12 @@ The implemented native readiness dashboard consumes the same read-only blocker p
 
 ## Proposed stages
 
-1. Internal fixture-only cohort with local models/mocks and no contribution upload or payment.
-2. Small opt-in accessibility cohort with production side effects still disabled.
-3. Provider sandbox cohort only after each provider acceptance gate passes.
-4. Separately approved production pilot with reversible feature flags and payout/live contribution controls still independently gated.
+1. **Owner-supervised local rehearsal.** Named internal testers use generated or explicitly approved data. Entry requires closure of every critical/major blocker plus approved privacy, support, incident and provider policies and exact-cohort authorization. Exit requires reviewed aggregate/drill evidence and no unresolved major issue.
+2. **Assistive-technology cohort.** Named keyboard, JAWS, NVDA and Narrator participants. Entry requires approved rehearsal exit, completed human assistive-technology acceptance, and staffed accessible support/stop channels. Exit requires every accessibility failure triaged and consent withdrawal verified.
+3. **Limited opt-in cohort.** A bounded explicitly consenting group. Entry requires approved accessibility exit and approved cohort size, duration, retention, support and incident thresholds. Exit requires reconciled reliability, privacy, cost, synchronization and CARE evidence with no unresolved major issue.
+4. **Expanded release-candidate cohort.** A separately approved bounded group. Entry requires approved limited-cohort exit and a fresh owner `GO` with every provider/distribution gate closed. Final release review follows; production activation is still a separate explicit decision.
+
+These are read-only future stages, not enrollment. The current preview has zero enrollment controls, no roster or participant store, no approved count or schedule, and no owner approval record.
 
 Each participant receives an accessible scope statement, data disclosure, stop/withdraw control and support route. Enrollment is unchecked by default. Leaving the pilot stops future measurement and follows the approved retention/deletion policy.
 
