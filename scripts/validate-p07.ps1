@@ -74,6 +74,34 @@ function Get-EphemeralPort {
     finally { $listener.Stop() }
 }
 
+function Get-NormalizedImageDifference(
+    [string]$expectedPath,
+    [string]$actualPath,
+    [ValidateSet("RMSE", "AE")][string]$metric,
+    [string]$fuzz = "") {
+    $arguments = @("compare", "-metric", $metric)
+    if (-not [string]::IsNullOrWhiteSpace($fuzz)) {
+        $arguments += @("-fuzz", $fuzz)
+    }
+    $arguments += @($expectedPath, $actualPath, "null:")
+    $raw = (& $magick @arguments 2>&1 | Out-String).Trim()
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -notin @(0, 1)) {
+        throw "Independent image comparison failed with exit code $exitCode."
+    }
+    $match = [regex]::Match(
+        $raw,
+        '\((?<normalized>[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)\)',
+        [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+    if (-not $match.Success) {
+        throw "Independent image comparison did not return a normalized metric."
+    }
+    $LASTEXITCODE = 0
+    return [double]::Parse(
+        $match.Groups["normalized"].Value,
+        [Globalization.CultureInfo]::InvariantCulture)
+}
+
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 if (-not (Test-Path -LiteralPath $ffmpegLicense -PathType Leaf)) {
     throw "The installed FFmpeg candidate lacks its co-located complete license file."
@@ -583,7 +611,8 @@ try {
         throw "The flattened PDF lacks the required tagged structure metadata."
     }
     $pdfInspectionPath = Join-Path $runRoot "flattened-pdf-inspection.json"
-    & dotnet $pdfInspector $pdfExport $pdfInspectionPath
+    $pdfDecodedImageRoot = Join-Path $runRoot "flattened-pdf-decoded-images"
+    & dotnet $pdfInspector $pdfExport $pdfInspectionPath $pdfDecodedImageRoot
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $pdfInspectionPath -PathType Leaf)) {
         throw "The flattened PDF text/coordinate inspector failed."
     }
@@ -606,6 +635,50 @@ try {
     $placedAspect = $placedWidth / $placedHeight
     if ([Math]::Abs($sampleAspect - $placedAspect) -gt 0.03) {
         throw "The flattened PDF distorted the source-raster aspect ratio."
+    }
+    if ($pageBackground.decoded_png_available -ne $true -or
+        [int]$pageBackground.decoded_png_bytes -lt 64 -or
+        [int]$pageBackground.decoded_png_bytes -gt 24MB -or
+        [string]$pageBackground.decoded_png_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        [string]$pageBackground.decoded_png_file -cnotmatch '^page-[0-9]{4}-image-[0-9]{4}\.png$') {
+        throw "The flattened PDF source raster was not independently decodable."
+    }
+    $decodedBackgroundPath = Join-Path $pdfDecodedImageRoot ([string]$pageBackground.decoded_png_file)
+    if (-not (Test-Path -LiteralPath $decodedBackgroundPath -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $decodedBackgroundPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+            [string]$pageBackground.decoded_png_sha256) {
+        throw "The independently decoded PDF raster did not match its inspector digest."
+    }
+    $visualReferencePath = Join-Path $runRoot "flattened-pdf-visual-reference.png"
+    $visualNegativePath = Join-Path $runRoot "flattened-pdf-visual-negative-control.png"
+    $visualDimensions = "$([int]$pageBackground.width_samples)x$([int]$pageBackground.height_samples)!"
+    & $magick $scanImage -alpha remove -background white -flatten -colorspace sRGB `
+        -resize $visualDimensions -strip -depth 8 $visualReferencePath
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $visualReferencePath -PathType Leaf)) {
+        throw "The independent source-raster reference could not be produced."
+    }
+    $visualRmse = Get-NormalizedImageDifference $visualReferencePath $decodedBackgroundPath "RMSE"
+    $visualChangedPixelRatio = Get-NormalizedImageDifference `
+        $visualReferencePath $decodedBackgroundPath "AE" "2%"
+    if ($visualRmse -gt 0.03 -or $visualChangedPixelRatio -gt 0.03) {
+        throw "The flattened PDF failed independent source-raster pixel fidelity."
+    }
+    $negativeLeft = [int][Math]::Round([int]$pageBackground.width_samples * 0.27)
+    $negativeTop = [int][Math]::Round([int]$pageBackground.height_samples * 0.29)
+    $negativeRight = [int][Math]::Round([int]$pageBackground.width_samples * 0.73)
+    $negativeBottom = [int][Math]::Round([int]$pageBackground.height_samples * 0.71)
+    $negativeRectangle = "rectangle $negativeLeft,$negativeTop $negativeRight,$negativeBottom"
+    & $magick $visualReferencePath -fill "#000000" -draw $negativeRectangle `
+        $visualNegativePath
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $visualNegativePath -PathType Leaf)) {
+        throw "The independent visual negative control could not be produced."
+    }
+    $visualNegativeRmse = Get-NormalizedImageDifference `
+        $visualNegativePath $decodedBackgroundPath "RMSE"
+    $visualNegativeChangedPixelRatio = Get-NormalizedImageDifference `
+        $visualNegativePath $decodedBackgroundPath "AE" "2%"
+    if ($visualNegativeRmse -lt 0.30 -or $visualNegativeChangedPixelRatio -lt 0.10) {
+        throw "The independent pixel-fidelity gate did not reject its altered negative control."
     }
     $pdfWords = @($pdfInspection.pages[0].words)
     $dcxWord = @($pdfWords | Where-Object { $_.text -eq "DCX" }) | Select-Object -First 1
@@ -662,6 +735,12 @@ try {
         flattened_pdf_extracted_words = [int]$pdfInspection.word_count
         flattened_pdf_coordinate_validation = $true
         flattened_pdf_source_raster_aspect_preserved = $true
+        flattened_pdf_source_raster_pixel_fidelity = $true
+        flattened_pdf_visual_rmse = $visualRmse
+        flattened_pdf_visual_changed_pixel_ratio = $visualChangedPixelRatio
+        flattened_pdf_visual_negative_control_rmse = $visualNegativeRmse
+        flattened_pdf_visual_negative_control_changed_pixel_ratio = $visualNegativeChangedPixelRatio
+        flattened_pdf_decoded_raster_sha256 = [string]$pageBackground.decoded_png_sha256
         flattened_pdf_changed_source_denied = $true
         scanned_pdf_url_private_temporary_cleanup = $true
         local_vlm_cold_milliseconds = $localDescriptionClock.ElapsedMilliseconds
@@ -708,6 +787,7 @@ try {
     "Flattened PDF structure tree observed=$pdfHasStructureTree"
     "Flattened PDF marked-content metadata observed=$pdfHasMarkedContent"
     "Flattened PDF extracted text and reviewed coordinates=PASS"
+    "Flattened PDF independent source-raster pixel fidelity=PASS; RMSE=$visualRmse; changed-pixel ratio=$visualChangedPixelRatio; negative-control RMSE=$visualNegativeRmse"
     "Scanned PDF URL strict download and private temporary cleanup=PASS"
     "P07 content viewer UIA validation=PASS"
 }
