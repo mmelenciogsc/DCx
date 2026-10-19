@@ -1,6 +1,6 @@
 # ADR 0106: Persist opaque failed-payout holds and zero-authority decisions
 
-- Status: Accepted for the local authoritative sandbox; authenticated transport/UI composition and external notification remain blocked
+- Status: Accepted durable-state foundation; authenticated local composition is governed by ADR 0107 and external notification remains blocked
 - Date: 2026-10-19
 
 ## Context
@@ -24,5 +24,5 @@ Implementation commit `1e3596a` passes 135/135 finance tests and full Windows CI
 
 - The authoritative sandbox can now retain a privacy-minimized review identity and non-financial operator intent across restart without copying destination or contributor fields into the review/audit tables.
 - Random references and operator digests remain sensitive linkable pseudonymous data, not anonymity. A privileged database administrator can still drop triggers and rewrite/recompute the entire chain.
-- The source is in-process only. It is not wired to the authenticated loopback API or desktop, and it grants no production operator identity, MFA/TLS, role lifecycle, centralized external audit, notification delivery or payout authority.
+- ADR 0107 subsequently wires the source to a default-off authenticated loopback validation API and isolated desktop fixture. Normal desktop startup remains unavailable, and the composition grants no production operator identity, MFA/TLS, role lifecycle, centralized external audit, notification delivery or payout authority.
 - Provider-verified recipient eligibility, credentialed PayPal sandbox acceptance, approved accounting/notification policy and human JAWS/NVDA/Narrator acceptance remain blocked.
