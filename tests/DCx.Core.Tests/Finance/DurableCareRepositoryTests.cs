@@ -160,7 +160,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(14L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(15L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -177,7 +177,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         {
             await connection.OpenAsync();
             var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 15;";
+            command.CommandText = "PRAGMA user_version = 16;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -189,7 +189,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var versionCommand = reopened.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(15L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(16L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -249,7 +249,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await verifiedConnection.OpenAsync();
         var version = verifiedConnection.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(14L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(15L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -286,7 +286,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await verified.OpenAsync();
         var version = verified.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(14L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(15L, (long)(await version.ExecuteScalarAsync())!);
         var table = verified.CreateCommand();
         table.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'payout_item_remediations';";
         Assert.Equal(1L, (long)(await table.ExecuteScalarAsync())!);
@@ -1122,6 +1122,10 @@ public sealed class DurableCareRepositoryTests : IDisposable
         var firstAdjustment = Assert.Single(firstAdjustments);
         Assert.Equal("RETURNED", firstAdjustment.ToProviderStatus);
         Assert.Equal(500, firstAdjustment.AmountCents);
+        var returnedHold = Assert.Single(await reopened.ListFailedPayoutReviewsAsync());
+        Assert.Equal(500, returnedHold.AmountCents);
+        Assert.Equal(CareFailedPayoutReviewPolicy.Returned, returnedHold.FailureCode);
+        Assert.Equal(now.AddMinutes(1), returnedHold.FailedAtUtc);
         Assert.True(await reopened.ReconcilesAsync());
 
         var again = await coordinator.ReconcileTerminalAsync(now.AddMinutes(2), now.AddMinutes(2));
@@ -1244,6 +1248,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         Assert.Equal(0, await repository.BalanceAsync(LedgerAccount.ContributorPayable));
         Assert.Equal(-1200, await repository.BalanceAsync(LedgerAccount.Cash));
         Assert.True(await repository.ReconcilesAsync());
+        Assert.Empty(await repository.ListFailedPayoutReviewsAsync());
 
         var reopened = await DurableCareRepository.OpenAsync(root);
         var lineage = Assert.Single(await reopened.GetPayoutItemRemediationsAsync(source.BatchId));
@@ -1402,6 +1407,176 @@ public sealed class DurableCareRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task FailedPayoutHoldReview_ProjectsMinimizedStateAndPersistsZeroAuthorityDisposition()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        var payout = await CompletePartiallyFailedPayoutAsync(
+            repository, "batch:hold-review-source");
+
+        var review = Assert.Single(await repository.ListFailedPayoutReviewsAsync());
+        Assert.Equal(payout.CarePeriodId, review.CarePeriodId);
+        Assert.Equal(700, review.AmountCents);
+        Assert.Equal(CareFailedPayoutReviewPolicy.ProviderRejected, review.FailureCode);
+        Assert.Equal(CareFailedPayoutReviewPolicy.FailedItemHold, review.HoldCode);
+        Assert.Equal(CareFailedPayoutReviewPolicy.NoticeNotReady, review.NoticeCode);
+        Assert.Equal(CareFailedPayoutReviewPolicy.Unreviewed, review.DispositionCode);
+        Assert.Equal(32, review.ReviewId.Length);
+        Assert.Equal(64, review.ReviewSha256.Length);
+        var json = JsonSerializer.Serialize(review);
+        Assert.DoesNotContain("batch:hold-review-source", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("contributor:", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("personal.example", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("snapshot:", json, StringComparison.Ordinal);
+
+        var source = new DurableCareFailedPayoutReviewSource(
+            repository,
+            new string('a', 64),
+            () => now.AddMinutes(1));
+        var request = new CareFailedPayoutDispositionRequest(
+            review.ReviewId,
+            review.ReviewSha256,
+            CareFailedPayoutReviewPolicy.RequestRecipientUpdate,
+            ExplicitlyApproved: true);
+        var result = await source.RecordFailedPayoutDispositionAsync(request);
+        CareFailedPayoutReviewPolicy.RequireResult(result, request);
+        Assert.Equal(0, result.ProviderCalls);
+        Assert.Equal(0, result.FinancialMutations);
+        Assert.Equal(0, result.PayoutAttempts);
+        Assert.Equal(0, result.NotificationTransports);
+
+        var updated = Assert.Single(await source.ListFailedPayoutReviewsAsync());
+        Assert.Equal(
+            CareFailedPayoutReviewPolicy.RequestRecipientUpdate,
+            updated.DispositionCode);
+        Assert.Equal(
+            CareFailedPayoutReviewPolicy.LocalDashboardNoticeReady,
+            updated.NoticeCode);
+        Assert.NotEqual(review.ReviewSha256, updated.ReviewSha256);
+        var audit = Assert.Single(await repository.GetFailedPayoutDispositionAuditAsync());
+        Assert.Equal(new string('a', 64), audit.OperatorPseudonymSha256);
+        Assert.Equal(request.ReviewedSha256, audit.ReviewedSha256);
+
+        var reopened = await DurableCareRepository.OpenAsync(root);
+        var persisted = Assert.Single(await reopened.ListFailedPayoutReviewsAsync());
+        Assert.Equal(updated, persisted);
+        Assert.Equal(-700, await reopened.BalanceAsync(LedgerAccount.ContributorPayable));
+        Assert.Equal(-500, await reopened.BalanceAsync(LedgerAccount.Cash));
+        Assert.True(await reopened.ReconcilesAsync());
+    }
+
+    [Fact]
+    public async Task FailedPayoutHoldReview_SerializesReplayAndRejectsConflictAndTamper()
+    {
+        var firstRepository = await DurableCareRepository.OpenAsync(root);
+        _ = await CompletePartiallyFailedPayoutAsync(
+            firstRepository, "batch:hold-review-concurrency");
+        var review = Assert.Single(await firstRepository.ListFailedPayoutReviewsAsync());
+        var secondRepository = await DurableCareRepository.OpenAsync(root);
+        var request = new CareFailedPayoutDispositionRequest(
+            review.ReviewId,
+            review.ReviewSha256,
+            CareFailedPayoutReviewPolicy.RetainHold,
+            ExplicitlyApproved: true);
+        var firstSource = new DurableCareFailedPayoutReviewSource(
+            firstRepository, new string('b', 64), () => now.AddMinutes(1));
+        var secondSource = new DurableCareFailedPayoutReviewSource(
+            secondRepository, new string('b', 64), () => now.AddMinutes(1));
+
+        var results = await Task.WhenAll(
+            firstSource.RecordFailedPayoutDispositionAsync(request),
+            secondSource.RecordFailedPayoutDispositionAsync(request));
+        Assert.Equal(results[0], results[1]);
+        Assert.Single(await firstRepository.GetFailedPayoutDispositionAuditAsync());
+
+        var updated = Assert.Single(await firstRepository.ListFailedPayoutReviewsAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            firstSource.RecordFailedPayoutDispositionAsync(request with
+            {
+                ReviewedSha256 = updated.ReviewSha256,
+                DispositionCode = CareFailedPayoutReviewPolicy.CancelRetryIntent,
+            }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            firstSource.RecordFailedPayoutDispositionAsync(request with
+            {
+                ReviewedSha256 = new string('0', 64),
+            }));
+
+        var databasePath = Path.Combine(root, "care-ledger.sqlite3");
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Pooling = false,
+        }.ToString();
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText =
+                "UPDATE care_failed_payout_dispositions SET disposition_code = 'cancel_retry_intent';";
+            await Assert.ThrowsAsync<SqliteException>(() => command.ExecuteNonQueryAsync());
+            command.CommandText =
+                "DELETE FROM care_failed_payout_holds WHERE review_id = $review;";
+            command.Parameters.AddWithValue("$review", review.ReviewId);
+            await Assert.ThrowsAsync<SqliteException>(() => command.ExecuteNonQueryAsync());
+            command.Parameters.Clear();
+            command.CommandText = """
+                DROP TRIGGER care_failed_payout_dispositions_no_update;
+                UPDATE care_failed_payout_dispositions
+                SET record_sha256 = $tampered;
+                """;
+            command.Parameters.AddWithValue("$tampered", new string('f', 64));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            firstRepository.GetFailedPayoutDispositionAuditAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            firstRepository.ListFailedPayoutReviewsAsync());
+    }
+
+    [Fact]
+    public async Task SchemaFourteen_BackfillsOpaqueFailedPayoutHoldReferences()
+    {
+        var repository = await DurableCareRepository.OpenAsync(root);
+        _ = await CompletePartiallyFailedPayoutAsync(
+            repository, "batch:hold-review-migration");
+        var original = Assert.Single(await repository.ListFailedPayoutReviewsAsync());
+        var databasePath = Path.Combine(root, "care-ledger.sqlite3");
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Pooling = false,
+        }.ToString();
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                DROP TRIGGER care_failed_payout_dispositions_no_delete;
+                DROP TRIGGER care_failed_payout_dispositions_no_update;
+                DROP TRIGGER care_failed_payout_holds_no_delete;
+                DROP TRIGGER care_failed_payout_holds_no_update;
+                DROP TABLE care_failed_payout_dispositions;
+                DROP TABLE care_failed_payout_holds;
+                PRAGMA user_version = 14;
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var migrated = await DurableCareRepository.OpenAsync(root);
+        var review = Assert.Single(await migrated.ListFailedPayoutReviewsAsync());
+        Assert.NotEqual(original.ReviewId, review.ReviewId);
+        Assert.Equal(32, review.ReviewId.Length);
+        Assert.Equal(700, review.AmountCents);
+        Assert.Equal(CareFailedPayoutReviewPolicy.ProviderRejected, review.FailureCode);
+        await using var reopened = new SqliteConnection(connectionString);
+        await reopened.OpenAsync();
+        var version = reopened.CreateCommand();
+        version.CommandText = "PRAGMA user_version;";
+        Assert.Equal(15L, (long)(await version.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
     public async Task SchemaTwelve_UnboundTerminalPayoutRemainsReadableButNewReservationsRequireAllocation()
     {
         var repository = await DurableCareRepository.OpenAsync(root);
@@ -1462,7 +1637,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await verified.OpenAsync();
         var version = verified.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(14L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(15L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -1574,7 +1749,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await verified.OpenAsync();
         var version = verified.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(14L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(15L, (long)(await version.ExecuteScalarAsync())!);
         var closeReview = verified.CreateCommand();
         closeReview.CommandText = """
             SELECT close_review_sha256, close_approval_sha256,
@@ -1641,7 +1816,7 @@ public sealed class DurableCareRepositoryTests : IDisposable
         await reopened.OpenAsync();
         var version = reopened.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(14L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(15L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     public void Dispose()

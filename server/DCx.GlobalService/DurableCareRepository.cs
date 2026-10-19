@@ -467,6 +467,17 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                 command.Parameters.AddWithValue("$succeeded", itemResult.Succeeded ? 1 : 0);
                 command.Parameters.AddWithValue("$provider", itemResult.ProviderStatus);
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                if (!itemResult.Succeeded)
+                {
+                    await CreateFailedPayoutHoldReferenceAsync(
+                            connection,
+                            (SqliteTransaction)transaction,
+                            preview.BatchId,
+                            index,
+                            now.ToUniversalTime(),
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
             }
 
             if (paidCents > 0)
@@ -839,6 +850,14 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
                 command.Parameters.AddWithValue("$ledger_event", ledgerEventId);
                 command.Parameters.AddWithValue("$occurred", now.ToUniversalTime().ToString("O"));
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                await CreateFailedPayoutHoldReferenceAsync(
+                        connection,
+                        sqliteTransaction,
+                        preview.BatchId,
+                        ordinal,
+                        now.ToUniversalTime(),
+                        cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             command.Parameters.Clear();
@@ -1167,7 +1186,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         command.CommandText = "PRAGMA user_version;";
         var schemaVersion = Convert.ToInt32(
             await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
-        if (schemaVersion > 14)
+        if (schemaVersion > 15)
         {
             throw new InvalidOperationException("The CARE ledger schema is newer than this application.");
         }
@@ -1631,6 +1650,62 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             BEGIN
                 SELECT RAISE(ABORT, 'CARE blocked-case dispositions are append-only');
             END;
+            CREATE TABLE IF NOT EXISTS care_failed_payout_holds(
+                source_batch_id TEXT NOT NULL,
+                source_ordinal INTEGER NOT NULL CHECK(source_ordinal >= 0),
+                review_id TEXT NOT NULL UNIQUE CHECK(
+                    length(review_id) = 32 AND
+                    review_id = lower(review_id) AND
+                    review_id NOT GLOB '*[^0-9a-f]*'),
+                created_utc TEXT NOT NULL,
+                PRIMARY KEY(source_batch_id, source_ordinal),
+                FOREIGN KEY(source_batch_id, source_ordinal)
+                    REFERENCES payout_item_results(batch_id, ordinal)
+            );
+            CREATE TABLE IF NOT EXISTS care_failed_payout_dispositions(
+                sequence INTEGER PRIMARY KEY CHECK(sequence > 0),
+                review_id TEXT NOT NULL UNIQUE,
+                occurred_utc TEXT NOT NULL,
+                operator_pseudonym_sha256 TEXT NOT NULL CHECK(
+                    length(operator_pseudonym_sha256) = 64 AND
+                    operator_pseudonym_sha256 = lower(operator_pseudonym_sha256) AND
+                    operator_pseudonym_sha256 NOT GLOB '*[^0-9a-f]*'),
+                disposition_code TEXT NOT NULL CHECK(disposition_code IN (
+                    'retain_hold', 'request_recipient_update', 'cancel_retry_intent')),
+                reviewed_sha256 TEXT NOT NULL CHECK(
+                    length(reviewed_sha256) = 64 AND
+                    reviewed_sha256 = lower(reviewed_sha256) AND
+                    reviewed_sha256 NOT GLOB '*[^0-9a-f]*'),
+                previous_record_sha256 TEXT NOT NULL CHECK(
+                    length(previous_record_sha256) = 64 AND
+                    previous_record_sha256 = lower(previous_record_sha256) AND
+                    previous_record_sha256 NOT GLOB '*[^0-9a-f]*'),
+                record_sha256 TEXT NOT NULL UNIQUE CHECK(
+                    length(record_sha256) = 64 AND
+                    record_sha256 = lower(record_sha256) AND
+                    record_sha256 NOT GLOB '*[^0-9a-f]*'),
+                FOREIGN KEY(review_id) REFERENCES care_failed_payout_holds(review_id)
+            );
+            CREATE TRIGGER IF NOT EXISTS care_failed_payout_holds_no_update
+            BEFORE UPDATE ON care_failed_payout_holds
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE failed-payout hold bindings are immutable');
+            END;
+            CREATE TRIGGER IF NOT EXISTS care_failed_payout_holds_no_delete
+            BEFORE DELETE ON care_failed_payout_holds
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE failed-payout hold bindings are immutable');
+            END;
+            CREATE TRIGGER IF NOT EXISTS care_failed_payout_dispositions_no_update
+            BEFORE UPDATE ON care_failed_payout_dispositions
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE failed-payout dispositions are append-only');
+            END;
+            CREATE TRIGGER IF NOT EXISTS care_failed_payout_dispositions_no_delete
+            BEFORE DELETE ON care_failed_payout_dispositions
+            BEGIN
+                SELECT RAISE(ABORT, 'CARE failed-payout dispositions are append-only');
+            END;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(
@@ -1666,6 +1741,8 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
         await BackfillBlockedCaseReferencesAsync(
                 connection, DateTimeOffset.UtcNow, cancellationToken)
             .ConfigureAwait(false);
+        await BackfillFailedPayoutHoldReferencesAsync(connection, cancellationToken)
+            .ConfigureAwait(false);
         command.CommandText = """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_payout_batches_provider_batch_id
             ON payout_batches(provider_batch_id)
@@ -1674,7 +1751,7 @@ public sealed partial class DurableCareRepository : IPayPalSandboxPayoutReferenc
             ON webhook_event_quarantine(state, next_attempt_utc, occurred_utc, event_id);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        command.CommandText = "PRAGMA user_version = 14;";
+        command.CommandText = "PRAGMA user_version = 15;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 

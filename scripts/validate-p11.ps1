@@ -39,6 +39,9 @@ try {
         "DCx.Core.Tests.Finance.DurableCareRepositoryTests.PayoutCompletion_RevalidatesLiabilityBeforeFinancialMutation",
         "DCx.Core.Tests.Finance.DurableCareRepositoryTests.SchemaTwelve_UnboundTerminalPayoutRemainsReadableButNewReservationsRequireAllocation",
         "DCx.Core.Tests.Finance.DurableCareRepositoryTests.SchemaThirteen_UnreviewedCarePeriodRequiresFreshExactCloseApproval",
+        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.SchemaFourteen_BackfillsOpaqueFailedPayoutHoldReferences",
+        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.FailedPayoutHoldReview_ProjectsMinimizedStateAndPersistsZeroAuthorityDisposition",
+        "DCx.Core.Tests.Finance.DurableCareRepositoryTests.FailedPayoutHoldReview_SerializesReplayAndRejectsConflictAndTamper",
         "DCx.Core.Tests.Finance.CareContributorDashboardTests.Contract_IsBoundedAndExcludesProviderRecipientAndAccountFields",
         "DCx.Core.Tests.Finance.CareContributorDashboardTests.Policy_AcceptsOrderedHeldEligiblePendingPartialAndPaidHistory",
         "DCx.Core.Tests.Finance.CareContributorDashboardTests.UnavailableSource_DoesNotInventContributorOrPeriodState",
@@ -82,7 +85,7 @@ try {
     "Qualified attribution split and Net 60=PASS"
     "Owner approval duplicate payout and live-disable gates=PASS"
     "Durable payout reservation terminal state and restart reconciliation=PASS"
-    "Schema-v13 registered CARE allocation migration and schema-v14 exact close-review promotion=PASS"
+    "Schema-v13 registered CARE allocation migration, schema-v14 exact close-review promotion and schema-v15 opaque failed-payout holds=PASS"
     "CARE period exact review approval expiry tamper replay conflict and atomic ledger accrual=PASS"
     "Contributor period amount substitution and held-allocation denials=PASS"
     "Outstanding contributor-payable liability required before provider send=PASS"
@@ -110,6 +113,7 @@ try {
     "Blocked-case disposition provider calls=0 financial mutations=0"
     "Accessible failed-payout hold review and local contributor notice=PASS"
     "Failed-payout decision provider calls=0 financial mutations=0 payout attempts=0 notification transports=0"
+    "Durable failed-payout opaque-reference migration and chained decision audit=PASS"
     "Quarantine reprocessing provider calls=0"
     "Malformed/unverified event denial before ledger mutation=PASS"
     "Stable PayPal request ID and sender batch retry fixture=PASS"
