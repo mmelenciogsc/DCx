@@ -1487,14 +1487,15 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
     {
         try
         {
-            var executable = Environment.ProcessPath
-                ?? throw new InvalidOperationException("The DCx executable path is unavailable.");
-            Process.Start(new ProcessStartInfo(executable, "--recovery") { UseShellExecute = true });
-            SetStatus("Backup and recovery opened separately. Close the main DCx window before starting an operation.");
+            var result = new WindowsBackupRecoveryHandoff().Open();
+            BackupRecoveryHandoffResultPolicy.Require(result);
+            SetStatus(
+                "Backup and recovery opened separately. No backup was created and DCx was not closed. Close the main DCx window before starting an operation.");
         }
-        catch (Exception exception)
+        catch
         {
-            SetStatus($"Backup and recovery could not open. {exception.Message}");
+            SetStatus(
+                "Backup and recovery could not open safely. No backup was created and DCx was not closed.");
         }
     }
 

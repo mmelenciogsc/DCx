@@ -86,10 +86,19 @@
                 </CheckBox>
 
                 <WrapPanel Margin="0,18,0,0">
+                    <Button x:Name="OpenBackupRecoveryButton"
+                            MinWidth="220"
+                            MinHeight="38"
+                            Margin="0,0,8,8"
+                            Content="Open backup and _recovery"
+                            AutomationProperties.AutomationId="PackageRemovalOpenRecoveryButton"
+                            AutomationProperties.Name="Open backup and recovery separately"
+                            AutomationProperties.HelpText="Starts a separate local DCx recovery window. It does not create a backup, close DCx, or start uninstall."
+                            Click="OnOpenBackupRecoveryClick" />
                     <Button x:Name="ExecuteButton"
                             MinWidth="220"
                             MinHeight="38"
-                            Margin="0,0,8,0"
+                            Margin="0,0,8,8"
                             Content="_Validate uninstall review"
                             AutomationProperties.AutomationId="ExecutePackageRemovalButton"
                             AutomationProperties.Name="Validate the uninstall review without removal"
@@ -98,6 +107,7 @@
                     <Button x:Name="CloseButton"
                             MinWidth="120"
                             MinHeight="38"
+                            Margin="0,0,0,8"
                             Content="C_lose"
                             AutomationProperties.AutomationId="ClosePackageRemovalButton"
                             AutomationProperties.Name="Close uninstall review"

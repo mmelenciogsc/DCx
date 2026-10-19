@@ -111,6 +111,7 @@ $previousOfflineStartup = $env:DCX_OFFLINE_STARTUP
 $deniedProcess = $null
 $fixtureProcess = $null
 $normalProcess = $null
+$normalRecoveryProcess = $null
 try {
     $env:DCX_PACKAGE_REMOVAL_FIXTURE = $null
     $deniedProcess = Start-Dcx @("--package-removal-fixture")
@@ -129,6 +130,7 @@ try {
     $details = Wait-For { Find-ById $window "PackageRemovalReviewDetails" } "The exact uninstall review was not exposed."
     $consequences = Wait-For { Find-ById $window "PackageRemovalConsequencesApproval" } "The consequences acknowledgment was not exposed."
     $backup = Wait-For { Find-ById $window "PackageRemovalBackupApproval" } "The backup acknowledgment was not exposed."
+    $openRecovery = Wait-For { Find-ById $window "PackageRemovalOpenRecoveryButton" } "The backup and recovery handoff was not exposed."
     $execute = Wait-For { Find-ById $window "ExecutePackageRemovalButton" } "The validation action was not exposed."
     $close = Wait-For { Find-ById $window "ClosePackageRemovalButton" } "The close action was not exposed."
     $status = Wait-For { Find-ById $window "PackageRemovalStatus" } "The assertive uninstall status was not exposed."
@@ -173,11 +175,12 @@ try {
     $accessKeys = @(
         $consequences.Current.AccessKey,
         $backup.Current.AccessKey,
+        $openRecovery.Current.AccessKey,
         $execute.Current.AccessKey,
         $close.Current.AccessKey)
     if (@($accessKeys | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -ne 0 -or
-        @($accessKeys | Select-Object -Unique).Count -ne 4) {
-        throw "The uninstall workflow did not expose four distinct access keys."
+        @($accessKeys | Select-Object -Unique).Count -ne 5) {
+        throw "The uninstall workflow did not expose five distinct access keys."
     }
 
     Invoke-WithKeyboardFocus $execute "The uninstall validation action"
@@ -228,11 +231,12 @@ try {
     $normalBoundary = Wait-For { Find-ById $normalRemovalWindow "PackageRemovalBoundary" } "The normal uninstall boundary was not exposed."
     $normalConsequences = Find-ById $normalRemovalWindow "PackageRemovalConsequencesApproval"
     $normalBackup = Find-ById $normalRemovalWindow "PackageRemovalBackupApproval"
+    $normalOpenRecovery = Find-ById $normalRemovalWindow "PackageRemovalOpenRecoveryButton"
     $normalExecute = Find-ById $normalRemovalWindow "ExecutePackageRemovalButton"
     $normalStatus = Find-ById $normalRemovalWindow "PackageRemovalStatus"
     if ($normalBoundary.Current.Name -notlike "DCx is not running with Windows package identity*unavailable*" -or
         $normalConsequences.Current.IsEnabled -or $normalBackup.Current.IsEnabled -or
-        $normalExecute.Current.IsEnabled -or
+        $normalExecute.Current.IsEnabled -or -not $normalOpenRecovery.Current.IsEnabled -or
         $normalStatus.Current.Name -ne "Uninstall is unavailable in this build. PackageManager invocations 0. Application close requests 0. Production actions 0.") {
         throw "The normal unpackaged uninstall surface did not fail closed."
     }
@@ -244,6 +248,39 @@ try {
     if ($unexpectedChildren.Count -ne 0) {
         throw "The normal uninstall review started an unexpected non-WebView child process."
     }
+
+    $handoffChildrenBefore = @(Get-ChildProcesses $normalProcess.Id)
+    $handoffChildIdsBefore = @($handoffChildrenBefore | ForEach-Object { [int]$_.ProcessId })
+    Invoke-WithKeyboardFocus $normalOpenRecovery "The backup and recovery handoff"
+    $handoffStatus = "Backup and recovery opened separately. No backup was created, DCx was not closed, and uninstall was not started. Close the main DCx window before creating a backup."
+    $null = Wait-For { $normalStatus.Current.Name -eq $handoffStatus } "The backup handoff did not report its exact zero-action result."
+    $recoveryChild = Wait-For {
+        @(Get-ChildProcesses $normalProcess.Id | Where-Object {
+            $handoffChildIdsBefore -notcontains [int]$_.ProcessId -and
+            $_.Name.Equals([IO.Path]::GetFileName($executable), [StringComparison]::OrdinalIgnoreCase)
+        }) | Select-Object -First 1
+    } "The exact child DCx recovery process did not start."
+    if (-not [string]::Equals(
+            [IO.Path]::GetFullPath([string]$recoveryChild.ExecutablePath),
+            $executable,
+            [StringComparison]::OrdinalIgnoreCase) -or
+        ([string]$recoveryChild.CommandLine -ne ('"' + $executable + '" --recovery') -and
+         [string]$recoveryChild.CommandLine -ne ($executable + ' --recovery'))) {
+        throw "The backup handoff child did not use the exact current executable and recovery argument."
+    }
+    $normalRecoveryProcess = [Diagnostics.Process]::GetProcessById([int]$recoveryChild.ProcessId)
+    $recoveryWindow = Wait-For {
+        Find-WindowByProcessAndId $normalRecoveryProcess.Id "RecoveryWindow"
+    } "The separate backup and recovery window did not appear."
+    $recoveryPath = Wait-For { Find-ById $recoveryWindow "RecoveryBackupPath" } "The backup path control was not exposed."
+    $null = Wait-For { $recoveryPath.Current.HasKeyboardFocus } "The separate recovery window did not receive its defined initial focus."
+    if ($normalProcess.HasExited -or $normalRecoveryProcess.HasExited -or
+        $recoveryWindow.Current.Name -ne "DCx backup and recovery window") {
+        throw "The backup handoff closed DCx or did not open the exact recovery window."
+    }
+    Stop-Dcx $normalRecoveryProcess
+    $normalRecoveryProcess = $null
+
     (Find-ById $normalRemovalWindow "ClosePackageRemovalButton").GetCurrentPattern(
         [Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For {
@@ -275,6 +312,16 @@ try {
         normal_product_source = "unavailable"
         normal_product_availability = "not_packaged"
         normal_product_controls_disabled = $true
+        normal_product_recovery_handoff_enabled = $true
+        normal_product_recovery_process_starts = 1
+        normal_product_recovery_targets_current_executable = $true
+        normal_product_recovery_exact_argument = $true
+        normal_product_recovery_shell_execution = $false
+        normal_product_recovery_backup_created = $false
+        normal_product_recovery_application_close_requests = 0
+        normal_product_recovery_installer_processes_started = 0
+        normal_product_recovery_elevation_requests = 0
+        normal_product_recovery_production_actions = 0
         normal_product_package_manager_invocations = 0
         normal_product_application_close_requests = 0
         normal_product_production_actions = 0
@@ -286,6 +333,7 @@ try {
     "P13 two default-off acknowledgments and denial focus=PASS"
     "P13 one-use uninstall validation no-op=PASS"
     "P13 package-removal PackageManager=0 child=0 close=0 elevation=0 production=0"
+    "P13 exact backup/recovery handoff process=1; backup=0 close=0 installer=0 elevation=0 production=0"
     "P13 normal package-removal source=unavailable; availability=not_packaged"
     "P13 package-removal evidence=$evidencePath"
     [pscustomobject]$evidence
@@ -293,6 +341,7 @@ try {
 finally {
     Stop-Dcx $deniedProcess
     Stop-Dcx $fixtureProcess
+    Stop-Dcx $normalRecoveryProcess
     Stop-Dcx $normalProcess
     $env:DCX_DATA_ROOT = $previousDataRoot
     $env:DCX_PACKAGE_REMOVAL_FIXTURE = $previousFixture

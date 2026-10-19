@@ -168,6 +168,23 @@ public partial class PackageRemovalWindow : Window
         }
     }
 
+    private void OnOpenBackupRecoveryClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var result = new WindowsBackupRecoveryHandoff().Open();
+            BackupRecoveryHandoffResultPolicy.Require(result);
+            SetStatus(
+                "Backup and recovery opened separately. No backup was created, DCx was not closed, and uninstall was not started. Close the main DCx window before creating a backup.");
+        }
+        catch
+        {
+            SetStatus(
+                "Backup and recovery could not open safely. No backup was created, DCx was not closed, and uninstall was not started.");
+            StatusText.Focus();
+        }
+    }
+
     private static string FormatReview(PackageRemovalReview review) => string.Join(
         Environment.NewLine,
         $"Requested operation: {PackageRemovalReviewPolicy.OperationKind}",
@@ -198,6 +215,7 @@ public partial class PackageRemovalWindow : Window
             workflow.Availability == PackageRemovalAvailability.Available;
         ExecuteButton.IsEnabled = !value && !completed &&
             workflow.Availability == PackageRemovalAvailability.Available;
+        OpenBackupRecoveryButton.IsEnabled = !value;
         CloseButton.IsEnabled = !value;
     }
 

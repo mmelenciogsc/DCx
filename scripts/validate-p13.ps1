@@ -810,8 +810,8 @@ try {
         -not $packageRemovalEvidence.heading_keyboard_focus -or
         -not $packageRemovalEvidence.exact_review_exposed -or
         $packageRemovalEvidence.exact_review_digest_count -ne 1 -or
-        @($packageRemovalEvidence.distinct_access_keys).Count -ne 4 -or
-        @($packageRemovalEvidence.distinct_access_keys | Select-Object -Unique).Count -ne 4 -or
+        @($packageRemovalEvidence.distinct_access_keys).Count -ne 5 -or
+        @($packageRemovalEvidence.distinct_access_keys | Select-Object -Unique).Count -ne 5 -or
         -not $packageRemovalEvidence.consequences_acknowledgment_initially_unchecked -or
         -not $packageRemovalEvidence.backup_acknowledgment_initially_unchecked -or
         -not $packageRemovalEvidence.denial_invocations_originated_with_keyboard_focus -or
@@ -830,6 +830,16 @@ try {
         $packageRemovalEvidence.normal_product_source -ne "unavailable" -or
         $packageRemovalEvidence.normal_product_availability -ne "not_packaged" -or
         -not $packageRemovalEvidence.normal_product_controls_disabled -or
+        -not $packageRemovalEvidence.normal_product_recovery_handoff_enabled -or
+        $packageRemovalEvidence.normal_product_recovery_process_starts -ne 1 -or
+        -not $packageRemovalEvidence.normal_product_recovery_targets_current_executable -or
+        -not $packageRemovalEvidence.normal_product_recovery_exact_argument -or
+        $packageRemovalEvidence.normal_product_recovery_shell_execution -or
+        $packageRemovalEvidence.normal_product_recovery_backup_created -or
+        $packageRemovalEvidence.normal_product_recovery_application_close_requests -ne 0 -or
+        $packageRemovalEvidence.normal_product_recovery_installer_processes_started -ne 0 -or
+        $packageRemovalEvidence.normal_product_recovery_elevation_requests -ne 0 -or
+        $packageRemovalEvidence.normal_product_recovery_production_actions -ne 0 -or
         $packageRemovalEvidence.normal_product_package_manager_invocations -ne 0 -or
         $packageRemovalEvidence.normal_product_application_close_requests -ne 0 -or
         $packageRemovalEvidence.normal_product_production_actions -ne 0) {
@@ -953,6 +963,16 @@ try {
         package_removal_normal_source = [string]$packageRemovalEvidence.normal_product_source
         package_removal_normal_availability = [string]$packageRemovalEvidence.normal_product_availability
         package_removal_normal_controls_disabled = [bool]$packageRemovalEvidence.normal_product_controls_disabled
+        package_removal_recovery_handoff_enabled = [bool]$packageRemovalEvidence.normal_product_recovery_handoff_enabled
+        package_removal_recovery_process_starts = [int]$packageRemovalEvidence.normal_product_recovery_process_starts
+        package_removal_recovery_targets_current_executable = [bool]$packageRemovalEvidence.normal_product_recovery_targets_current_executable
+        package_removal_recovery_exact_argument = [bool]$packageRemovalEvidence.normal_product_recovery_exact_argument
+        package_removal_recovery_shell_execution = [bool]$packageRemovalEvidence.normal_product_recovery_shell_execution
+        package_removal_recovery_backup_created = [bool]$packageRemovalEvidence.normal_product_recovery_backup_created
+        package_removal_recovery_application_close_requests = [int]$packageRemovalEvidence.normal_product_recovery_application_close_requests
+        package_removal_recovery_installer_processes = [int]$packageRemovalEvidence.normal_product_recovery_installer_processes_started
+        package_removal_recovery_elevation_requests = [int]$packageRemovalEvidence.normal_product_recovery_elevation_requests
+        package_removal_recovery_production_actions = [int]$packageRemovalEvidence.normal_product_recovery_production_actions
         sbom_components = $components.Count
         license_records = $licenseInventory.Count
         published_secret_scan_files = $publishedSecretScanFiles.Count
@@ -1001,6 +1021,7 @@ try {
     "Controlled-update network=0 installer=0 elevation=0 activation=0 restart=0 production=0"
     "Accessible exact current-package uninstall review and two acknowledgments=PASS"
     "Accessible one-use uninstall validation no-op=PASS"
+    "Accessible exact self-process backup/recovery handoff=PASS (process=1; backup=0 close=0 installer=0 elevation=0 production=0)"
     "Normal package-removal source=unavailable; availability=not_packaged"
     "Package removal PackageManager=0 child=0 close=0 elevation=0 production=0"
     "CycloneDX components=$($components.Count)"
