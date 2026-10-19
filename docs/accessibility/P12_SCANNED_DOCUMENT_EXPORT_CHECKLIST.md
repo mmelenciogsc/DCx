@@ -23,10 +23,11 @@ Automated Windows UIA status does not substitute for a human screen-reader or do
 - [ ] Keyboard-only review of OCR blocks, semantic repair and repeated export/failure recovery.
 - [ ] Visual comparison of source PDF geometry and repaired output.
 
-## Unimplemented authoritative scenario
+## Tagged flattened PDF extension
 
-- [ ] Admit an approved URL, download the inaccessible PDF safely, and retain source identity/provenance.
-- [ ] Produce and validate the required fillable or flattened saved PDF, including coordinates, extracted text and accessibility structure.
+- [x] Admit a strictly bounded URL and delete the private downloaded temporary after wizard close.
+- [x] Produce an atomically replaced tagged flattened textual PDF with extracted-text, coordinate, `/StructTreeRoot` and `/MarkInfo` evidence.
+- [ ] Preserve scanned raster/non-text visual fidelity or provide fillable AcroForm fields.
 - [ ] Pass an approved PDF/UA/accessibility validator and human Adobe Reader/assistive-technology review.
 
-Current HTML/DOCX success must not be cited as completion of the saved-PDF scenario.
+See `P12_TAGGED_PDF_CHECKLIST.md`. Automated PDF success must not be cited as PDF/UA conformance, visual fidelity, fillability or human acceptance.

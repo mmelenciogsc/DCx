@@ -1,8 +1,8 @@
 # P14 — Pilot and release readiness
 
 - Status: BLOCKED / NO_GO (local readiness controls pass; pilot and production activation are off)
-- Product implementation commits: local consent `9745e33`; strict local QuickBooks XLSX `da4187a`; corrected P12 residual blocker `62914d1`
-- Evidence-retention commit: `7f6e707`; current exact validation source: `62914d1`
+- Product implementation commits: local consent `9745e33`; strict local QuickBooks XLSX `da4187a`; tagged flattened PDF `3b35701`; corrected P12 blocker `287660b`
+- Evidence-retention commit: `7f6e707`; current exact validation source: `287660b`
 - Documentation commit: recorded by the commit containing this file
 
 No pilot was started, no telemetry was collected, no user was enrolled, and no production service or payment was activated.
@@ -36,7 +36,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 exact-namespace release/readiness tests: passed 11, failed 0, skipped 0. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
-- Current product expanded full suite: passed 628, failed 0, skipped 0; native Windows with zero build warnings/errors.
+- Current product expanded full suite: passed 641, failed 0, skipped 0; native Windows with zero build warnings/errors.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -45,7 +45,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled/zero-bucket consent state, blocker list, metric-definition list and refresh action. It proved separate initially unchecked opt-in and stop/purge approvals, successful local enable, focused completion, approval reset, successful stop/purge back to zero buckets, focused purge completion and five distinct access keys. The validator confirmed that no control named `Activate production` exists.
 - The P11 readiness gate was rerun after composing the default-off contributor process transport with the native dashboard under a separate validation-only startup gate. It proves a read-only digest-authenticated token-to-subject mapping, operator/contributor role separation, hardened literal-loopback transport, real ledger projection and native focus/keyboard behavior. P11 remains blocking because this is not production contributor identity, MFA/TLS/credential rotation/multi-subject authorization/deployment, and production close/adjustment/hold/dispute/tax authority, exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider plus closure/requeue policy, centralized audit, deployed distributed fencing, external alert delivery/human acknowledgment/escalation and authorized provider acceptance remain absent.
-- Evidence: `artifacts/test-results/p14-e42f3c16f7e248b08cb1160a8b73ada7/`, generated from exact clean source `62914d1` and intentionally not committed. It contains `go-no-go.json`, `p14-readiness.trx` and the retained `native-readiness-uia.json` consent/focus/access-key/privacy-boundary transcript. The P12 blocker explicitly names the unimplemented URL-to-fillable/flattened-PDF flow plus separately authorized QuickBooks sandbox OAuth/API retrieval and live/human acceptance. The current product expanded full suite passes 628/628 with zero build warnings/errors.
+- Evidence: `artifacts/test-results/p14-385fb6f355594c1cbc5556f124dda3f7/`, generated from exact clean source `287660b` and intentionally not committed. It contains `go-no-go.json`, `p14-readiness.trx` and the retained `native-readiness-uia.json` consent/focus/access-key/privacy-boundary transcript. The P12 blocker retains separately authorized QuickBooks sandbox OAuth/API retrieval, Adobe Reader/PDF-conformance and live/human acceptance without listing the implemented local flattened-PDF branch. The current product expanded full suite passes 641/641 with zero build warnings/errors.
 
 ## Changed files in the latest milestone
 
@@ -54,14 +54,14 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14
 - Native approval/enable/stop/purge/focus/access-key/activation-absence gate and retained machine-readable UIA transcript: `scripts/validate-p14.ps1`.
 - Decision and human-AT boundary: `docs/architecture/adr/0087-local-only-pilot-metric-consent-controls.md` and `docs/accessibility/P14_PILOT_PRIVACY_CHECKLIST.md`.
 - Shared policy and tests: `src/DCx.Core/Release/ReleaseReadiness.cs`, `tests/DCx.Core.Tests/Release/ReleaseReadinessTests.cs`, `tests/DCx.ReadinessReport/Program.cs`.
-- The P12 readiness item now treats local QuickBooks formula/table/date/currency conformance as passed and retains URL-to-fillable/flattened-PDF plus separately authorized QuickBooks sandbox OAuth/API retrieval and live/human acceptance; its focused policy tests pass 5/5.
+- The P12 readiness item treats local QuickBooks conformance and the local URL-to-tagged-flattened-PDF branch as passed, while retaining separately authorized QuickBooks sandbox OAuth/API retrieval, Adobe Reader/PDF-conformance and live/human acceptance; its focused policy tests pass 5/5.
 - Native accessible UI: `src/DCx.Desktop/ReadinessWindow.xaml`, `src/DCx.Desktop/ReadinessWindow.xaml.cs`, `src/DCx.Desktop/App.xaml.cs`, `src/DCx.Desktop/MainWindow.xaml`, `src/DCx.Desktop/MainWindow.xaml.cs`.
 - Reproducible UIA gate: `scripts/validate-p14.ps1`.
 - Windows fixture cleanup was separately stabilized in `1c06d97`; three consecutive no-build runs and the P14 checkpoint CI run each passed 146/146.
 
 ## Blockers
 
-- P06 transcription/embedding backend gate, P09 Compose gate, P10 production CCB isolation/deployment gate, P11 exact-plan provisioning/credentialed PayPal acceptance/provider eligibility and verification/closure/requeue-policy/authenticated-transport/distributed-fencing/production-scheduling/external-notification gates, P12 URL-to-saved-PDF/authorized QuickBooks retrieval/live/human acceptance and P13 signed installer/security/human-AT gates are unresolved.
+- P06 transcription/embedding backend gate, P09 Compose gate, P10 production CCB isolation/deployment gate, P11 exact-plan provisioning/credentialed PayPal acceptance/provider eligibility and verification/closure/requeue-policy/authenticated-transport/distributed-fencing/production-scheduling/external-notification gates, P12 PDF/UA/visual/human acceptance plus authorized QuickBooks retrieval/live-provider acceptance, and P13 signed installer/security/human-AT gates are unresolved.
 - Privacy notice, terms, CARE/commission policy, provider distribution approvals and legal/compliance review are not approved.
 - The readiness dashboard now has automated evidence for accessible local aggregate-consent enable and withdrawal/purge, but it is not a pilot admin console or approved pilot enrollment flow. The notice and interaction still require human JAWS/NVDA/Narrator and legal/privacy approval. No enrollment system, product event source, network metric transport, final retention policy, support staffing or incident exercise exists.
 - A staged pilot requires explicit owner approval after blocker closure. Production activation remains off by construction in this report.

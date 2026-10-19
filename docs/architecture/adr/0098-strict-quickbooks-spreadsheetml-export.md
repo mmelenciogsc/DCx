@@ -20,7 +20,7 @@ This decision makes no QuickBooks request, reads no credential and grants no liv
 
 ## Validation
 
-Implementation commit `da4187a` and residual-blocker correction `62914d1` pass 9/9 QuickBooks cases within the 24/24 focused P12 integration gate. Evidence `artifacts/test-results/p12-integrations-bc24abeb1de34673842838be84560d1e/` records schema, table, formula, typed date/currency and formula-injection controls with zero QuickBooks requests. Clean-source aggregate `artifacts/test-results/p12-adebe56851fa46a5903a07df57b822e3/` passes nine scenarios at `62914d1`; full native CI passes 628/628. P13 evidence `p13-49bd45fd8570459098c5767c06e56528/` retains nine shipped components, confirming the test-only SDK did not enter the desktop SBOM.
+Implementation commit `da4187a` passes 9/9 QuickBooks cases within the 24/24 focused P12 integration gate. Current evidence `artifacts/test-results/p12-integrations-c1dd23e0a84e45cfbb3b6ec131bba78b/` records schema, table, formula, typed date/currency and formula-injection controls with zero QuickBooks requests. Clean-source aggregate `artifacts/test-results/p12-52a89969eea44bd8a09ca1f798f0632f/` passes nine scenarios at `287660b`; full native CI passes 641/641. P13 evidence `p13-ad83689e0aad493b9cefa877582908b9/` retains nine shipped components, confirming test-only Open XML SDK and PdfPig dependencies did not enter the desktop SBOM.
 
 ## Consequences and residual risk
 
