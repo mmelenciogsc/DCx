@@ -1,7 +1,7 @@
 # P09 — Global registry and synchronization
 
 - Status: BLOCKED (native process/HTTP simulation passes; required Docker Compose execution unavailable)
-- Partial implementation commits: `1be3f9e`, `b1608cd`, `9123a81`, `4278601`, `7df8c0a`, `0a2dab8`, `6239834`, `65d9718`; read-only environment audit `8b94159`
+- Partial implementation commits: `1be3f9e`, `b1608cd`, `9123a81`, `4278601`, `7df8c0a`, `0a2dab8`, `6239834`, `65d9718`, `0b9d254`; read-only environment audit `8b94159`
 - Documentation commit: recorded by the commit containing this file
 
 A bounded read-only SSH capability audit was added later; no deployment, remote write, container start, service change or privileged action was attempted.
@@ -31,6 +31,8 @@ A bounded read-only SSH capability audit was added later; no deployment, remote 
 - Normal startup now offers a separate accessible enrollment window for one exact bounded local P-256 SubjectPublicKeyInfo trust root and one canonical HTTPS registry origin. Literal-loopback HTTP remains validation-only. Review displays the base file name, byte count, exact SHA-256, canonical address and UTC time without contacting the registry.
 - Approval begins disabled and unchecked, expires after 30 minutes, and is invalidated by any candidate change. The strict versioned record is stored only in current-user Windows Credential Manager. Replacement repeats review/approval; removal has a separate initially unchecked acknowledgment and does not delete cached generations.
 - Normal source composition creates no storage or HTTP handler while unenrolled. An enrolled source opens the digest-namespaced replica offline; only explicit synchronization can use the exact origin through a no-redirect/no-cookie/no-proxy/no-decompression 30-second client. Enrollment changes disable the old open source until the user closes and reopens Global knowledge.
+- Registry descriptors are admitted before deserialization only from the exact requested URI, as unencoded `application/json` with optional UTF-8 charset, under independent declared and streaming 16 KiB limits. Strict JSON denies comments, trailing commas, duplicate/unknown fields and excessive depth; release/policy identities, digests and sizes receive semantic validation before use.
+- Policy/release/artifact chunks require unencoded `application/octet-stream`, no charset and exact request-size bounds for both declared and streamed bytes. Invalid revisions, sequences, offsets, counts and artifact digests are denied before network contact. Production composition enables certificate-revocation checks and caps response headers/connections while retaining redirect/cookie/proxy/decompression denial.
 - Malformed protected enrollment fails closed into the same review/clear workflow. No root, endpoint or authoritative state is inferred. Source and network lifetimes are disposed with the window, and concurrent open attempts are suppressed.
 - Separate dual-gated fixtures compose the real signed-replica window and the exact enrollment UI. The enrollment fixture uses an isolated in-process store, never touches the user's real credential and opens no socket.
 
@@ -45,8 +47,8 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 ## Measured result
 
 - Locked restore and native Release build passed with 0 warnings/errors.
-- P09 exact filtered tests: passed 25, failed 0, skipped 0; about 1 second, with exact counters parsed from retained TRX.
-- Current full suite: passed 595, failed 0, skipped 0; about 19 seconds.
+- P09 exact filtered tests: passed 41, failed 0, skipped 0; about 1 second, with exact counters parsed from retained TRX.
+- Current full suite: passed 611, failed 0, skipped 0; about 19 seconds.
 - A real child Kestrel process served three chained trust-policy revisions and a signed SQLite-backed release over loopback HTTP; a fresh production client transport caught up all revisions, synchronized and searched it.
 - Two distinct client roots synchronized the same chain; the P08 private sentinel remained present and absent from global results.
 - Wrong-key release activation was rejected with no active pointer.
@@ -63,8 +65,10 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - Enrollment tests rejected remote HTTP, P-384, linked, malformed, digest-conflicting and noncanonical candidates. A unique-target real Windows Credential Manager round trip required approval, rejected a stale review, replaced one exact root/origin and cleared idempotently.
 - Source-composition tests proved unconfigured open creates neither storage nor a network handler. Configured open/status/search issued zero requests; explicit synchronization issued the first request to the exact enrolled origin, and close disposed its HTTP lifetime.
 - Enrollment UIA proved heading-first focus; seven unique access keys; initially disabled/unchecked approval; exact P-256 fingerprint/address review; full-path minimization; review revocation on candidate change; explicit save/remove interlocks; zero sockets; the production Credential Manager/HTTPS boundary; and focus return after close. The unconfigured shell used an isolated store, so the gate could not read or overwrite real enrollment.
+- Eighteen focused HTTP cases proved strict valid response handling and denial of wrong media/charset/encoding, declared or streaming oversize, changed response URI, duplicate/unknown/malformed/semantically invalid descriptors, binary charset, oversized chunks and invalid outbound parameters with zero handler calls. The real child Kestrel/SQLite synchronization remained compatible.
+- The first aggregate run after transport hardening exposed a UIA regression: WPF default-button semantics reported carriage return instead of the search mnemonic. Removing default-button status and changing the action to **Find offline** with `Alt+F`, then asserting every exact Global knowledge/enrollment access key, made the unchanged aggregate pass. The failed run remains in ignored local evidence and is not represented as acceptance.
 - The first UIA attempt exposed a CLR type name instead of the resource label. `GlobalResourceListItem.ToString()` now returns the human-readable display string; the unchanged exact assertion passed afterward.
-- Latest local evidence: `artifacts/test-results/p09-f1f931e9e77f4895a560a29904df8954/` containing `p09-global-knowledge.trx`, `storage-forecast.json` and `global-knowledge-uia.json`, generated from implementation commit `65d9718`; full-suite TRX: `artifacts/test-results/p00-tests.trx`; server capability evidence: `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` (generated and intentionally not committed).
+- Latest local evidence: `artifacts/test-results/p09-e01d78b05a3b4529adc2cfca32f531bc/` containing `p09-global-knowledge.trx`, `storage-forecast.json` and `global-knowledge-uia.json`, generated from implementation commit `0b9d254`; full-suite TRX: `artifacts/test-results/p00-tests.trx`; server capability evidence: `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` (generated and intentionally not committed).
 
 ## Measured storage/bandwidth fixture
 
@@ -85,7 +89,9 @@ Artifact storage and transfer must add exact signed artifact sizes. Artifacts ar
 - Protected enrollment record/reviewer/store, exact endpoint policy and offline-first source composition: `src/DCx.Core/GlobalKnowledge/GlobalRegistryEnrollment.cs`, `src/DCx.Core/GlobalKnowledge/GlobalKnowledgeSourceFactory.cs`, `src/DCx.Core/GlobalKnowledge/HttpGlobalRegistryTransport.cs`, `src/DCx.Core/GlobalKnowledge/GlobalKnowledgeViewSource.cs`.
 - Accessible review/approve/replace/clear UI, normal shell composition and isolated fixtures: `src/DCx.Desktop/GlobalRegistryEnrollmentWindow.xaml`, `src/DCx.Desktop/GlobalRegistryEnrollmentWindow.xaml.cs`, `src/DCx.Desktop/GlobalKnowledgeWindow.xaml`, `src/DCx.Desktop/GlobalKnowledgeWindow.xaml.cs`, `src/DCx.Desktop/MainWindow.xaml.cs`, `src/DCx.Desktop/App.xaml.cs`.
 - Exact-root/vault/source tests and expanded native UIA gate: `tests/DCx.Core.Tests/GlobalKnowledge/GlobalRegistryEnrollmentTests.cs`, `scripts/validate-p09-global-ui.ps1`.
-- Decision, security/privacy boundary and human checklist: `docs/architecture/adr/0093-protected-explicit-global-registry-enrollment.md`, `docs/security/THREAT_MODEL.md`, `docs/privacy/PRIVACY_MODEL.md`, `docs/accessibility/P09_GLOBAL_KNOWLEDGE_CHECKLIST.md`, `docs/DECISIONS.md`.
+- Bounded strict response admission and hostile transport cases: `src/DCx.Core/GlobalKnowledge/HttpGlobalRegistryTransport.cs`, `src/DCx.Core/GlobalKnowledge/GlobalKnowledgeSourceFactory.cs`, `tests/DCx.Core.Tests/GlobalKnowledge/HttpGlobalRegistryTransportTests.cs`.
+- Exact `Alt+F` offline-find semantics and mnemonic assertions: `src/DCx.Desktop/GlobalKnowledgeWindow.xaml`, `scripts/validate-p09-global-ui.ps1`, `docs/user/KEYBOARD_SHORTCUTS.md`.
+- Decision, security/privacy boundary and human checklist: `docs/architecture/adr/0093-protected-explicit-global-registry-enrollment.md`, `docs/architecture/adr/0094-bounded-strict-global-registry-transport.md`, `docs/security/THREAT_MODEL.md`, `docs/privacy/PRIVACY_MODEL.md`, `docs/accessibility/P09_GLOBAL_KNOWLEDGE_CHECKLIST.md`, `docs/DECISIONS.md`.
 
 ## Blocker and limits
 

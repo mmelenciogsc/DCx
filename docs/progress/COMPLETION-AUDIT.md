@@ -34,9 +34,9 @@ Authoritative inputs: `DCx_Codex_Handoff_Kit/README.md`, `DCX_PRODUCT_ARCHITECTU
 
 ## Current exact-source checkpoint
 
-- Product implementation source: `65d9718`; current documented downstream validation source: `4764de4`.
-- Full Windows suite: 595 passed, 0 failed, 0 skipped; zero build warnings/errors.
-- P09: `artifacts/test-results/p09-f1f931e9e77f4895a560a29904df8954/`; 25/25 plus native UIA for exact P-256 root/origin review, protected-approval/remove interlocks, focus return, heading focus, unique access keys, explicit signed sync, offline CKB/CCB search, readable result metadata, zero fixture sockets/private collections and unconfigured default denial.
+- Product implementation source: `0b9d254`; downstream P13/P14 regeneration is pending at this documentation checkpoint.
+- Full Windows suite: 611 passed, 0 failed, 0 skipped; zero build warnings/errors.
+- P09: `artifacts/test-results/p09-e01d78b05a3b4529adc2cfca32f531bc/`; 41/41 plus native UIA for strict bounded HTTP admission, exact P-256 root/origin review, protected-approval/remove interlocks, focus return, heading focus, exact access keys, explicit signed sync, offline CKB/CCB search, readable result metadata, zero fixture sockets/private collections and unconfigured default denial.
 - P06: `artifacts/test-results/p06-49d6bc8f87874c83a051bd1b009b1897/`; 230/230, 17 owned-runtime contracts, eight hardware contracts, five mandatory sequencing contracts and eight runtime-resource/residency/unload contracts, with real installed-GPU vision and retained follow-up. The exact dependency plan remains untransferred; no dependency was downloaded or installed.
 - P11: `artifacts/test-results/p11-0d4a701ca5614522af687bd42a8064a5/`; 122/122 plus generated and authenticated-ledger native UIA.
 - P12: `artifacts/test-results/p12-1ac53524cc9644e294d7d660736b2025/`; nine composed fixtures and zero production actions. Focused Facebook/XLSX evidence: `p12-integrations-294bb5ae0fee4aafa9e23af092de14fb/`; 17/17 selected tests, including 15 Facebook policy cases, plus native UIA.
