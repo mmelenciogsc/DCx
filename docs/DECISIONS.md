@@ -93,5 +93,6 @@
 | [0089](architecture/adr/0089-fence-shared-ollama-runtime-activity.md) | Fence shared Ollama runtime activity without altering other workloads | Accepted for fail-closed overlap detection; exclusive external-client isolation remains blocked | 2026-10-19 |
 | [0090](architecture/adr/0090-owned-ollama-runtime-boundary.md) | Bind an independently owned Ollama runtime before production composition | Accepted as a validated isolation foundation; accessible approval and production composition remain blocked | 2026-10-19 |
 | [0091](architecture/adr/0091-protected-owned-ollama-production-host.md) | Compose protected owned Ollama approval with bounded exact-model residency | Accepted for local vision production composition; malicious same-user isolation remains blocked | 2026-10-19 |
+| [0092](architecture/adr/0092-offline-first-accessible-global-replica.md) | Expose the signed global replica through an offline-first accessible surface | Accepted for local/native validation; production registry provisioning remains blocked | 2026-10-19 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

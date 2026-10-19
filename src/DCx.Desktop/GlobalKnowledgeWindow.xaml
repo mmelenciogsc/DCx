@@ -1,0 +1,138 @@
+<Window x:Class="DCx.Desktop.GlobalKnowledgeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Global knowledge — DCx"
+        Width="820"
+        Height="700"
+        MinWidth="640"
+        MinHeight="500"
+        AutomationProperties.AutomationId="GlobalKnowledgeWindow"
+        AutomationProperties.Name="Global knowledge">
+    <DockPanel Margin="20">
+        <TextBlock x:Name="StatusText"
+                   DockPanel.Dock="Bottom"
+                   Margin="0,16,0,0"
+                   Padding="10"
+                   Text="Loading global replica status."
+                   TextWrapping="Wrap"
+                   Background="#F3F3F3"
+                   AutomationProperties.AutomationId="GlobalKnowledgeStatus"
+                   AutomationProperties.Name="Loading global replica status."
+                   AutomationProperties.LiveSetting="Assertive" />
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Focusable="False">
+            <StackPanel>
+                <TextBlock x:Name="Heading"
+                           FontSize="26"
+                           FontWeight="SemiBold"
+                           Text="Global knowledge"
+                           Focusable="True"
+                           AutomationProperties.AutomationId="GlobalKnowledgeHeading"
+                           AutomationProperties.Name="Global knowledge" />
+                <TextBlock Margin="0,10,0,0"
+                           TextWrapping="Wrap"
+                           Text="Search the locally cached, signature-verified global CKB and CCB replica. This surface never searches private knowledge and never contributes or publishes content." />
+                <Border Margin="0,14,0,0"
+                        Padding="10"
+                        Background="#FFF4CE"
+                        BorderBrush="#8A6D00"
+                        BorderThickness="1">
+                    <TextBlock x:Name="BoundaryText"
+                               TextWrapping="Wrap"
+                               Text="No trusted global registry is configured. No remote content or empty catalog is inferred."
+                               AutomationProperties.AutomationId="GlobalKnowledgeBoundary"
+                               AutomationProperties.Name="No trusted global registry is configured. No remote content or empty catalog is inferred." />
+                </Border>
+
+                <GroupBox Margin="0,18,0,0" Header="Verified replica status">
+                    <StackPanel Margin="12,8">
+                        <TextBox x:Name="SummaryText"
+                                 MinHeight="105"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="Global replica status has not been loaded."
+                                 AutomationProperties.AutomationId="GlobalKnowledgeSummary"
+                                 AutomationProperties.Name="Global replica status has not been loaded." />
+                        <WrapPanel Margin="0,12,0,0">
+                            <Button x:Name="RefreshButton"
+                                    Width="150"
+                                    MinHeight="36"
+                                    Margin="0,0,8,8"
+                                    Content="_Refresh status"
+                                    AutomationProperties.AutomationId="RefreshGlobalKnowledgeButton"
+                                    AutomationProperties.Name="Refresh global replica status"
+                                    Click="OnRefreshClick" />
+                            <Button x:Name="SynchronizeButton"
+                                    Width="170"
+                                    MinHeight="36"
+                                    Margin="0,0,8,8"
+                                    Content="S_ynchronize"
+                                    IsEnabled="False"
+                                    AutomationProperties.AutomationId="SynchronizeGlobalKnowledgeButton"
+                                    AutomationProperties.Name="Synchronize global replica"
+                                    AutomationProperties.HelpText="Explicitly fetches and verifies signed updates only when a registry transport is configured."
+                                    Click="OnSynchronizeClick" />
+                            <Button x:Name="CancelButton"
+                                    Width="120"
+                                    MinHeight="36"
+                                    Margin="0,0,8,8"
+                                    Content="_Cancel"
+                                    IsEnabled="False"
+                                    AutomationProperties.AutomationId="CancelGlobalKnowledgeButton"
+                                    AutomationProperties.Name="Cancel global knowledge operation"
+                                    Click="OnCancelClick" />
+                        </WrapPanel>
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Margin="0,18,0,0" Header="Offline catalog search">
+                    <StackPanel Margin="12,8">
+                        <Label Target="{Binding ElementName=QueryBox}"
+                               Content="_Search words" />
+                        <TextBox x:Name="QueryBox"
+                                 MaxLength="512"
+                                 MinHeight="34"
+                                 Padding="6"
+                                 AutomationProperties.AutomationId="GlobalKnowledgeQuery"
+                                 AutomationProperties.Name="Global knowledge search words" />
+                        <Button x:Name="SearchButton"
+                                Width="160"
+                                MinHeight="36"
+                                Margin="0,10,0,0"
+                                HorizontalAlignment="Left"
+                                Content="Search _offline"
+                                IsEnabled="False"
+                                IsDefault="True"
+                                AutomationProperties.AutomationId="SearchGlobalKnowledgeButton"
+                                AutomationProperties.Name="Search offline global knowledge"
+                                Click="OnSearchClick" />
+                        <ListBox x:Name="ResultsList"
+                                 MinHeight="150"
+                                 MaxHeight="240"
+                                 Margin="0,12,0,0"
+                                 DisplayMemberPath="Display"
+                                 SelectionChanged="OnResultSelectionChanged"
+                                 AutomationProperties.AutomationId="GlobalKnowledgeResults"
+                                 AutomationProperties.Name="Global knowledge search results" />
+                        <TextBox x:Name="ResultDetails"
+                                 MinHeight="130"
+                                 Margin="0,10,0,0"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="Select a result to review its signed catalog metadata."
+                                 AutomationProperties.AutomationId="GlobalKnowledgeResultDetails"
+                                 AutomationProperties.Name="Select a result to review its signed catalog metadata." />
+                    </StackPanel>
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

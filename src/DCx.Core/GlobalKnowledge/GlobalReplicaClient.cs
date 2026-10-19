@@ -7,6 +7,7 @@ namespace DCx.Core.GlobalKnowledge;
 public sealed partial class GlobalReplicaClient
 {
     public const int TransferChunkBytes = 64 * 1024;
+    public const int MaximumSearchQueryCharacters = 512;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -311,10 +312,12 @@ public sealed partial class GlobalReplicaClient
         int limit = 10,
         CancellationToken cancellationToken = default)
     {
-        if (limit is < 1 or > 50 || embedding is { Length: > GlobalReleaseCodec.MaximumEmbeddingDimensions } ||
+        if (query is null || query.Length > MaximumSearchQueryCharacters ||
+            query.Any(character => char.IsControl(character) && !char.IsWhiteSpace(character)) ||
+            limit is < 1 or > 50 || embedding is { Length: > GlobalReleaseCodec.MaximumEmbeddingDimensions } ||
             embedding?.Any(value => !float.IsFinite(value)) == true)
         {
-            throw new ArgumentException("The global search limit or embedding is invalid.");
+            throw new ArgumentException("The global search query, limit, or embedding is invalid.");
         }
 
         await syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -324,7 +327,7 @@ public sealed partial class GlobalReplicaClient
                 .ConfigureAwait(false);
             ValidateStorageLayout();
             var state = await LoadActiveAsync(cancellationToken).ConfigureAwait(false);
-            var terms = SearchTermRegex().Matches(query ?? string.Empty)
+            var terms = SearchTermRegex().Matches(query)
                 .Select(match => match.Value)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Take(12)

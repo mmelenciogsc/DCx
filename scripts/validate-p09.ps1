@@ -55,6 +55,9 @@ try {
     "Storage forecast=$forecast"
     "P09 global-knowledge tests=PASS ($globalKnowledgeTestsPassed/$globalKnowledgeTestsPassed)"
 
+    & (Join-Path $PSScriptRoot "validate-p09-global-ui.ps1") -RunRoot $runRoot
+    if ($LASTEXITCODE -ne 0) { throw "P09 global knowledge UIA failed with exit code $LASTEXITCODE." }
+
     $docker = Get-Command docker -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -eq $docker) {
         "P09 Docker Compose gate=BLOCKED: Docker CLI is unavailable to native Windows validation."

@@ -4,6 +4,8 @@ using System.Windows;
 using System.Windows.Threading;
 using DCx.Core.Deployment;
 using DCx.Core.Finance;
+using DCx.Core.GlobalKnowledge;
+using DCx.Core.Knowledge;
 using DCx.Core.LocalModels;
 using DCx.Core.Reliability;
 using DCx.Core.Storage;
@@ -49,6 +51,13 @@ public partial class App : Application
                 StringComparison.Ordinal))
         {
             StartCareContributorLoopbackFixture();
+            return;
+        }
+
+        if (e.Args.Length == 1 &&
+            string.Equals(e.Args[0], "--global-knowledge-fixture", StringComparison.Ordinal))
+        {
+            StartGlobalKnowledgeFixture();
             return;
         }
 
@@ -438,6 +447,83 @@ public partial class App : Application
         }
     }
 
+    private void StartGlobalKnowledgeFixture()
+    {
+        try
+        {
+            if (!string.Equals(
+                    Environment.GetEnvironmentVariable("DCX_GLOBAL_KNOWLEDGE_FIXTURE"),
+                    "1",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The global knowledge fixture is disabled.");
+            }
+
+            var applicationDataRoot = ApplicationDataRoot.Resolve();
+            if (!IsWithinFixtureRoot(applicationDataRoot, "DCX_GLOBAL_KNOWLEDGE_FIXTURE_ROOT"))
+            {
+                throw new InvalidOperationException("Global knowledge fixture storage is outside its root.");
+            }
+
+            runtimeLease = ApplicationDataOperationLease.Acquire(
+                applicationDataRoot,
+                "starting the global knowledge fixture");
+            using var signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var resources = new[]
+            {
+                new GlobalResourceRecord(
+                    "global:screen-reader-browser-guide",
+                    "1.0.0",
+                    KnowledgeResourceKind.Ckb,
+                    "Screen reader browser guide",
+                    "Keyboard focus restoration, concise announcements, and manual-control handback patterns.",
+                    "https://example.test/global/screen-reader-browser-guide",
+                    "CC-BY-4.0",
+                    ["accessibility", "keyboard", "screen-reader"]),
+                new GlobalResourceRecord(
+                    "global:focus-validator",
+                    "2.1.0",
+                    KnowledgeResourceKind.Ccb,
+                    "Focus restoration validator",
+                    "A deterministic validation capability for browser takeover and handback focus.",
+                    "https://example.test/global/focus-validator",
+                    "MIT",
+                    ["browser", "focus", "validation"]),
+            };
+            var changes = resources.Select(resource => new GlobalReleaseChange(
+                GlobalReleaseChangeKind.Upsert,
+                resource.ResourceId,
+                resource.Version,
+                resource)).ToArray();
+            var manifest = new GlobalReleaseManifest(
+                GlobalReleaseCodec.CurrentSchemaVersion,
+                1,
+                0,
+                null,
+                GlobalReleaseCodec.Sha256(GlobalReleaseCodec.CreateCanonicalCatalog(resources)),
+                DateTimeOffset.Parse("2026-10-19T00:00:00Z"),
+                changes);
+            var release = GlobalReleaseCodec.Encode(GlobalReleaseCodec.Sign(manifest, signingKey));
+            var client = GlobalReplicaClient.OpenAsync(
+                    applicationDataRoot,
+                    signingKey.ExportSubjectPublicKeyInfo(),
+                    new FixtureGlobalTrustPolicyAnchorStore())
+                .GetAwaiter()
+                .GetResult();
+            var source = new GlobalReplicaViewSource(client, new FixtureGlobalRegistryTransport(release));
+            MainWindow = new GlobalKnowledgeWindow(
+                source,
+                GlobalKnowledgeSourceKind.LocalValidationFixture);
+            MainWindow.Show();
+        }
+        catch
+        {
+            runtimeLease?.Dispose();
+            runtimeLease = null;
+            Shutdown(2);
+        }
+    }
+
     private static bool IsWithinFixtureRoot(string path, string environmentVariable)
     {
         var configuredRoot = Environment.GetEnvironmentVariable(environmentVariable);
@@ -507,6 +593,77 @@ public partial class App : Application
             anchor = value;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class FixtureGlobalTrustPolicyAnchorStore : IGlobalTrustPolicyAnchorStore
+    {
+        private readonly Dictionary<string, GlobalTrustPolicyAnchor> anchors =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        public Task<GlobalTrustPolicyAnchor?> ReadAsync(
+            string trustRootSha256,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(anchors.TryGetValue(trustRootSha256, out var anchor)
+                ? anchor
+                : null);
+        }
+
+        public Task AdvanceAsync(
+            GlobalTrustPolicyAnchor anchor,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            anchors[anchor.TrustRootSha256] = anchor;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FixtureGlobalRegistryTransport(byte[] release) : IGlobalRegistryTransport
+    {
+        private readonly GlobalReleaseDescriptor descriptor =
+            new(1, GlobalReleaseCodec.Sha256(release), release.LongLength);
+
+        public async Task<GlobalReleaseDescriptor?> GetLatestReleaseAsync(
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(750, cancellationToken);
+            return descriptor;
+        }
+
+        public Task<GlobalReleaseDescriptor> GetReleaseAsync(
+            long sequence,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(sequence == 1
+                ? descriptor
+                : throw new GlobalReplicaException("The fixture release is unavailable."));
+        }
+
+        public Task<byte[]> DownloadReleaseChunkAsync(
+            long sequence,
+            long offset,
+            int count,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (sequence != 1 || offset < 0 || offset >= release.Length || count is < 1 or > GlobalReplicaClient.TransferChunkBytes)
+            {
+                throw new GlobalReplicaException("The fixture release range is unavailable.");
+            }
+
+            return Task.FromResult(
+                release.AsSpan((int)offset, Math.Min(count, release.Length - (int)offset)).ToArray());
+        }
+
+        public Task<byte[]> DownloadArtifactChunkAsync(
+            string sha256,
+            long offset,
+            int count,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     private sealed class FixtureLocalModelApprovalStateAnchorStore : ILocalModelApprovalStateAnchorStore

@@ -172,6 +172,14 @@
                             AutomationProperties.AutomationId="ContributionsButton"
                             AutomationProperties.Name="Open private contribution review"
                             Click="OnContributionsClick" />
+                    <Button x:Name="GlobalKnowledgeButton"
+                            MinWidth="120"
+                            Margin="0,0,6,0"
+                            Content="Global knowledge"
+                            AutomationProperties.AutomationId="GlobalKnowledgeButton"
+                            AutomationProperties.Name="Open global knowledge"
+                            AutomationProperties.HelpText="Search the separate signature-verified global replica. This does not search private knowledge or synchronize automatically."
+                            Click="OnGlobalKnowledgeClick" />
                     <Button x:Name="CareRecipientsButton"
                             MinWidth="120"
                             Margin="0,0,6,0"

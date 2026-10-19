@@ -11,6 +11,7 @@ using DCx.Core.Browsing;
 using DCx.Core.Control;
 using DCx.Core.Downloads;
 using DCx.Core.Finance;
+using DCx.Core.GlobalKnowledge;
 using DCx.Core.LocalModels;
 using DCx.Core.Navigation;
 using DCx.Core.Profiles;
@@ -58,6 +59,7 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
     private LocalModelsWindow? _localModelsWindow;
     private ContentViewerWindow? _contentViewerWindow;
     private ContributionsWindow? _contributionsWindow;
+    private GlobalKnowledgeWindow? _globalKnowledgeWindow;
     private CareRecipientsWindow? _careRecipientsWindow;
     private CareOperationsWindow? _careOperationsWindow;
     private CareContributorDashboardWindow? _careContributorDashboardWindow;
@@ -1266,6 +1268,25 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
         _contributionsWindow = new ContributionsWindow { Owner = this };
         _contributionsWindow.Closed += (_, _) => _contributionsWindow = null;
         _contributionsWindow.Show();
+    }
+
+    private void OnGlobalKnowledgeClick(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Opening the separate read-only global knowledge replica. No synchronization will occur automatically.");
+        if (_globalKnowledgeWindow is { IsVisible: true })
+        {
+            _globalKnowledgeWindow.Activate();
+            return;
+        }
+
+        _globalKnowledgeWindow = new GlobalKnowledgeWindow(
+            new UnavailableGlobalKnowledgeViewSource(),
+            GlobalKnowledgeSourceKind.Unavailable)
+        {
+            Owner = this,
+        };
+        _globalKnowledgeWindow.Closed += (_, _) => _globalKnowledgeWindow = null;
+        _globalKnowledgeWindow.Show();
     }
 
     private async void OnCareRecipientsClick(object sender, RoutedEventArgs e)
