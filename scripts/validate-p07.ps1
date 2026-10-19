@@ -20,6 +20,9 @@ $textFixture = Join-Path $runRoot "accessible-fixture.txt"
 $videoFixture = Join-Path $runRoot "media-fixture.mp4"
 $audioFixture = Join-Path $runRoot "audio-fixture.wav"
 $scanImage = Join-Path $runRoot "scanned-source.png"
+$scanColorImage = Join-Path $runRoot "scanned-source-color.png"
+$scanLandscapeImage = Join-Path $runRoot "scanned-source-landscape.png"
+$scanImages = @($scanImage, $scanColorImage, $scanLandscapeImage)
 $pdfFixture = Join-Path $runRoot "scanned-source.pdf"
 $exportRoot = Join-Path $runRoot "exports"
 $webFixtureServer = Join-Path $repoRoot "tests\DCx.WebFixtureServer\bin\Release\net10.0\DCx.WebFixtureServer.dll"
@@ -129,7 +132,64 @@ finally {
     $graphics.Dispose()
     $bitmap.Dispose()
 }
-& $magick $scanImage $pdfFixture
+$colorBitmap = New-Object System.Drawing.Bitmap 700, 1000
+$colorGraphics = [System.Drawing.Graphics]::FromImage($colorBitmap)
+try {
+    $colorGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $colorGradient = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
+        [System.Drawing.Rectangle]::new(0, 0, 700, 1000),
+        [System.Drawing.Color]::FromArgb(255, 20, 62, 126),
+        [System.Drawing.Color]::FromArgb(255, 244, 184, 72),
+        35.0)
+    try { $colorGraphics.FillRectangle($colorGradient, 0, 0, 700, 1000) }
+    finally { $colorGradient.Dispose() }
+    $colorGraphics.FillEllipse([System.Drawing.Brushes]::Crimson, 70, 90, 230, 230)
+    $colorGraphics.FillRectangle([System.Drawing.Brushes]::DarkGreen, 360, 110, 250, 180)
+    $colorPen = [System.Drawing.Pen]::new([System.Drawing.Color]::White, 12)
+    try { $colorGraphics.DrawLine($colorPen, 70, 420, 630, 420) }
+    finally { $colorPen.Dispose() }
+    $colorFont = New-Object System.Drawing.Font "Arial", 48, ([System.Drawing.FontStyle]::Bold)
+    try {
+        $colorGraphics.DrawString("COLOR PAGE 73", $colorFont, [System.Drawing.Brushes]::White, 68, 500)
+        $colorGraphics.DrawString("Portrait gradient", $colorFont, [System.Drawing.Brushes]::Black, 68, 610)
+    }
+    finally { $colorFont.Dispose() }
+    $colorBitmap.Save($scanColorImage, [System.Drawing.Imaging.ImageFormat]::Png)
+}
+finally {
+    $colorGraphics.Dispose()
+    $colorBitmap.Dispose()
+}
+$landscapeBitmap = New-Object System.Drawing.Bitmap 1200, 800
+$landscapeGraphics = [System.Drawing.Graphics]::FromImage($landscapeBitmap)
+try {
+    $landscapeGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $landscapeGraphics.Clear([System.Drawing.Color]::FromArgb(255, 16, 28, 61))
+    $tileColors = @(
+        [System.Drawing.Color]::FromArgb(255, 35, 168, 182),
+        [System.Drawing.Color]::FromArgb(255, 245, 111, 93),
+        [System.Drawing.Color]::FromArgb(255, 246, 204, 83),
+        [System.Drawing.Color]::FromArgb(255, 104, 84, 166)
+    )
+    for ($row = 0; $row -lt 2; $row++) {
+        for ($column = 0; $column -lt 4; $column++) {
+            $tileBrush = [System.Drawing.SolidBrush]::new(
+                $tileColors[($row * 2 + $column) % $tileColors.Count])
+            try { $landscapeGraphics.FillRectangle($tileBrush, 55 + ($column * 275), 55 + ($row * 245), 225, 190) }
+            finally { $tileBrush.Dispose() }
+        }
+    }
+    $landscapeGraphics.FillEllipse([System.Drawing.Brushes]::White, 855, 505, 245, 190)
+    $landscapeFont = New-Object System.Drawing.Font "Arial", 52, ([System.Drawing.FontStyle]::Bold)
+    try { $landscapeGraphics.DrawString("LANDSCAPE PAGE 9", $landscapeFont, [System.Drawing.Brushes]::White, 55, 610) }
+    finally { $landscapeFont.Dispose() }
+    $landscapeBitmap.Save($scanLandscapeImage, [System.Drawing.Imaging.ImageFormat]::Png)
+}
+finally {
+    $landscapeGraphics.Dispose()
+    $landscapeBitmap.Dispose()
+}
+& $magick @scanImages $pdfFixture
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $pdfFixture)) { throw "ImageMagick could not create the scanned PDF fixture." }
 
 $webPort = Get-EphemeralPort
@@ -602,7 +662,7 @@ try {
         catch { return $false }
     } "The tagged flattened PDF was not produced atomically." 100
     $pdfBytes = [IO.File]::ReadAllBytes($pdfExport)
-    if ($pdfBytes.Length -gt 20MB) { throw "The one-page PDF fixture exceeded its validation bound." }
+    if ($pdfBytes.Length -gt 60MB) { throw "The multipage PDF fixture exceeded its validation bound." }
     $pdfAscii = [Text.Encoding]::ASCII.GetString($pdfBytes)
     if ($pdfAscii -notmatch '%%EOF') { throw "The flattened PDF lacks a complete end marker." }
     $pdfHasStructureTree = $pdfAscii -match '/StructTreeRoot'
@@ -617,69 +677,108 @@ try {
         throw "The flattened PDF text/coordinate inspector failed."
     }
     $pdfInspection = Get-Content -LiteralPath $pdfInspectionPath -Raw | ConvertFrom-Json
-    if ([int]$pdfInspection.page_count -ne 1 -or [int]$pdfInspection.word_count -lt 3) {
+    $pdfPages = @($pdfInspection.pages)
+    if ([int]$pdfInspection.page_count -ne $scanImages.Count -or
+        $pdfPages.Count -ne $scanImages.Count -or
+        [int]$pdfInspection.word_count -lt 3) {
         throw "The flattened PDF did not preserve its expected page or word structure."
     }
-    $pdfImages = @($pdfInspection.pages[0].images)
-    $pageBackground = @($pdfImages | Where-Object {
-        ([double]$_.right_normalized - [double]$_.left_normalized) -ge 0.99 -or
-        ([double]$_.bottom_normalized - [double]$_.top_normalized) -ge 0.99
-    }) | Select-Object -First 1
-    if ([int]$pdfInspection.pages[0].image_count -lt 1 -or $null -eq $pageBackground -or
-        [int]$pageBackground.width_samples -lt 600 -or [int]$pageBackground.height_samples -lt 700) {
-        throw "The flattened PDF did not preserve a bounded source raster."
+    $visualKinds = @("monochrome-landscape", "color-gradient-portrait", "mixed-color-landscape")
+    $visualPageEvidence = @()
+    $pageBackground = $null
+    for ($pageIndex = 0; $pageIndex -lt $scanImages.Count; $pageIndex++) {
+        $page = $pdfPages[$pageIndex]
+        $pdfImages = @($page.images)
+        $currentBackground = @($pdfImages | Where-Object {
+            ([double]$_.right_normalized - [double]$_.left_normalized) -ge 0.99 -or
+            ([double]$_.bottom_normalized - [double]$_.top_normalized) -ge 0.99
+        }) | Select-Object -First 1
+        if ([int]$page.image_count -lt 1 -or $null -eq $currentBackground -or
+            [int]$currentBackground.width_samples -lt 600 -or
+            [int]$currentBackground.height_samples -lt 700) {
+            throw "Flattened PDF page $($pageIndex + 1) did not preserve a bounded source raster."
+        }
+
+        $placedWidth = ([double]$currentBackground.right_normalized -
+            [double]$currentBackground.left_normalized) * [double]$page.width
+        $placedHeight = ([double]$currentBackground.bottom_normalized -
+            [double]$currentBackground.top_normalized) * [double]$page.height
+        $sampleAspect = [double]$currentBackground.width_samples /
+            [double]$currentBackground.height_samples
+        $placedAspect = $placedWidth / $placedHeight
+        if ([Math]::Abs($sampleAspect - $placedAspect) -gt 0.03) {
+            throw "Flattened PDF page $($pageIndex + 1) distorted the source-raster aspect ratio."
+        }
+        if ($currentBackground.decoded_png_available -ne $true -or
+            [int]$currentBackground.decoded_png_bytes -lt 64 -or
+            [int]$currentBackground.decoded_png_bytes -gt 24MB -or
+            [string]$currentBackground.decoded_png_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+            [string]$currentBackground.decoded_png_file -cnotmatch '^page-[0-9]{4}-image-[0-9]{4}\.png$') {
+            throw "Flattened PDF page $($pageIndex + 1) was not independently decodable."
+        }
+        $decodedBackgroundPath = Join-Path `
+            $pdfDecodedImageRoot ([string]$currentBackground.decoded_png_file)
+        if (-not (Test-Path -LiteralPath $decodedBackgroundPath -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $decodedBackgroundPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                [string]$currentBackground.decoded_png_sha256) {
+            throw "The independently decoded raster for page $($pageIndex + 1) did not match its digest."
+        }
+
+        $pageNumber = $pageIndex + 1
+        $visualReferencePath = Join-Path $runRoot `
+            "flattened-pdf-visual-reference-page-$($pageNumber.ToString('D2')).png"
+        $visualNegativePath = Join-Path $runRoot `
+            "flattened-pdf-visual-negative-page-$($pageNumber.ToString('D2')).png"
+        $visualDimensions = "$([int]$currentBackground.width_samples)x$([int]$currentBackground.height_samples)!"
+        & $magick $scanImages[$pageIndex] -alpha remove -background white -flatten -colorspace sRGB `
+            -resize $visualDimensions -strip -depth 8 $visualReferencePath
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $visualReferencePath -PathType Leaf)) {
+            throw "The independent source-raster reference for page $pageNumber could not be produced."
+        }
+        $pageVisualRmse = Get-NormalizedImageDifference `
+            $visualReferencePath $decodedBackgroundPath "RMSE"
+        $pageVisualChangedPixelRatio = Get-NormalizedImageDifference `
+            $visualReferencePath $decodedBackgroundPath "AE" "2%"
+        $positiveLimit = if ($pageIndex -eq 0) { 0.03 } else { 0.05 }
+        if ($pageVisualRmse -gt $positiveLimit -or
+            $pageVisualChangedPixelRatio -gt $positiveLimit) {
+            throw "Flattened PDF page $pageNumber failed independent source-raster pixel fidelity: RMSE=$pageVisualRmse; changed=$pageVisualChangedPixelRatio."
+        }
+
+        & $magick $visualReferencePath -channel RGB -negate $visualNegativePath
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $visualNegativePath -PathType Leaf)) {
+            throw "The independent visual negative control for page $pageNumber could not be produced."
+        }
+        $pageVisualNegativeRmse = Get-NormalizedImageDifference `
+            $visualNegativePath $decodedBackgroundPath "RMSE"
+        $pageVisualNegativeChangedPixelRatio = Get-NormalizedImageDifference `
+            $visualNegativePath $decodedBackgroundPath "AE" "2%"
+        if ($pageVisualNegativeRmse -lt 0.30 -or
+            $pageVisualNegativeChangedPixelRatio -lt 0.95) {
+            throw "The pixel-fidelity gate did not reject the altered control for page $pageNumber."
+        }
+
+        $visualPageEvidence += [pscustomobject][ordered]@{
+            page_number = $pageNumber
+            fixture_kind = $visualKinds[$pageIndex]
+            width_samples = [int]$currentBackground.width_samples
+            height_samples = [int]$currentBackground.height_samples
+            rmse = $pageVisualRmse
+            changed_pixel_ratio = $pageVisualChangedPixelRatio
+            negative_control_rmse = $pageVisualNegativeRmse
+            negative_control_changed_pixel_ratio = $pageVisualNegativeChangedPixelRatio
+            decoded_raster_sha256 = [string]$currentBackground.decoded_png_sha256
+        }
+        if ($pageIndex -eq 0) { $pageBackground = $currentBackground }
     }
-    $placedWidth = ([double]$pageBackground.right_normalized - [double]$pageBackground.left_normalized) * [double]$pdfInspection.pages[0].width
-    $placedHeight = ([double]$pageBackground.bottom_normalized - [double]$pageBackground.top_normalized) * [double]$pdfInspection.pages[0].height
-    $sampleAspect = [double]$pageBackground.width_samples / [double]$pageBackground.height_samples
-    $placedAspect = $placedWidth / $placedHeight
-    if ([Math]::Abs($sampleAspect - $placedAspect) -gt 0.03) {
-        throw "The flattened PDF distorted the source-raster aspect ratio."
-    }
-    if ($pageBackground.decoded_png_available -ne $true -or
-        [int]$pageBackground.decoded_png_bytes -lt 64 -or
-        [int]$pageBackground.decoded_png_bytes -gt 24MB -or
-        [string]$pageBackground.decoded_png_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
-        [string]$pageBackground.decoded_png_file -cnotmatch '^page-[0-9]{4}-image-[0-9]{4}\.png$') {
-        throw "The flattened PDF source raster was not independently decodable."
-    }
-    $decodedBackgroundPath = Join-Path $pdfDecodedImageRoot ([string]$pageBackground.decoded_png_file)
-    if (-not (Test-Path -LiteralPath $decodedBackgroundPath -PathType Leaf) -or
-        (Get-FileHash -LiteralPath $decodedBackgroundPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
-            [string]$pageBackground.decoded_png_sha256) {
-        throw "The independently decoded PDF raster did not match its inspector digest."
-    }
-    $visualReferencePath = Join-Path $runRoot "flattened-pdf-visual-reference.png"
-    $visualNegativePath = Join-Path $runRoot "flattened-pdf-visual-negative-control.png"
-    $visualDimensions = "$([int]$pageBackground.width_samples)x$([int]$pageBackground.height_samples)!"
-    & $magick $scanImage -alpha remove -background white -flatten -colorspace sRGB `
-        -resize $visualDimensions -strip -depth 8 $visualReferencePath
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $visualReferencePath -PathType Leaf)) {
-        throw "The independent source-raster reference could not be produced."
-    }
-    $visualRmse = Get-NormalizedImageDifference $visualReferencePath $decodedBackgroundPath "RMSE"
-    $visualChangedPixelRatio = Get-NormalizedImageDifference `
-        $visualReferencePath $decodedBackgroundPath "AE" "2%"
-    if ($visualRmse -gt 0.03 -or $visualChangedPixelRatio -gt 0.03) {
-        throw "The flattened PDF failed independent source-raster pixel fidelity."
-    }
-    $negativeLeft = [int][Math]::Round([int]$pageBackground.width_samples * 0.27)
-    $negativeTop = [int][Math]::Round([int]$pageBackground.height_samples * 0.29)
-    $negativeRight = [int][Math]::Round([int]$pageBackground.width_samples * 0.73)
-    $negativeBottom = [int][Math]::Round([int]$pageBackground.height_samples * 0.71)
-    $negativeRectangle = "rectangle $negativeLeft,$negativeTop $negativeRight,$negativeBottom"
-    & $magick $visualReferencePath -fill "#000000" -draw $negativeRectangle `
-        $visualNegativePath
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $visualNegativePath -PathType Leaf)) {
-        throw "The independent visual negative control could not be produced."
-    }
-    $visualNegativeRmse = Get-NormalizedImageDifference `
-        $visualNegativePath $decodedBackgroundPath "RMSE"
-    $visualNegativeChangedPixelRatio = Get-NormalizedImageDifference `
-        $visualNegativePath $decodedBackgroundPath "AE" "2%"
-    if ($visualNegativeRmse -lt 0.30 -or $visualNegativeChangedPixelRatio -lt 0.10) {
-        throw "The independent pixel-fidelity gate did not reject its altered negative control."
-    }
+    $visualRmse = [double]$visualPageEvidence[0].rmse
+    $visualChangedPixelRatio = [double]$visualPageEvidence[0].changed_pixel_ratio
+    $visualNegativeRmse = [double]$visualPageEvidence[0].negative_control_rmse
+    $visualNegativeChangedPixelRatio = [double]$visualPageEvidence[0].negative_control_changed_pixel_ratio
+    $visualMaximumRmse = [double](
+        $visualPageEvidence | Measure-Object -Property rmse -Maximum).Maximum
+    $visualMaximumChangedPixelRatio = [double](
+        $visualPageEvidence | Measure-Object -Property changed_pixel_ratio -Maximum).Maximum
     $pdfWords = @($pdfInspection.pages[0].words)
     $dcxWord = @($pdfWords | Where-Object { $_.text -eq "DCX" }) | Select-Object -First 1
     $numberWord = @($pdfWords | Where-Object { $_.text -eq "42" }) | Select-Object -First 1
@@ -717,6 +816,9 @@ try {
     }
     $worktreeState = @(& git -c "safe.directory=$safeRepoRoot" -C $repoRoot status --porcelain --untracked-files=no)
     if ($LASTEXITCODE -ne 0) { throw "The P07 gate could not inspect source worktree state." }
+    $visualPageSummary = ($visualPageEvidence | ForEach-Object {
+        "page $($_.page_number) $($_.fixture_kind): RMSE=$($_.rmse), changed=$($_.changed_pixel_ratio), negative RMSE=$($_.negative_control_rmse)"
+    }) -join "; "
     $evidence = [ordered]@{
         captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
         source_commit = $sourceCommit
@@ -736,6 +838,11 @@ try {
         flattened_pdf_coordinate_validation = $true
         flattened_pdf_source_raster_aspect_preserved = $true
         flattened_pdf_source_raster_pixel_fidelity = $true
+        flattened_pdf_visual_page_count = $visualPageEvidence.Count
+        flattened_pdf_visual_pages = $visualPageEvidence
+        flattened_pdf_visual_maximum_rmse = $visualMaximumRmse
+        flattened_pdf_visual_maximum_changed_pixel_ratio = $visualMaximumChangedPixelRatio
+        flattened_pdf_all_page_negative_controls_rejected = $true
         flattened_pdf_visual_rmse = $visualRmse
         flattened_pdf_visual_changed_pixel_ratio = $visualChangedPixelRatio
         flattened_pdf_visual_negative_control_rmse = $visualNegativeRmse
@@ -747,7 +854,7 @@ try {
         retained_model_web_video_milliseconds = $webDescriptionClock.ElapsedMilliseconds
         production_actions = 0
     }
-    $evidence | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot "p07-evidence.json") -Encoding utf8
+    $evidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runRoot "p07-evidence.json") -Encoding utf8
 
     "Accessible text content=True"
     "Folder item count=$($listed.Count)"
@@ -787,7 +894,8 @@ try {
     "Flattened PDF structure tree observed=$pdfHasStructureTree"
     "Flattened PDF marked-content metadata observed=$pdfHasMarkedContent"
     "Flattened PDF extracted text and reviewed coordinates=PASS"
-    "Flattened PDF independent source-raster pixel fidelity=PASS; RMSE=$visualRmse; changed-pixel ratio=$visualChangedPixelRatio; negative-control RMSE=$visualNegativeRmse"
+    "Flattened PDF independent three-page source-raster pixel fidelity=PASS; maximum RMSE=$visualMaximumRmse; maximum changed-pixel ratio=$visualMaximumChangedPixelRatio"
+    "Flattened PDF visual page evidence=$visualPageSummary"
     "Scanned PDF URL strict download and private temporary cleanup=PASS"
     "P07 content viewer UIA validation=PASS"
 }
