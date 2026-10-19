@@ -49,6 +49,11 @@ try {
         "DCx.Core.Tests.Finance.LoopbackCareContributorDashboardSourceTests.Dispose_PreventsCredentialReuse",
         "DCx.Core.Tests.Finance.SimulationCareContributorDashboardApiOptionsTests.Parse_IsAbsentOnlyWhenEverySettingIsAbsent",
         "DCx.Core.Tests.Finance.SimulationCareContributorDashboardApiOptionsTests.Parse_StoresOnlyTokenDigestAndOneValidatedSubject",
+        "DCx.Core.Tests.Finance.CareFailedPayoutReviewTests.Policy_AcceptsPrivacyMinimizedReviewAndZeroAuthorityDisposition",
+        "DCx.Core.Tests.Finance.CareFailedPayoutReviewTests.Policy_RejectsMalformedIdentityAmountStateAndSensitiveShapedCodes",
+        "DCx.Core.Tests.Finance.CareFailedPayoutReviewTests.Policy_RejectsDuplicateOrExcessReviewsAndUnapprovedDisposition",
+        "DCx.Core.Tests.Finance.CareFailedPayoutReviewTests.Policy_RejectsAnyDispositionAuthorityCounter",
+        "DCx.Core.Tests.Finance.CareFailedPayoutReviewTests.UnavailableSource_DoesNotInventReviewsOrRecordDisposition",
         "DCx.Core.Tests.Finance.CareOperationsApiE2eTests.LoopbackApi_AuthenticatesBindsExactReviewAndNeverCallsProviderDuringReplay"
     )
     foreach ($requiredContract in $requiredLiabilityContracts) {
@@ -103,6 +108,8 @@ try {
     "Durable chained aggregate alert outbox and at-least-once delivery receipts=PASS"
     "Accessible opaque blocked-case review and append-only non-financial disposition=PASS"
     "Blocked-case disposition provider calls=0 financial mutations=0"
+    "Accessible failed-payout hold review and local contributor notice=PASS"
+    "Failed-payout decision provider calls=0 financial mutations=0 payout attempts=0 notification transports=0"
     "Quarantine reprocessing provider calls=0"
     "Malformed/unverified event denial before ledger mutation=PASS"
     "Stable PayPal request ID and sender batch retry fixture=PASS"

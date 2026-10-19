@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
 using DCx.Core.Finance;
@@ -8,6 +9,7 @@ public partial class CareOperationsWindow : Window
 {
     private readonly ICareOperationsSource source;
     private readonly ICareBlockedCaseReviewSource blockedCaseSource;
+    private readonly ICareFailedPayoutReviewSource failedPayoutSource;
     private readonly bool isFixture;
     private readonly CancellationTokenSource lifetime = new();
     private CareOperationsHealth? current;
@@ -19,6 +21,8 @@ public partial class CareOperationsWindow : Window
         this.source = source ?? throw new ArgumentNullException(nameof(source));
         blockedCaseSource = source as ICareBlockedCaseReviewSource ??
             UnavailableCareBlockedCaseReviewSource.Instance;
+        failedPayoutSource = source as ICareFailedPayoutReviewSource ??
+            UnavailableCareFailedPayoutReviewSource.Instance;
         this.isFixture = isFixture;
         InitializeComponent();
         BoundaryText.Text = isFixture
@@ -45,6 +49,9 @@ public partial class CareOperationsWindow : Window
 
     private async void OnLoadBlockedCasesClick(object sender, RoutedEventArgs e) =>
         await LoadBlockedCasesAsync();
+
+    private async void OnLoadFailedPayoutReviewsClick(object sender, RoutedEventArgs e) =>
+        await LoadFailedPayoutReviewsAsync();
 
     private async Task RefreshAsync()
     {
@@ -256,6 +263,149 @@ public partial class CareOperationsWindow : Window
         }
     }
 
+    private async Task LoadFailedPayoutReviewsAsync()
+    {
+        SetActionsEnabled(false);
+        ResetFailedPayoutApproval();
+        FailedPayoutReviewsList.ItemsSource = null;
+        SetFailedPayoutDetails("Loading privacy-minimized failed payout holds.");
+        try
+        {
+            var reviews = await failedPayoutSource.ListFailedPayoutReviewsAsync(lifetime.Token);
+            CareFailedPayoutReviewPolicy.RequireList(reviews);
+            if (closed) return;
+            var items = reviews.Select(item => new FailedPayoutListItem(item)).ToArray();
+            FailedPayoutReviewsList.ItemsSource = items;
+            SetFailedPayoutDetails(items.Length == 0
+                ? "No failed payout holds are available for review. No provider request occurred."
+                : $"Loaded {items.Length} privacy-minimized failed payout hold records. Select one to review it. No provider request occurred.");
+            SetStatus(items.Length == 0
+                ? "No failed payout holds require review. No provider request occurred."
+                : $"Loaded {items.Length} failed payout holds. Select one, choose a non-financial decision, and approve the exact record before recording.");
+            FailedPayoutReviewsList.Focus();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            if (!closed)
+            {
+                SetFailedPayoutDetails(
+                    "Failed-payout review is unavailable. No empty state was inferred.");
+                SetStatus(
+                    "Failed-payout review failed closed. No provider call, financial mutation, payout attempt, or notification transport occurred.");
+            }
+        }
+        finally
+        {
+            if (!closed) SetActionsEnabled(true);
+        }
+    }
+
+    private void OnFailedPayoutSelectionChanged(
+        object sender,
+        System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        ResetFailedPayoutApproval();
+        if (FailedPayoutReviewsList.SelectedItem is not FailedPayoutListItem selected)
+        {
+            SetFailedPayoutDetails(
+                "Load and select a failed payout hold to review it.");
+            SetFailedPayoutActionsEnabled();
+            return;
+        }
+
+        var item = selected.Review;
+        SetFailedPayoutDetails(
+            $"Opaque review reference: {item.ReviewId}.{Environment.NewLine}" +
+            $"CARE period: {item.CarePeriodId}.{Environment.NewLine}" +
+            $"Amount: {FormatCents(item.AmountCents)}.{Environment.NewLine}" +
+            $"Closed failure code: {item.FailureCode}.{Environment.NewLine}" +
+            $"Hold code: {item.HoldCode}.{Environment.NewLine}" +
+            $"Local notice code: {item.NoticeCode}.{Environment.NewLine}" +
+            $"Failed UTC: {item.FailedAtUtc:O}.{Environment.NewLine}" +
+            $"Review digest: {item.ReviewSha256}.{Environment.NewLine}" +
+            $"Current disposition: {item.DispositionCode}.{Environment.NewLine}" +
+            "This review records operator intent only. It cannot retry or release a payout, change financial state, send a notification, or contact a provider.");
+        SetFailedPayoutActionsEnabled();
+    }
+
+    private async void OnRecordFailedPayoutDispositionClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (FailedPayoutReviewsList.SelectedItem is not FailedPayoutListItem selected ||
+            ApproveFailedPayoutDispositionBox.IsChecked != true ||
+            RetainFailedPayoutHoldOption.IsChecked != true &&
+            RequestFailedPayoutRecipientUpdateOption.IsChecked != true &&
+            CancelFailedPayoutRetryOption.IsChecked != true)
+        {
+            ResetFailedPayoutApproval();
+            SetStatus(
+                "No failed-payout decision was recorded. Select and review one exact record, choose a decision, and explicitly approve it first.");
+            ApproveFailedPayoutDispositionBox.Focus();
+            return;
+        }
+
+        var disposition = RetainFailedPayoutHoldOption.IsChecked == true
+            ? CareFailedPayoutReviewPolicy.RetainHold
+            : RequestFailedPayoutRecipientUpdateOption.IsChecked == true
+                ? CareFailedPayoutReviewPolicy.RequestRecipientUpdate
+                : CareFailedPayoutReviewPolicy.CancelRetryIntent;
+        SetActionsEnabled(false);
+        try
+        {
+            var request = new CareFailedPayoutDispositionRequest(
+                selected.Review.ReviewId,
+                selected.Review.ReviewSha256,
+                disposition,
+                ExplicitlyApproved: true);
+            var result = await failedPayoutSource.RecordFailedPayoutDispositionAsync(
+                request,
+                lifetime.Token);
+            CareFailedPayoutReviewPolicy.RequireResult(result, request);
+            if (closed) return;
+            selected.Review = selected.Review with
+            {
+                DispositionCode = result.DispositionCode,
+                NoticeCode = result.NoticeCode,
+            };
+            FailedPayoutReviewsList.Items.Refresh();
+            OnFailedPayoutSelectionChanged(
+                FailedPayoutReviewsList,
+                new System.Windows.Controls.SelectionChangedEventArgs(
+                    System.Windows.Controls.Primitives.Selector.SelectionChangedEvent,
+                    Array.Empty<object>(),
+                    Array.Empty<object>()));
+            SetStatus(
+                $"Failed-payout decision recorded as {result.DispositionCode}. " +
+                $"Local dashboard notice {result.NoticeCode}. " +
+                $"Provider calls {result.ProviderCalls}. " +
+                $"Financial mutations {result.FinancialMutations}. " +
+                $"Payout attempts {result.PayoutAttempts}. " +
+                $"Notification transports {result.NotificationTransports}. " +
+                "No retry was sent and the payout remains held.");
+            FailedPayoutReviewDetails.Focus();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            if (!closed)
+            {
+                ResetFailedPayoutApproval();
+                SetStatus(
+                    "No failed-payout decision was recorded. The request failed closed with no provider call, financial mutation, payout attempt, or notification transport.");
+            }
+        }
+        finally
+        {
+            if (!closed) SetActionsEnabled(true);
+        }
+    }
+
     private void SetSummary(CareOperationsHealth health)
     {
         SummaryText.Text =
@@ -286,7 +436,9 @@ public partial class CareOperationsWindow : Window
         ProcessApprovalBox.IsEnabled = canProcess;
         ProcessButton.IsEnabled = canProcess;
         LoadBlockedCasesButton.IsEnabled = enabled;
+        LoadFailedPayoutReviewsButton.IsEnabled = enabled;
         SetBlockedActionsEnabled();
+        SetFailedPayoutActionsEnabled();
     }
 
     private void SetBlockedActionsEnabled()
@@ -305,10 +457,39 @@ public partial class CareOperationsWindow : Window
         RetainDisposition.IsChecked = false;
     }
 
+    private void SetFailedPayoutActionsEnabled()
+    {
+        var hasSelection =
+            actionsEnabled &&
+            FailedPayoutReviewsList.SelectedItem is FailedPayoutListItem
+            {
+                Review.DispositionCode: CareFailedPayoutReviewPolicy.Unreviewed,
+            };
+        RetainFailedPayoutHoldOption.IsEnabled = hasSelection;
+        RequestFailedPayoutRecipientUpdateOption.IsEnabled = hasSelection;
+        CancelFailedPayoutRetryOption.IsEnabled = hasSelection;
+        ApproveFailedPayoutDispositionBox.IsEnabled = hasSelection;
+        RecordFailedPayoutDispositionButton.IsEnabled = hasSelection;
+    }
+
+    private void ResetFailedPayoutApproval()
+    {
+        ApproveFailedPayoutDispositionBox.IsChecked = false;
+        RetainFailedPayoutHoldOption.IsChecked = false;
+        RequestFailedPayoutRecipientUpdateOption.IsChecked = false;
+        CancelFailedPayoutRetryOption.IsChecked = false;
+    }
+
     private void SetBlockedCaseDetails(string value)
     {
         BlockedCaseDetails.Text = value;
         AutomationProperties.SetName(BlockedCaseDetails, value);
+    }
+
+    private void SetFailedPayoutDetails(string value)
+    {
+        FailedPayoutReviewDetails.Text = value;
+        AutomationProperties.SetName(FailedPayoutReviewDetails, value);
     }
 
     private void SetStatus(string value)
@@ -320,11 +501,23 @@ public partial class CareOperationsWindow : Window
     private static string FormatTime(DateTimeOffset? value) =>
         value is null ? "none" : value.Value.ToUniversalTime().ToString("O");
 
+    private static string FormatCents(long value) =>
+        string.Create(CultureInfo.InvariantCulture, $"USD {value / 100m:0.00}");
+
     private sealed class BlockedCaseListItem(CareBlockedCaseReview review)
     {
         public CareBlockedCaseReview Review { get; set; } = review;
 
         public string Display =>
             $"{Review.EventKind}. {Review.ReasonCode}. {Review.DispositionCode}. Case {Review.CaseId}.";
+    }
+
+    private sealed class FailedPayoutListItem(CareFailedPayoutReview review)
+    {
+        public CareFailedPayoutReview Review { get; set; } = review;
+
+        public string Display =>
+            $"{Review.CarePeriodId}. {FormatCents(Review.AmountCents)}. " +
+            $"{Review.FailureCode}. {Review.DispositionCode}. Review {Review.ReviewId}.";
     }
 }

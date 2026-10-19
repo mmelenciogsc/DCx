@@ -284,7 +284,8 @@ try {
         "RefreshCareOperationsButton",
         "ApproveCareOperationsProcessBox",
         "ProcessDueCareOperationsButton",
-        "LoadBlockedCareCasesButton")
+        "LoadBlockedCareCasesButton",
+        "LoadFailedPayoutReviewsButton")
     $operationsAccessKeys = @()
     foreach ($automationId in $operationsActionIds) {
         $action = Find-ById $operationsWindow $automationId
@@ -382,6 +383,100 @@ try {
         throw "Blocked-case disposition approval was not reset after recording."
     }
 
+    Invoke-ById $operationsWindow "LoadFailedPayoutReviewsButton" | Out-Null
+    $failedPayoutList = Wait-For {
+        $element = Find-ById $operationsWindow "FailedPayoutReviewsList"
+        if ($null -ne $element) {
+            $items = $element.FindAll(
+                [System.Windows.Automation.TreeScope]::Children,
+                [System.Windows.Automation.Condition]::TrueCondition)
+            if ($items.Count -eq 1) { $element }
+        }
+    } "The privacy-minimized failed payout hold was not exposed."
+    $failedPayoutItems = $failedPayoutList.FindAll(
+        [System.Windows.Automation.TreeScope]::Children,
+        [System.Windows.Automation.Condition]::TrueCondition)
+    $failedPayoutItems[0].GetCurrentPattern(
+        [System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    $failedPayoutDetailsBefore = Wait-For {
+        $value = Get-Value $operationsWindow "FailedPayoutReviewDetails"
+        if ($value -like "*Opaque review reference: fedcba9876543210fedcba9876543210.*" -and
+            $value -like "*CARE period: care:2026-05.*" -and
+            $value -like "*Amount: USD 7.00.*" -and
+            $value -like "*Closed failure code: recipient_unverified.*" -and
+            $value -like "*Hold code: failed_item_hold.*" -and
+            $value -like "*Local notice code: not_ready.*" -and
+            $value -like "*Current disposition: unreviewed.*" -and
+            $value -notlike "*@*" -and
+            $value -notlike "*PayPal*" -and
+            $value -notlike "*destination*" -and
+            $value -notlike "*account*") { $value }
+    } "The exact privacy-minimized failed payout hold review was not exposed."
+    $failedPayoutActionIds = @(
+        "RetainFailedPayoutHoldOption",
+        "RequestFailedPayoutRecipientUpdateOption",
+        "CancelFailedPayoutRetryOption",
+        "ApproveFailedPayoutDispositionBox",
+        "RecordFailedPayoutDispositionButton")
+    foreach ($automationId in $failedPayoutActionIds) {
+        $action = Find-ById $operationsWindow $automationId
+        if ($null -eq $action -or -not $action.Current.IsKeyboardFocusable -or
+            [string]::IsNullOrWhiteSpace($action.Current.AccessKey)) {
+            throw "The $automationId action lacks a keyboard-focusable access key."
+        }
+        $operationsAccessKeys += $action.Current.AccessKey
+    }
+    if (@($operationsAccessKeys | Sort-Object -Unique).Count -ne
+        $operationsAccessKeys.Count) {
+        throw "CARE operations remediation actions expose duplicate access keys."
+    }
+    $failedPayoutApproval = Find-ById $operationsWindow "ApproveFailedPayoutDispositionBox"
+    $failedPayoutApprovalToggle = $failedPayoutApproval.GetCurrentPattern(
+        [System.Windows.Automation.TogglePattern]::Pattern)
+    if ($failedPayoutApprovalToggle.Current.ToggleState -ne
+        [System.Windows.Automation.ToggleState]::Off) {
+        throw "Failed-payout disposition approval did not default to unchecked."
+    }
+    Invoke-ById $operationsWindow "RecordFailedPayoutDispositionButton" | Out-Null
+    $null = Wait-For {
+        $status = Find-ById $operationsWindow "CareOperationsStatus"
+        if ($null -ne $status -and $status.Current.Name -like
+            "No failed-payout decision was recorded.*explicitly approve it first.*") { $status }
+    } "Failed-payout disposition without approval did not fail closed."
+    if ($failedPayoutApprovalToggle.Current.ToggleState -ne
+        [System.Windows.Automation.ToggleState]::Off -or
+        -not $failedPayoutApproval.Current.HasKeyboardFocus) {
+        throw "Denied failed-payout disposition did not reset and focus explicit approval."
+    }
+    $requestUpdateOption = Find-ById $operationsWindow "RequestFailedPayoutRecipientUpdateOption"
+    $requestUpdateOption.GetCurrentPattern(
+        [System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    $failedPayoutApprovalToggle.Toggle()
+    Invoke-ById $operationsWindow "RecordFailedPayoutDispositionButton" | Out-Null
+    $failedPayoutStatus = Wait-For {
+        $status = Find-ById $operationsWindow "CareOperationsStatus"
+        if ($null -ne $status -and $status.Current.Name -eq
+            "Failed-payout decision recorded as request_recipient_update. Local dashboard notice local_dashboard_notice_ready. Provider calls 0. Financial mutations 0. Payout attempts 0. Notification transports 0. No retry was sent and the payout remains held.") { $status }
+    } "The approved zero-authority failed-payout disposition was not announced."
+    $failedPayoutStatusName = [string]$failedPayoutStatus.Current.Name
+    $failedPayoutDetailsAfter = Wait-For {
+        $element = Find-ById $operationsWindow "FailedPayoutReviewDetails"
+        $value = $element.GetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+        if ($value -like "*Local notice code: local_dashboard_notice_ready.*" -and
+            $value -like "*Current disposition: request_recipient_update.*" -and
+            $value -like "*cannot retry or release a payout*send a notification*contact a provider.*" -and
+            $element.Current.HasKeyboardFocus) { $value }
+    } "The recorded failed-payout disposition or focus was not exposed."
+    if ($failedPayoutApprovalToggle.Current.ToggleState -ne
+        [System.Windows.Automation.ToggleState]::Off) {
+        throw "Failed-payout disposition approval was not reset after recording."
+    }
+    $failedPayoutRecordButton = Find-ById $operationsWindow "RecordFailedPayoutDispositionButton"
+    if ($null -eq $failedPayoutRecordButton -or $failedPayoutRecordButton.Current.IsEnabled) {
+        throw "Failed-payout disposition replay remained enabled after the decision was recorded."
+    }
+
     Invoke-ById $operationsWindow "ProcessDueCareOperationsButton" | Out-Null
     $null = Wait-For {
         $status = Find-ById $operationsWindow "CareOperationsStatus"
@@ -473,6 +568,16 @@ try {
             throw "The CARE contributor dashboard omitted status $statusCode. Observed: $periodText"
         }
     }
+    foreach ($notice in @(
+        "Notice: This allocation is withheld. No payout is scheduled.",
+        "Notice: This allocation remains held below the payout threshold.",
+        "Notice: A payout is pending. No contributor action is requested.",
+        "Notice: Part was paid. The remaining amount stays held for review; no automatic retry occurs.",
+        "Notice: This allocation was paid.")) {
+        if ($periodText -notlike "*$notice*") {
+            throw "The CARE contributor dashboard omitted local notice: $notice"
+        }
+    }
     if ($periodText -like "*@*" -or $periodText -like "*PayPal*" -or
         $periodText -like "*account*" -or $periodText -like "*recipient*") {
         throw "The CARE contributor period history exposed recipient or provider-account data."
@@ -489,7 +594,7 @@ try {
     } "CARE contributor dashboard refresh did not move focus to the updated summary."
 
     [ordered]@{
-        schema_version = 3
+        schema_version = 4
         heading = $heading.Current.Name
         owner_approval_default_unchecked = $true
         revocation_approval_default_unchecked = $true
@@ -519,6 +624,17 @@ try {
         blocked_case_provider_calls = 0
         blocked_case_financial_mutations = 0
         blocked_case_remained_blocked = $true
+        failed_payout_review_before = $failedPayoutDetailsBefore
+        failed_payout_review_after = $failedPayoutDetailsAfter
+        failed_payout_approval_default_unchecked = $true
+        failed_payout_without_approval_denied = $true
+        failed_payout_status_after_disposition = $failedPayoutStatusName
+        failed_payout_provider_calls = 0
+        failed_payout_financial_mutations = 0
+        failed_payout_attempts = 0
+        failed_payout_notification_transports = 0
+        failed_payout_remained_held = $true
+        failed_payout_replay_enabled = $false
         operations_provider_calls = 0
         operations_production_actions = 0
         contributor_dashboard_heading = $dashboardHeading.Current.Name
@@ -527,6 +643,8 @@ try {
         contributor_dashboard_periods = $periodItems.Count
         contributor_dashboard_statuses = @(
             "withheld", "held_below_threshold", "pending", "partially_paid", "paid")
+        contributor_dashboard_local_status_notices = $true
+        contributor_dashboard_external_notification_transports = 0
         contributor_dashboard_read_only = $true
         contributor_dashboard_network_requests = 0
         contributor_dashboard_payout_attempts = 0
@@ -539,6 +657,8 @@ try {
     "P11 provider eligibility remains false=PASS"
     "P11 CARE operations default-off local cycle and focus=PASS"
     "P11 accessible blocked-case review and non-financial disposition=PASS"
+    "P11 accessible failed-payout hold review and zero-authority disposition=PASS"
+    "P11 contributor-facing local status notices=PASS external notification transports=0"
     "P11 accessible privacy-minimized contributor dashboard=PASS"
     "P11 CARE operations aggregate-only provider calls=0 production actions=0"
     "P11 recipient UI network requests=0 payout attempts=0"

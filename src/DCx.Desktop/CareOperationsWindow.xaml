@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="CARE verified-event operations — DCx"
         Width="760"
-        Height="650"
+        Height="700"
         MinWidth="620"
         MinHeight="500"
         AutomationProperties.AutomationId="CareOperationsWindow"
@@ -159,6 +159,78 @@
                                 AutomationProperties.Name="Record blocked CARE case disposition"
                                 AutomationProperties.HelpText="Requires exact-case review and explicit approval. Financial mutations and provider calls are prohibited."
                                 Click="OnRecordDispositionClick" />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Margin="0,18,0,0" Header="Review failed payout holds">
+                    <StackPanel Margin="12,8">
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="Review generated, privacy-minimized failed payout records. A decision records operator intent and prepares a local dashboard notice only. It never retries or releases a payout, sends a notification, changes financial state, or contacts a provider." />
+                        <Button x:Name="LoadFailedPayoutReviewsButton"
+                                Width="210"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="Load payout re_views"
+                                AutomationProperties.AutomationId="LoadFailedPayoutReviewsButton"
+                                AutomationProperties.Name="Load failed payout hold reviews"
+                                AutomationProperties.HelpText="Reads at most one hundred privacy-minimized failed payout records. No provider request occurs."
+                                Click="OnLoadFailedPayoutReviewsClick" />
+                        <ListBox x:Name="FailedPayoutReviewsList"
+                                 MinHeight="100"
+                                 MaxHeight="180"
+                                 Margin="0,12,0,0"
+                                 DisplayMemberPath="Display"
+                                 AutomationProperties.AutomationId="FailedPayoutReviewsList"
+                                 AutomationProperties.Name="Failed payout hold reviews"
+                                 SelectionChanged="OnFailedPayoutSelectionChanged" />
+                        <TextBox x:Name="FailedPayoutReviewDetails"
+                                 MinHeight="120"
+                                 Margin="0,12,0,0"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="Load and select a failed payout hold to review it."
+                                 AutomationProperties.AutomationId="FailedPayoutReviewDetails"
+                                 AutomationProperties.Name="Load and select a failed payout hold to review it." />
+                        <RadioButton x:Name="RetainFailedPayoutHoldOption"
+                                     Margin="0,12,0,0"
+                                     GroupName="FailedPayoutDisposition"
+                                     Content="_Keep hold"
+                                     AutomationProperties.AutomationId="RetainFailedPayoutHoldOption"
+                                     AutomationProperties.Name="Keep the selected failed payout on hold" />
+                        <RadioButton x:Name="RequestFailedPayoutRecipientUpdateOption"
+                                     Margin="0,8,0,0"
+                                     GroupName="FailedPayoutDisposition"
+                                     Content="Request recipient _update"
+                                     AutomationProperties.AutomationId="RequestFailedPayoutRecipientUpdateOption"
+                                     AutomationProperties.Name="Request a recipient update for the selected failed payout" />
+                        <RadioButton x:Name="CancelFailedPayoutRetryOption"
+                                     Margin="0,8,0,0"
+                                     GroupName="FailedPayoutDisposition"
+                                     Content="Cancel retry in_tent"
+                                     AutomationProperties.AutomationId="CancelFailedPayoutRetryOption"
+                                     AutomationProperties.Name="Cancel retry intent for the selected failed payout" />
+                        <CheckBox x:Name="ApproveFailedPayoutDispositionBox"
+                                  Margin="0,12,0,0"
+                                  FontWeight="SemiBold"
+                                  IsChecked="False"
+                                  Content="I reviewed this exact failed payout and con_firm this non-financial decision"
+                                  AutomationProperties.AutomationId="ApproveFailedPayoutDispositionBox"
+                                  AutomationProperties.Name="I reviewed this exact failed payout and confirm this non-financial decision"
+                                  AutomationProperties.HelpText="Initially unchecked and reset after every load, selection change, or attempt." />
+                        <Button x:Name="RecordFailedPayoutDispositionButton"
+                                Width="230"
+                                MinHeight="36"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                Content="Record re_mediation decision"
+                                AutomationProperties.AutomationId="RecordFailedPayoutDispositionButton"
+                                AutomationProperties.Name="Record failed payout remediation decision"
+                                AutomationProperties.HelpText="Requires exact-record review and explicit approval. Provider calls, financial mutations, payout attempts, and notification transports are prohibited."
+                                Click="OnRecordFailedPayoutDispositionClick" />
                     </StackPanel>
                 </GroupBox>
             </StackPanel>

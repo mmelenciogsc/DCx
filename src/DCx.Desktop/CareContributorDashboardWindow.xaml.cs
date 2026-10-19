@@ -161,8 +161,24 @@ public partial class CareContributorDashboardWindow : Window
             $"{status.PeriodId}. Period close {status.EarningPeriodClose:yyyy-MM-dd}. " +
             $"Net 60 eligibility {status.Net60EligibilityDate:yyyy-MM-dd}. " +
             $"Status {status.StatusCode}. Allocation {FormatCents(status.AllocationCents)}. " +
-            $"Paid {FormatCents(status.PaidCents)}. Outstanding {FormatCents(status.OutstandingCents)}.";
+            $"Paid {FormatCents(status.PaidCents)}. Outstanding {FormatCents(status.OutstandingCents)}. " +
+            GetLocalNotice(status.StatusCode);
 
         public override string ToString() => Display;
+
+        private static string GetLocalNotice(string statusCode) => statusCode switch
+        {
+            CareContributorDashboardPolicy.Withheld =>
+                "Notice: This allocation is withheld. No payout is scheduled.",
+            CareContributorDashboardPolicy.HeldBelowThreshold =>
+                "Notice: This allocation remains held below the payout threshold.",
+            CareContributorDashboardPolicy.Pending =>
+                "Notice: A payout is pending. No contributor action is requested.",
+            CareContributorDashboardPolicy.PartiallyPaid =>
+                "Notice: Part was paid. The remaining amount stays held for review; no automatic retry occurs.",
+            CareContributorDashboardPolicy.Paid =>
+                "Notice: This allocation was paid.",
+            _ => "Notice: No payout state is inferred.",
+        };
     }
 }

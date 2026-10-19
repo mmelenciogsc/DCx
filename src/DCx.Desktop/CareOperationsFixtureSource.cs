@@ -4,7 +4,8 @@ namespace DCx.Desktop;
 
 internal sealed class CareOperationsFixtureSource :
     ICareOperationsSource,
-    ICareBlockedCaseReviewSource
+    ICareBlockedCaseReviewSource,
+    ICareFailedPayoutReviewSource
 {
     internal const string EnvironmentVariable = "DCX_CARE_OPERATIONS_FIXTURE";
     private static readonly DateTimeOffset FixtureTime =
@@ -12,6 +13,9 @@ internal sealed class CareOperationsFixtureSource :
     private int processed;
     private readonly object dispositionLock = new();
     private string disposition = CareBlockedCaseReviewPolicy.Unreviewed;
+    private readonly object failedPayoutLock = new();
+    private string failedPayoutDisposition = CareFailedPayoutReviewPolicy.Unreviewed;
+    private string failedPayoutNotice = CareFailedPayoutReviewPolicy.NoticeNotReady;
     private static readonly CareBlockedCaseReview BlockedFixture = new(
         "0123456789abcdef0123456789abcdef",
         "refund",
@@ -21,6 +25,16 @@ internal sealed class CareOperationsFixtureSource :
         FixtureTime.AddMinutes(-1),
         "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
         CareBlockedCaseReviewPolicy.Unreviewed);
+    private static readonly CareFailedPayoutReview FailedPayoutFixture = new(
+        "fedcba9876543210fedcba9876543210",
+        "care:2026-05",
+        700,
+        CareFailedPayoutReviewPolicy.RecipientUnverified,
+        CareFailedPayoutReviewPolicy.FailedItemHold,
+        CareFailedPayoutReviewPolicy.NoticeNotReady,
+        FixtureTime.AddMinutes(-20),
+        "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        CareFailedPayoutReviewPolicy.Unreviewed);
 
     public Task<CareOperationsHealth> RefreshAsync(
         CancellationToken cancellationToken = default)
@@ -103,6 +117,70 @@ internal sealed class CareOperationsFixtureSource :
             ProviderCalls: 0,
             FinancialMutations: 0);
         CareBlockedCaseReviewPolicy.RequireResult(result);
+        return Task.FromResult(result);
+    }
+
+    public Task<IReadOnlyList<CareFailedPayoutReview>> ListFailedPayoutReviewsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (failedPayoutLock)
+        {
+            IReadOnlyList<CareFailedPayoutReview> result =
+                [FailedPayoutFixture with
+                {
+                    DispositionCode = failedPayoutDisposition,
+                    NoticeCode = failedPayoutNotice,
+                }];
+            CareFailedPayoutReviewPolicy.RequireList(result);
+            return Task.FromResult(result);
+        }
+    }
+
+    public Task<CareFailedPayoutDispositionResult> RecordFailedPayoutDispositionAsync(
+        CareFailedPayoutDispositionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CareFailedPayoutReviewPolicy.RequireRequest(request);
+        if (!string.Equals(
+                request.ReviewId,
+                FailedPayoutFixture.ReviewId,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                request.ReviewedSha256,
+                FailedPayoutFixture.ReviewSha256,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The reviewed failed payout changed before disposition.");
+        }
+
+        lock (failedPayoutLock)
+        {
+            if (!string.Equals(
+                    failedPayoutDisposition,
+                    CareFailedPayoutReviewPolicy.Unreviewed,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The failed-payout decision was already recorded.");
+            }
+
+            failedPayoutDisposition = request.DispositionCode;
+            failedPayoutNotice = CareFailedPayoutReviewPolicy.LocalDashboardNoticeReady;
+        }
+
+        var result = new CareFailedPayoutDispositionResult(
+            request.ReviewId,
+            request.DispositionCode,
+            CareFailedPayoutReviewPolicy.LocalDashboardNoticeReady,
+            FixtureTime.AddMinutes(2),
+            ProviderCalls: 0,
+            FinancialMutations: 0,
+            PayoutAttempts: 0,
+            NotificationTransports: 0);
+        CareFailedPayoutReviewPolicy.RequireResult(result, request);
         return Task.FromResult(result);
     }
 
