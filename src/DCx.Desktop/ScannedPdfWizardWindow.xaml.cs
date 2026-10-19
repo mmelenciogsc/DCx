@@ -13,6 +13,7 @@ public partial class ScannedPdfWizardWindow : Window
     private readonly AccessibleDocumentExporter _exporter = new();
     private WebView2AccessiblePdfExporter? _pdfExporter;
     private AccessibleDocument? _document;
+    private string? _recognizedSourceSha256;
     private DocumentBlock[] _orderedBlocks = [];
 
     public ScannedPdfWizardWindow(string pdfPath)
@@ -34,7 +35,9 @@ public partial class ScannedPdfWizardWindow : Window
         SetStatus("Windows OCR is processing the scanned PDF.");
         try
         {
-            _document = await _ocrService.RecognizePdfAsync(_pdfPath);
+            var recognized = await _ocrService.RecognizePdfAsync(_pdfPath);
+            _document = recognized.Document;
+            _recognizedSourceSha256 = recognized.SourceSha256;
             var validation = _validator.Validate(_document);
             _orderedBlocks = _document.Blocks.OrderBy(block => block.PageNumber).ThenBy(block => block.ReadingOrder).ToArray();
             OcrBlocksList.ItemsSource = _orderedBlocks
@@ -135,15 +138,15 @@ public partial class ScannedPdfWizardWindow : Window
 
     private async void OnExportPdfClick(object sender, RoutedEventArgs e)
     {
-        if (_document is null) return;
+        if (_document is null || _recognizedSourceSha256 is null) return;
         var path = GetExportPath("pdf");
         SetExportActionsEnabled(false);
-        SetStatus("Preparing a flattened accessible PDF from reviewed text and geometry. The output is not an editable form.");
+        SetStatus("Preparing a tagged flattened PDF with the source-page raster plus reviewed text and geometry. The output is not an editable form.");
         try
         {
             _pdfExporter ??= new WebView2AccessiblePdfExporter(PdfExportWebView);
-            await _pdfExporter.ExportFlattenedAsync(_document, path);
-            SetStatus($"Flattened accessible PDF exported atomically: {Path.GetFileName(path)}. Human assistive-technology review is still required.");
+            await _pdfExporter.ExportFlattenedAsync(_document, _pdfPath, _recognizedSourceSha256, path);
+            SetStatus($"Tagged flattened PDF exported atomically: {Path.GetFileName(path)}. Human assistive-technology review is still required.");
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or InvalidOperationException or

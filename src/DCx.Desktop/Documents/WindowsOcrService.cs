@@ -1,19 +1,32 @@
 using DCx.Core.Documents;
 using System.IO;
+using System.Security.Cryptography;
 using Windows.Data.Pdf;
 using Windows.Graphics.Imaging;
 using Windows.Media.Ocr;
-using Windows.Storage;
 using Windows.Storage.Streams;
 
 namespace DCx.Desktop.Documents;
 
+public sealed record RecognizedPdf(AccessibleDocument Document, string SourceSha256);
+
 public sealed class WindowsOcrService
 {
-    public async Task<AccessibleDocument> RecognizePdfAsync(string path, CancellationToken cancellationToken = default)
+    public async Task<RecognizedPdf> RecognizePdfAsync(string path, CancellationToken cancellationToken = default)
     {
-        var file = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(path));
-        var pdf = await PdfDocument.LoadFromFileAsync(file);
+        await using var source = new FileStream(
+            Path.GetFullPath(path),
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read | FileShare.Delete,
+            64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var digestBytes = await SHA256.HashDataAsync(source, cancellationToken);
+        var sourceSha256 = Convert.ToHexStringLower(digestBytes);
+        CryptographicOperations.ZeroMemory(digestBytes);
+        source.Position = 0;
+        using var randomAccessSource = source.AsRandomAccessStream();
+        var pdf = await PdfDocument.LoadFromStreamAsync(randomAccessSource);
         var engine = OcrEngine.TryCreateFromUserProfileLanguages()
             ?? throw new InvalidOperationException("Windows OCR has no configured recognition language.");
         var blocks = new List<DocumentBlock>();
@@ -46,9 +59,11 @@ public sealed class WindowsOcrService
             }
         }
 
-        return new AccessibleDocument(
-            Path.GetFileNameWithoutExtension(path),
-            blocks,
-            engine.RecognizerLanguage.LanguageTag);
+        return new RecognizedPdf(
+            new AccessibleDocument(
+                Path.GetFileNameWithoutExtension(path),
+                blocks,
+                engine.RecognizerLanguage.LanguageTag),
+            sourceSha256);
     }
 }

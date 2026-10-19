@@ -537,20 +537,20 @@ try {
         throw "Atomic document export left a same-directory temporary file."
     }
 
-    $exportPdf = Require-ById $wizard "ExportPdfButton" "The flattened accessible PDF export action was not exposed."
+    $exportPdf = Require-ById $wizard "ExportPdfButton" "The tagged flattened PDF export action was not exposed."
     $pdfExport = Join-Path $exportRoot "scanned-source-accessible.pdf"
     [IO.File]::WriteAllText($pdfExport, "prior export placeholder")
     $exportPdf.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For {
         if (-not (Test-Path -LiteralPath $pdfExport -PathType Leaf) -or
-            $wizardStatus.Current.Name -notlike "Flattened accessible PDF exported atomically:*") { return $false }
+            $wizardStatus.Current.Name -notlike "Tagged flattened PDF exported atomically:*") { return $false }
         try {
             $candidate = [IO.File]::ReadAllBytes($pdfExport)
             return $candidate.Length -gt 128 -and
                 [Text.Encoding]::ASCII.GetString($candidate, 0, 5) -eq "%PDF-"
         }
         catch { return $false }
-    } "The flattened accessible PDF was not produced atomically." 100
+    } "The tagged flattened PDF was not produced atomically." 100
     $pdfBytes = [IO.File]::ReadAllBytes($pdfExport)
     if ($pdfBytes.Length -gt 20MB) { throw "The one-page PDF fixture exceeded its validation bound." }
     $pdfAscii = [Text.Encoding]::ASCII.GetString($pdfBytes)
@@ -569,12 +569,29 @@ try {
     if ([int]$pdfInspection.page_count -ne 1 -or [int]$pdfInspection.word_count -lt 3) {
         throw "The flattened PDF did not preserve its expected page or word structure."
     }
+    $pdfImages = @($pdfInspection.pages[0].images)
+    $pageBackground = @($pdfImages | Where-Object {
+        ([double]$_.right_normalized - [double]$_.left_normalized) -ge 0.99 -or
+        ([double]$_.bottom_normalized - [double]$_.top_normalized) -ge 0.99
+    }) | Select-Object -First 1
+    if ([int]$pdfInspection.pages[0].image_count -lt 1 -or $null -eq $pageBackground -or
+        [int]$pageBackground.width_samples -lt 600 -or [int]$pageBackground.height_samples -lt 700) {
+        throw "The flattened PDF did not preserve a bounded source raster."
+    }
+    $placedWidth = ([double]$pageBackground.right_normalized - [double]$pageBackground.left_normalized) * [double]$pdfInspection.pages[0].width
+    $placedHeight = ([double]$pageBackground.bottom_normalized - [double]$pageBackground.top_normalized) * [double]$pdfInspection.pages[0].height
+    $sampleAspect = [double]$pageBackground.width_samples / [double]$pageBackground.height_samples
+    $placedAspect = $placedWidth / $placedHeight
+    if ([Math]::Abs($sampleAspect - $placedAspect) -gt 0.03) {
+        throw "The flattened PDF distorted the source-raster aspect ratio."
+    }
     $pdfWords = @($pdfInspection.pages[0].words)
     $dcxWord = @($pdfWords | Where-Object { $_.text -eq "DCX" }) | Select-Object -First 1
     $numberWord = @($pdfWords | Where-Object { $_.text -eq "42" }) | Select-Object -First 1
     if ($null -eq $dcxWord -or $null -eq $numberWord -or
         [double]$dcxWord.left_normalized -lt 0.03 -or [double]$dcxWord.left_normalized -gt 0.30 -or
-        [double]$dcxWord.top_normalized -lt 0.20 -or [double]$dcxWord.top_normalized -gt 0.70 -or
+        [double]$dcxWord.top_normalized -lt [double]$pageBackground.top_normalized -or
+        [double]$dcxWord.top_normalized -gt [double]$pageBackground.bottom_normalized -or
         [Math]::Abs([double]$dcxWord.top_normalized - [double]$numberWord.top_normalized) -gt 0.05) {
         throw "The flattened PDF failed extracted-text or reviewed-coordinate validation."
     }
@@ -623,6 +640,7 @@ try {
         flattened_pdf_mark_info_observed = $pdfHasMarkedContent
         flattened_pdf_extracted_words = [int]$pdfInspection.word_count
         flattened_pdf_coordinate_validation = $true
+        flattened_pdf_source_raster_aspect_preserved = $true
         scanned_pdf_url_private_temporary_cleanup = $true
         local_vlm_cold_milliseconds = $localDescriptionClock.ElapsedMilliseconds
         retained_model_web_video_milliseconds = $webDescriptionClock.ElapsedMilliseconds

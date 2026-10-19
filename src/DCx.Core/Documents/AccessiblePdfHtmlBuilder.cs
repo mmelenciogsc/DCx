@@ -7,9 +7,13 @@ namespace DCx.Core.Documents;
 public sealed class AccessiblePdfHtmlBuilder
 {
     private const int MaximumPages = 2_000;
+    private const double PaperWidthInches = 8.5;
+    private const double PaperHeightInches = 11;
     private readonly AccessibleDocumentValidator validator = new();
 
-    public string BuildFlattenedLayout(AccessibleDocument document)
+    public string BuildFlattenedLayout(
+        AccessibleDocument document,
+        IReadOnlyList<AccessiblePdfPageBackground>? pageBackgrounds = null)
     {
         var validation = validator.Validate(document);
         if (!validation.IsValid) throw new InvalidOperationException(string.Join(" ", validation.Errors));
@@ -26,26 +30,52 @@ public sealed class AccessiblePdfHtmlBuilder
             throw new InvalidOperationException("Flattened PDF pages must be sequential and within the page limit.");
         }
 
+        if (pageBackgrounds is not null &&
+            (pageBackgrounds.Count != pages.Length ||
+             pageBackgrounds.Select((background, index) =>
+                     background.IsValid && string.Equals(
+                         background.FileName,
+                         $"page-{index + 1:D4}.png",
+                         StringComparison.Ordinal))
+                 .Any(matches => !matches)))
+        {
+            throw new InvalidOperationException("Flattened PDF page backgrounds must exactly match the reviewed page sequence.");
+        }
+
         var language = CultureInfo.GetCultureInfo(document.Language).Name;
         var html = new StringBuilder();
         html.Append("<!doctype html><html lang=\"").Append(Encode(language))
             .Append("\"><head><meta charset=\"utf-8\">")
-            .Append("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data:\">")
+            .Append("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src 'self'\">")
             .Append("<title>").Append(Encode(document.Title)).Append("</title>")
             .Append("<style>@page{size:8.5in 11in;margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff;color:#000;font-family:Arial,sans-serif}")
             .Append("main{margin:0;padding:0}.page{position:relative;width:8.5in;height:11in;overflow:hidden;break-after:page;page-break-after:always}")
             .Append(".page:last-child{break-after:auto;page-break-after:auto}.block{position:absolute;margin:0;white-space:pre-wrap;overflow:hidden;font-size:10pt;line-height:1.15}")
+            .Append(".page-background{position:absolute;object-fit:fill;z-index:0}.has-background .block{z-index:1;color:transparent;-webkit-text-fill-color:transparent}")
             .Append(".field-label{font-weight:700}.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}</style>")
             .Append("</head><body><main aria-label=\"").Append(Encode(document.Title)).Append("\">");
 
         foreach (var page in pages)
         {
-            html.Append("<section class=\"page\" aria-label=\"Page ").Append(page.Key)
+            var hasBackground = pageBackgrounds is not null;
+            var placement = hasBackground
+                ? CalculatePlacement(pageBackgrounds![page.Key - 1])
+                : PagePlacement.FullPage;
+            html.Append("<section class=\"page");
+            if (hasBackground) html.Append(" has-background");
+            html.Append("\" aria-label=\"Page ").Append(page.Key)
                 .Append("\"><h1 class=\"sr-only\">").Append(Encode(document.Title))
                 .Append(", page ").Append(page.Key).Append("</h1>");
+            if (hasBackground)
+            {
+                html.Append("<img class=\"page-background\" src=\"")
+                    .Append(pageBackgrounds![page.Key - 1].FileName)
+                    .Append("\" style=\"").Append(placement.ToCss())
+                    .Append("\" alt=\"\" aria-hidden=\"true\">");
+            }
             foreach (var block in page.OrderBy(block => block.ReadingOrder))
             {
-                AppendBlock(html, block);
+                AppendBlock(html, block, placement);
             }
 
             html.Append("</section>");
@@ -54,11 +84,15 @@ public sealed class AccessiblePdfHtmlBuilder
         return html.Append("</main></body></html>").ToString();
     }
 
-    private static void AppendBlock(StringBuilder html, DocumentBlock block)
+    private static void AppendBlock(StringBuilder html, DocumentBlock block, PagePlacement placement)
     {
         var bounds = block.Bounds!;
+        var left = placement.Left + (bounds.X * placement.Width);
+        var top = placement.Top + (bounds.Y * placement.Height);
+        var width = bounds.Width * placement.Width;
+        var height = bounds.Height * placement.Height;
         var style = FormattableString.Invariant(
-            $"left:{bounds.X * 100:0.####}%;top:{bounds.Y * 100:0.####}%;width:{bounds.Width * 100:0.####}%;height:{bounds.Height * 100:0.####}%");
+            $"left:{left * 100:0.####}%;top:{top * 100:0.####}%;width:{width * 100:0.####}%;height:{height * 100:0.####}%");
         var tag = block.Role == DocumentBlockRole.Heading ? "h2" : "div";
         html.Append('<').Append(tag).Append(" class=\"block\" style=\"").Append(style).Append("\"");
         if (block.Role == DocumentBlockRole.ImageDescription)
@@ -87,4 +121,34 @@ public sealed class AccessiblePdfHtmlBuilder
     }
 
     private static string Encode(string? value) => WebUtility.HtmlEncode(value ?? string.Empty);
+
+    private static PagePlacement CalculatePlacement(AccessiblePdfPageBackground background)
+    {
+        var sourceAspect = background.Width / background.Height;
+        var paperAspect = PaperWidthInches / PaperHeightInches;
+        if (sourceAspect >= paperAspect)
+        {
+            var height = paperAspect / sourceAspect;
+            return new PagePlacement(0, (1 - height) / 2, 1, height);
+        }
+
+        var width = sourceAspect / paperAspect;
+        return new PagePlacement((1 - width) / 2, 0, width, 1);
+    }
+
+    private readonly record struct PagePlacement(double Left, double Top, double Width, double Height)
+    {
+        public static PagePlacement FullPage { get; } = new(0, 0, 1, 1);
+
+        public string ToCss() => FormattableString.Invariant(
+            $"left:{Left * 100:0.####}%;top:{Top * 100:0.####}%;width:{Width * 100:0.####}%;height:{Height * 100:0.####}%");
+    }
+}
+
+public sealed record AccessiblePdfPageBackground(string FileName, double Width, double Height)
+{
+    public bool IsValid =>
+        !string.IsNullOrWhiteSpace(FileName) && Path.GetFileName(FileName) == FileName &&
+        double.IsFinite(Width) && double.IsFinite(Height) && Width > 0 && Height > 0 &&
+        Width / Height is >= 0.1 and <= 10;
 }

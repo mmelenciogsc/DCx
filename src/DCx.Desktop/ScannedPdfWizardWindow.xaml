@@ -44,8 +44,8 @@
                         Click="OnExportDocxClick" />
                 <Button x:Name="ExportPdfButton" MinWidth="180" Content="_Export flattened PDF"
                         IsEnabled="False" AutomationProperties.AutomationId="ExportPdfButton"
-                        AutomationProperties.Name="Export flattened accessible PDF"
-                        AutomationProperties.HelpText="Creates a non-editable PDF from reviewed OCR text and page geometry."
+                        AutomationProperties.Name="Export tagged flattened PDF"
+                        AutomationProperties.HelpText="Creates a non-editable PDF with the source-page raster plus reviewed OCR text and page geometry. Human accessibility review is still required."
                         Click="OnExportPdfClick" />
             </WrapPanel>
             <wv2:WebView2 x:Name="PdfExportWebView" Width="1" Height="1"

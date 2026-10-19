@@ -15,6 +15,7 @@ public sealed class WebView2AccessiblePdfExporter : IDisposable
     private readonly WebView2 browser;
     private readonly string workingRoot;
     private readonly AccessiblePdfHtmlBuilder htmlBuilder = new();
+    private readonly WindowsPdfPageRenderer pageRenderer = new();
     private bool initialized;
     private bool disposed;
 
@@ -26,6 +27,8 @@ public sealed class WebView2AccessiblePdfExporter : IDisposable
 
     public async Task ExportFlattenedAsync(
         AccessibleDocument document,
+        string sourcePdfPath,
+        string expectedSourceSha256,
         string outputPath,
         CancellationToken cancellationToken = default)
     {
@@ -42,9 +45,22 @@ public sealed class WebView2AccessiblePdfExporter : IDisposable
         var temporaryPdf = Path.Combine(
             destinationDirectory,
             $".{Path.GetFileNameWithoutExtension(canonical)}.{Guid.NewGuid():N}.tmp.pdf");
+        IReadOnlyList<RenderedPdfPage> renderedPages = [];
         try
         {
-            var html = htmlBuilder.BuildFlattenedLayout(document);
+            var expectedPages = document.Blocks.Select(block => block.PageNumber).Distinct().Count();
+            renderedPages = await pageRenderer.RenderAsync(
+                sourcePdfPath,
+                workingRoot,
+                expectedPages,
+                expectedSourceSha256,
+                cancellationToken).ConfigureAwait(true);
+            var html = htmlBuilder.BuildFlattenedLayout(
+                document,
+                renderedPages.Select(page => new AccessiblePdfPageBackground(
+                    page.FileName,
+                    page.Width,
+                    page.Height)).ToArray());
             await File.WriteAllTextAsync(htmlPath, html, new UTF8Encoding(false), cancellationToken)
                 .ConfigureAwait(true);
             await EnsureInitializedAsync(cancellationToken).ConfigureAwait(true);
@@ -68,6 +84,8 @@ public sealed class WebView2AccessiblePdfExporter : IDisposable
         {
             DeleteFileBestEffort(htmlPath);
             DeleteFileBestEffort(temporaryPdf);
+            foreach (var page in renderedPages)
+                DeleteFileBestEffort(Path.Combine(workingRoot, page.FileName));
         }
     }
 

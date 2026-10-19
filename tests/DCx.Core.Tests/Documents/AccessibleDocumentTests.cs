@@ -212,6 +212,14 @@ public sealed class AccessibleDocumentTests : IDisposable
         Assert.Contains("<span class=\"field-label\">Status: </span><span>Draft &amp; ready</span>", html, StringComparison.Ordinal);
         Assert.Contains("role=\"img\" aria-label=\"Revenue chart\"", html, StringComparison.Ordinal);
         Assert.DoesNotContain("<script", html, StringComparison.OrdinalIgnoreCase);
+
+        var visualHtml = new AccessiblePdfHtmlBuilder().BuildFlattenedLayout(
+            document,
+            [new("page-0001.png", 2550, 1020), new("page-0002.png", 612, 792)]);
+        Assert.Contains("img-src 'self'", visualHtml, StringComparison.Ordinal);
+        Assert.Contains("class=\"page has-background\"", visualHtml, StringComparison.Ordinal);
+        Assert.Contains("src=\"page-0001.png\" style=\"left:0%;top:34.5455%;width:100%;height:30.9091%\" alt=\"\" aria-hidden=\"true\"", visualHtml, StringComparison.Ordinal);
+        Assert.Contains("color:transparent", visualHtml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -227,6 +235,9 @@ public sealed class AccessibleDocumentTests : IDisposable
 
         Assert.Throws<InvalidOperationException>(() => builder.BuildFlattenedLayout(missingGeometry));
         Assert.Throws<InvalidOperationException>(() => builder.BuildFlattenedLayout(missingPage));
+        Assert.Throws<InvalidOperationException>(() => builder.BuildFlattenedLayout(
+            new AccessibleDocument("Page", [new("text", 1, 0, DocumentBlockRole.Paragraph, "Text", new(0.1, 0.1, 0.8, 0.1))]),
+            [new("../page-0001.png", 612, 792)]));
     }
 
     [Fact]

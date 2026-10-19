@@ -35,6 +35,7 @@ for (var number = 1; number <= document.NumberOfPages; number++)
     }
 
     var words = page.GetWords().ToArray();
+    var images = page.GetImages().ToArray();
     totalWords = checked(totalWords + words.Length);
     if (totalWords > 50_000)
     {
@@ -48,6 +49,16 @@ for (var number = 1; number <= document.NumberOfPages; number++)
         width = page.Width,
         height = page.Height,
         text = string.Concat(page.Letters.Select(letter => letter.Value)),
+        image_count = images.Length,
+        images = images.Select(image => new
+        {
+            width_samples = image.WidthInSamples,
+            height_samples = image.HeightInSamples,
+            left_normalized = image.BoundingBox.Left / page.Width,
+            top_normalized = 1 - (image.BoundingBox.Top / page.Height),
+            right_normalized = image.BoundingBox.Right / page.Width,
+            bottom_normalized = 1 - (image.BoundingBox.Bottom / page.Height),
+        }).ToArray(),
         words = words.Select(word => new
         {
             text = word.Text,
