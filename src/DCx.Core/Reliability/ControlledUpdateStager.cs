@@ -196,7 +196,7 @@ public static class ControlledUpdateActivationReadinessPolicy
             character is >= '0' and <= '9' or >= 'a' and <= 'f');
 }
 
-public sealed class ControlledUpdateStager(
+public sealed partial class ControlledUpdateStager(
     IControlledUpdateTransport transport,
     IUpdatePackageTrustVerifier packageTrustVerifier,
     byte[] manifestSigningPublicKey)

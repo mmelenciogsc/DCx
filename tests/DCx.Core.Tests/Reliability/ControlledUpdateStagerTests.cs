@@ -365,6 +365,209 @@ public sealed class ControlledUpdateStagerTests : IDisposable
     }
 
     [Fact]
+    public async Task ActivationTransaction_HoldsExactFilesAgainstMutationAndRevalidates()
+    {
+        var fixture = await CreateActivationFixtureAsync("activation-lease");
+        var trustChecks = fixture.Trust.Verifications;
+        var executor = new FixtureActivationExecutor((context, _) =>
+        {
+            Assert.Equal(fixture.Admission.PackagePath, context.PackagePath);
+            Assert.Equal(fixture.Review.CandidateVersion, context.Version);
+            Assert.Equal(fixture.Review.PackageSha256, context.PackageSha256);
+            Assert.Equal(fixture.Review.PackageLength, context.PackageLength);
+            Assert.Equal(fixture.Review.ReviewSha256, context.ReviewSha256);
+            Assert.Equal(fixture.Readiness.ReadinessSha256, context.ReadinessSha256);
+            Assert.Equal(fixture.Package, File.ReadAllBytes(context.PackagePath));
+
+            var publishedDirectory = Path.GetDirectoryName(context.PackagePath)!;
+            var manifestPath = Path.Combine(publishedDirectory, "manifest.json");
+            AssertLeaseDenies(() =>
+                File.Open(context.PackagePath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite)
+                    .Dispose());
+            AssertLeaseDenies(() =>
+                File.Open(manifestPath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite)
+                    .Dispose());
+            AssertLeaseDenies(() => File.Delete(context.PackagePath));
+            AssertLeaseDenies(() => File.Delete(manifestPath));
+            AssertLeaseDenies(() => Directory.Move(
+                publishedDirectory,
+                publishedDirectory + "-moved"));
+            return Task.CompletedTask;
+        });
+
+        await fixture.Stager.ExecuteActivationTransactionAsync(
+            fixture.Review,
+            fixture.Readiness,
+            fixture.Review.CurrentVersion,
+            fixture.StagingRoot,
+            Now.AddMinutes(2),
+            explicitlyApproved: true,
+            executor);
+
+        Assert.Equal(1, executor.Executions);
+        Assert.Equal(trustChecks + 2, fixture.Trust.Verifications);
+        Assert.Equal(fixture.Package, await File.ReadAllBytesAsync(fixture.Admission.PackagePath));
+        Assert.Equal(
+            ["manifest.json", "package.msix"],
+            Directory.EnumerateFiles(Path.GetDirectoryName(fixture.Admission.PackagePath)!)
+                .Select(path => Path.GetFileName(path)!)
+                .Order(StringComparer.Ordinal)
+                .ToArray());
+    }
+
+    [Fact]
+    public async Task ActivationTransaction_RequiresSeparateApprovalExactReceiptAndCurrentVersion()
+    {
+        var fixture = await CreateActivationFixtureAsync("activation-authority");
+        var trustChecks = fixture.Trust.Verifications;
+        var executor = new FixtureActivationExecutor((_, _) => Task.CompletedTask);
+
+        await AssertCodeAsync("update_activation_approval_required", () =>
+            fixture.Stager.ExecuteActivationTransactionAsync(
+                fixture.Review,
+                fixture.Readiness,
+                fixture.Review.CurrentVersion,
+                fixture.StagingRoot,
+                Now.AddMinutes(2),
+                explicitlyApproved: false,
+                executor));
+        await AssertCodeAsync("update_activation_readiness_invalid", () =>
+            fixture.Stager.ExecuteActivationTransactionAsync(
+                fixture.Review,
+                fixture.Readiness with { ReadinessSha256 = new string('0', 64) },
+                fixture.Review.CurrentVersion,
+                fixture.StagingRoot,
+                Now.AddMinutes(2),
+                explicitlyApproved: true,
+                executor));
+        await AssertCodeAsync("update_review_changed", () =>
+            fixture.Stager.ExecuteActivationTransactionAsync(
+                fixture.Review,
+                fixture.Readiness,
+                "1.0.0.1",
+                fixture.StagingRoot,
+                Now.AddMinutes(2),
+                explicitlyApproved: true,
+                executor));
+        await AssertCodeAsync("update_activation_time_invalid", () =>
+            fixture.Stager.ExecuteActivationTransactionAsync(
+                fixture.Review,
+                fixture.Readiness,
+                fixture.Review.CurrentVersion,
+                fixture.StagingRoot,
+                fixture.Readiness.RevalidatedUtc.AddTicks(-1),
+                explicitlyApproved: true,
+                executor));
+
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            fixture.Stager.ExecuteActivationTransactionAsync(
+                fixture.Review,
+                fixture.Readiness,
+                fixture.Review.CurrentVersion,
+                fixture.StagingRoot,
+                Now.AddMinutes(2),
+                explicitlyApproved: true,
+                executor,
+                cancelled.Token));
+
+        Assert.Equal(0, executor.Executions);
+        Assert.Equal(trustChecks, fixture.Trust.Verifications);
+    }
+
+    [Fact]
+    public async Task ActivationTransaction_RejectsExistingWriterAndPostExecutorSetDrift()
+    {
+        var writerFixture = await CreateActivationFixtureAsync("activation-writer");
+        var writerExecutor = new FixtureActivationExecutor((_, _) => Task.CompletedTask);
+        await using (var writer = new FileStream(
+                         writerFixture.Admission.PackagePath,
+                         FileMode.Open,
+                         FileAccess.ReadWrite,
+                         FileShare.ReadWrite))
+        {
+            await AssertCodeAsync("update_activation_lease_unavailable", () =>
+                writerFixture.Stager.ExecuteActivationTransactionAsync(
+                    writerFixture.Review,
+                    writerFixture.Readiness,
+                    writerFixture.Review.CurrentVersion,
+                    writerFixture.StagingRoot,
+                    Now.AddMinutes(2),
+                    explicitlyApproved: true,
+                    writerExecutor));
+        }
+
+        Assert.Equal(0, writerExecutor.Executions);
+
+        var driftFixture = await CreateActivationFixtureAsync("activation-drift");
+        var unexpectedPath = Path.Combine(
+            Path.GetDirectoryName(driftFixture.Admission.PackagePath)!,
+            "unexpected.txt");
+        var driftExecutor = new FixtureActivationExecutor((_, _) =>
+        {
+            File.WriteAllText(unexpectedPath, "not in the admitted update set");
+            return Task.CompletedTask;
+        });
+
+        await AssertCodeAsync("update_staged_set_invalid", () =>
+            driftFixture.Stager.ExecuteActivationTransactionAsync(
+                driftFixture.Review,
+                driftFixture.Readiness,
+                driftFixture.Review.CurrentVersion,
+                driftFixture.StagingRoot,
+                Now.AddMinutes(2),
+                explicitlyApproved: true,
+                driftExecutor));
+
+        Assert.Equal(1, driftExecutor.Executions);
+        File.Delete(unexpectedPath);
+    }
+
+    [Fact]
+    public async Task ActivationTransaction_MapsExecutorFailureAndPostChecksCancellation()
+    {
+        var failedFixture = await CreateActivationFixtureAsync("activation-executor-failure");
+        var failedTrustChecks = failedFixture.Trust.Verifications;
+        var failedExecutor = new FixtureActivationExecutor((_, _) =>
+            throw new InvalidOperationException("private executor detail"));
+
+        await AssertCodeAsync("update_activation_executor_failed", () =>
+            failedFixture.Stager.ExecuteActivationTransactionAsync(
+                failedFixture.Review,
+                failedFixture.Readiness,
+                failedFixture.Review.CurrentVersion,
+                failedFixture.StagingRoot,
+                Now.AddMinutes(2),
+                explicitlyApproved: true,
+                failedExecutor));
+        Assert.Equal(1, failedExecutor.Executions);
+        Assert.Equal(failedTrustChecks + 2, failedFixture.Trust.Verifications);
+
+        var cancelledFixture = await CreateActivationFixtureAsync("activation-executor-cancel");
+        var cancelledTrustChecks = cancelledFixture.Trust.Verifications;
+        using var cancellation = new CancellationTokenSource();
+        var cancelledExecutor = new FixtureActivationExecutor((_, _) =>
+        {
+            cancellation.Cancel();
+            throw new OperationCanceledException(cancellation.Token);
+        });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            cancelledFixture.Stager.ExecuteActivationTransactionAsync(
+                cancelledFixture.Review,
+                cancelledFixture.Readiness,
+                cancelledFixture.Review.CurrentVersion,
+                cancelledFixture.StagingRoot,
+                Now.AddMinutes(2),
+                explicitlyApproved: true,
+                cancelledExecutor,
+                cancellation.Token));
+        Assert.Equal(1, cancelledExecutor.Executions);
+        Assert.Equal(cancelledTrustChecks + 2, cancelledFixture.Trust.Verifications);
+    }
+
+    [Fact]
     public async Task ManifestPolicy_RejectsWrongSignatureDowngradeExpiryAndCrossOrigin()
     {
         var package = "update fixture"u8.ToArray();
@@ -591,6 +794,53 @@ public sealed class ControlledUpdateStagerTests : IDisposable
 
     public void Dispose() => TestDirectory.DeleteIfExists(root);
 
+    private async Task<ActivationFixture> CreateActivationFixtureAsync(string name)
+    {
+        var package = System.Text.Encoding.UTF8.GetBytes(
+            $"lease-held update fixture: {name}");
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var transport = new FixtureTransport(
+            ManifestUri,
+            Envelope(key, package),
+            PackageUri,
+            package);
+        var trust = new FixtureTrustVerifier(ValidTrust());
+        var stager = new ControlledUpdateStager(
+            transport,
+            trust,
+            key.ExportSubjectPublicKeyInfo());
+        var stagingRoot = Path.Combine(root, name);
+        var review = await stager.ReviewAsync(ManifestUri, "1.1.0.0", Now);
+        var admission = await stager.StageReviewedAsync(
+            review,
+            review.CurrentVersion,
+            stagingRoot,
+            Now,
+            explicitlyApproved: true);
+        var readiness = await stager.PrepareActivationReadinessAsync(
+            review,
+            review.CurrentVersion,
+            stagingRoot,
+            Now.AddMinutes(1),
+            explicitlyApproved: true);
+        return new ActivationFixture(
+            stager,
+            trust,
+            review,
+            readiness,
+            admission,
+            stagingRoot,
+            package);
+    }
+
+    private static void AssertLeaseDenies(Action action)
+    {
+        var exception = Record.Exception(action);
+        Assert.True(
+            exception is IOException or UnauthorizedAccessException,
+            $"Expected a Windows sharing denial, but received {exception?.GetType().Name ?? "no exception"}.");
+    }
+
     private static ControlledUpdateManifest Manifest(byte[] package) => new(
         ControlledUpdateManifestCodec.CurrentSchemaVersion,
         ControlledUpdateManifestCodec.ProductId,
@@ -692,6 +942,32 @@ public sealed class ControlledUpdateStagerTests : IDisposable
             return Task.FromResult(evidence);
         }
     }
+
+    private sealed class FixtureActivationExecutor(
+        Func<ControlledUpdateActivationContext, CancellationToken, Task> execute)
+        : IControlledUpdateActivationExecutor
+    {
+        private int executions;
+
+        public int Executions => Volatile.Read(ref executions);
+
+        public Task ExecuteAsync(
+            ControlledUpdateActivationContext context,
+            CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref executions);
+            return execute(context, cancellationToken);
+        }
+    }
+
+    private sealed record ActivationFixture(
+        ControlledUpdateStager Stager,
+        FixtureTrustVerifier Trust,
+        ControlledUpdateReview Review,
+        ControlledUpdateActivationReadiness Readiness,
+        ControlledUpdateAdmission Admission,
+        string StagingRoot,
+        byte[] Package);
 
     private sealed class FixtureHttpHandler(
         Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler
