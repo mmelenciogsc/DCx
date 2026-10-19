@@ -219,6 +219,13 @@
                             AutomationProperties.HelpText="Review or change default-off local crash diagnostics and delete retained reports."
                             Click="OnCrashDiagnosticsClick" />
                     <Button MinWidth="100"
+                            Margin="0,0,6,0"
+                            Content="Updates"
+                            AutomationProperties.AutomationId="ControlledUpdatesButton"
+                            AutomationProperties.Name="Open controlled updates"
+                            AutomationProperties.HelpText="Review controlled-update availability. No production service or installer is configured."
+                            Click="OnControlledUpdatesClick" />
+                    <Button MinWidth="100"
                             Content="Readiness"
                             AutomationProperties.AutomationId="ReadinessButton"
                             AutomationProperties.Name="Open release readiness dashboard"

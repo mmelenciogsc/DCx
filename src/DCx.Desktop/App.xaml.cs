@@ -30,6 +30,13 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 1 &&
+            string.Equals(e.Args[0], "--controlled-update-fixture", StringComparison.Ordinal))
+        {
+            StartControlledUpdateFixture();
+            return;
+        }
+
         if (e.Args.Length == 2 &&
             string.Equals(e.Args[0], "--whisper-staging-fixture", StringComparison.Ordinal))
         {
@@ -257,6 +264,43 @@ public partial class App : Application
 
     private static string GetApplicationVersion() =>
         typeof(App).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+
+    private void StartControlledUpdateFixture()
+    {
+        try
+        {
+            if (!string.Equals(
+                    Environment.GetEnvironmentVariable("DCX_CONTROLLED_UPDATE_FIXTURE"),
+                    "1",
+                    StringComparison.Ordinal))
+            {
+                throw new ControlledUpdateException("update_fixture_disabled");
+            }
+
+            var applicationDataRoot = ApplicationDataRoot.Resolve();
+            if (!IsWithinFixtureRoot(
+                    applicationDataRoot,
+                    "DCX_CONTROLLED_UPDATE_FIXTURE_ROOT"))
+            {
+                throw new ControlledUpdateException("update_fixture_storage_invalid");
+            }
+
+            runtimeLease = ApplicationDataOperationLease.Acquire(
+                applicationDataRoot,
+                "starting the controlled-update fixture");
+            var stagingRoot = Path.Combine(applicationDataRoot, "controlled-update-stage");
+            MainWindow = new ControlledUpdateWindow(
+                new ControlledUpdateFixtureSource(stagingRoot),
+                ControlledUpdateSourceKind.GeneratedFixture);
+            MainWindow.Show();
+        }
+        catch
+        {
+            runtimeLease?.Dispose();
+            runtimeLease = null;
+            Shutdown(2);
+        }
+    }
 
     private void StartPackageApprovalFixture(string packagePath)
     {

@@ -28,16 +28,23 @@ public sealed class ControlledUpdateStagerTests : IDisposable
         var stager = new ControlledUpdateStager(
             transport, trust, key.ExportSubjectPublicKeyInfo());
 
-        var first = await stager.CheckAndStageAsync(
-            ManifestUri, "1.1.9.9", root, Now);
-        var second = await stager.CheckAndStageAsync(
-            ManifestUri, "1.1.9.9", root, Now);
+        var review = await stager.ReviewAsync(ManifestUri, "1.1.9.9", Now);
+        Assert.Equal(0, transport.PackageDownloads);
+        await AssertCodeAsync("update_approval_required", () => stager.StageReviewedAsync(
+            review, "1.1.9.9", root, Now, explicitlyApproved: false));
+        Assert.Equal(1, transport.ManifestDownloads);
+        Assert.Equal(0, transport.PackageDownloads);
+
+        var first = await stager.StageReviewedAsync(
+            review, "1.1.9.9", root, Now, explicitlyApproved: true);
+        var second = await stager.StageReviewedAsync(
+            review, "1.1.9.9", root, Now, explicitlyApproved: true);
 
         Assert.Equal("1.2.0.0", first.Version);
         Assert.Equal(first, second);
         Assert.Equal(package, await File.ReadAllBytesAsync(first.PackagePath));
         Assert.Equal(envelope, await File.ReadAllBytesAsync(first.SignedManifestPath));
-        Assert.Equal(2, transport.ManifestDownloads);
+        Assert.Equal(3, transport.ManifestDownloads);
         Assert.Equal(1, transport.PackageDownloads);
         Assert.Equal(2, trust.Verifications);
         Assert.DoesNotContain("installed", first.PackagePath, StringComparison.OrdinalIgnoreCase);
@@ -53,14 +60,14 @@ public sealed class ControlledUpdateStagerTests : IDisposable
         var transport = new FixtureTransport(ManifestUri, validEnvelope, PackageUri, package);
         var stager = new ControlledUpdateStager(
             transport, new FixtureTrustVerifier(ValidTrust()), wrongKey.ExportSubjectPublicKeyInfo());
-        await AssertCodeAsync("update_signature_invalid", () => stager.CheckAndStageAsync(
-            ManifestUri, "1.1.0.0", Path.Combine(root, "wrong-key"), Now));
+        await AssertCodeAsync("update_signature_invalid", () => stager.ReviewAsync(
+            ManifestUri, "1.1.0.0", Now));
         Assert.Equal(0, transport.PackageDownloads);
 
         var trusted = new ControlledUpdateStager(
             transport, new FixtureTrustVerifier(ValidTrust()), signer.ExportSubjectPublicKeyInfo());
-        await AssertCodeAsync("update_not_newer", () => trusted.CheckAndStageAsync(
-            ManifestUri, "1.2.0.0", Path.Combine(root, "same-version"), Now));
+        await AssertCodeAsync("update_not_newer", () => trusted.ReviewAsync(
+            ManifestUri, "1.2.0.0", Now));
 
         var expiredManifest = Manifest(package) with
         {
@@ -69,8 +76,8 @@ public sealed class ControlledUpdateStagerTests : IDisposable
         };
         transport.Manifest = ControlledUpdateManifestCodec.Encode(
             ControlledUpdateManifestCodec.Sign(expiredManifest, signer));
-        await AssertCodeAsync("update_manifest_expired", () => trusted.CheckAndStageAsync(
-            ManifestUri, "1.1.0.0", Path.Combine(root, "expired"), Now));
+        await AssertCodeAsync("update_manifest_expired", () => trusted.ReviewAsync(
+            ManifestUri, "1.1.0.0", Now));
 
         var crossOrigin = Manifest(package) with
         {
@@ -78,8 +85,8 @@ public sealed class ControlledUpdateStagerTests : IDisposable
         };
         transport.Manifest = ControlledUpdateManifestCodec.Encode(
             ControlledUpdateManifestCodec.Sign(crossOrigin, signer));
-        await AssertCodeAsync("update_origin_invalid", () => trusted.CheckAndStageAsync(
-            ManifestUri, "1.1.0.0", Path.Combine(root, "cross-origin"), Now));
+        await AssertCodeAsync("update_origin_invalid", () => trusted.ReviewAsync(
+            ManifestUri, "1.1.0.0", Now));
         Assert.Equal(0, transport.PackageDownloads);
     }
 
@@ -94,27 +101,100 @@ public sealed class ControlledUpdateStagerTests : IDisposable
         var badTransport = new FixtureTransport(ManifestUri, envelope, PackageUri, changed);
         var stager = new ControlledUpdateStager(
             badTransport, new FixtureTrustVerifier(ValidTrust()), key.ExportSubjectPublicKeyInfo());
-        await AssertCodeAsync("update_package_integrity_invalid", () => stager.CheckAndStageAsync(
-            ManifestUri, "1.1.0.0", Path.Combine(root, "digest"), Now));
+        var digestReview = await stager.ReviewAsync(ManifestUri, "1.1.0.0", Now);
+        await AssertCodeAsync("update_package_integrity_invalid", () => stager.StageReviewedAsync(
+            digestReview,
+            "1.1.0.0",
+            Path.Combine(root, "digest"),
+            Now,
+            explicitlyApproved: true));
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "digest", "packages")));
 
         var goodTransport = new FixtureTransport(ManifestUri, envelope, PackageUri, expected);
         var invalidTrust = new FixtureTrustVerifier(ValidTrust() with { SignatureValid = false });
         var untrustedStager = new ControlledUpdateStager(
             goodTransport, invalidTrust, key.ExportSubjectPublicKeyInfo());
-        await AssertCodeAsync("update_package_trust_invalid", () => untrustedStager.CheckAndStageAsync(
-            ManifestUri, "1.1.0.0", Path.Combine(root, "trust"), Now));
+        var trustReview = await untrustedStager.ReviewAsync(ManifestUri, "1.1.0.0", Now);
+        await AssertCodeAsync("update_package_trust_invalid", () =>
+            untrustedStager.StageReviewedAsync(
+                trustReview,
+                "1.1.0.0",
+                Path.Combine(root, "trust"),
+                Now,
+                explicitlyApproved: true));
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "trust", "packages")));
 
         var validStager = new ControlledUpdateStager(
             goodTransport, new FixtureTrustVerifier(ValidTrust()), key.ExportSubjectPublicKeyInfo());
-        var admitted = await validStager.CheckAndStageAsync(
-            ManifestUri, "1.1.0.0", Path.Combine(root, "existing"), Now);
+        var validReview = await validStager.ReviewAsync(ManifestUri, "1.1.0.0", Now);
+        var admitted = await validStager.StageReviewedAsync(
+            validReview,
+            "1.1.0.0",
+            Path.Combine(root, "existing"),
+            Now,
+            explicitlyApproved: true);
         var downloadsBeforeTamperCheck = goodTransport.PackageDownloads;
         await File.WriteAllBytesAsync(admitted.PackagePath, changed);
-        await AssertCodeAsync("update_package_integrity_invalid", () => validStager.CheckAndStageAsync(
-            ManifestUri, "1.1.0.0", Path.Combine(root, "existing"), Now));
+        await AssertCodeAsync("update_package_integrity_invalid", () =>
+            validStager.StageReviewedAsync(
+                validReview,
+                "1.1.0.0",
+                Path.Combine(root, "existing"),
+                Now,
+                explicitlyApproved: true));
         Assert.Equal(downloadsBeforeTamperCheck, goodTransport.PackageDownloads);
+    }
+
+    [Fact]
+    public async Task Stage_RequiresExactFreshReviewAndApprovalBeforeAnyPackageRequest()
+    {
+        var package = "review-bound package"u8.ToArray();
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var transport = new FixtureTransport(
+            ManifestUri,
+            Envelope(key, package),
+            PackageUri,
+            package);
+        var stager = new ControlledUpdateStager(
+            transport,
+            new FixtureTrustVerifier(ValidTrust()),
+            key.ExportSubjectPublicKeyInfo());
+        var review = await stager.ReviewAsync(ManifestUri, "1.1.0.0", Now);
+
+        await AssertCodeAsync("update_review_invalid", () => stager.StageReviewedAsync(
+            review with { PackageLength = review.PackageLength + 1 },
+            "1.1.0.0",
+            Path.Combine(root, "tampered-review"),
+            Now,
+            explicitlyApproved: true));
+        await AssertCodeAsync("update_review_changed", () => stager.StageReviewedAsync(
+            review,
+            "1.0.0.0",
+            Path.Combine(root, "changed-current"),
+            Now,
+            explicitlyApproved: true));
+        await AssertCodeAsync("update_approval_required", () => stager.StageReviewedAsync(
+            review,
+            "1.1.0.0",
+            Path.Combine(root, "not-approved"),
+            Now,
+            explicitlyApproved: false));
+        Assert.Equal(1, transport.ManifestDownloads);
+        Assert.Equal(0, transport.PackageDownloads);
+        Assert.False(Directory.Exists(Path.Combine(root, "not-approved")));
+
+        var changed = Manifest(package) with { Version = "1.3.0.0" };
+        transport.Manifest = ControlledUpdateManifestCodec.Encode(
+            ControlledUpdateManifestCodec.Sign(changed, key));
+        await AssertCodeAsync("update_review_changed", () => stager.StageReviewedAsync(
+            review,
+            "1.1.0.0",
+            Path.Combine(root, "changed-manifest"),
+            Now,
+            explicitlyApproved: true));
+        Assert.Equal(2, transport.ManifestDownloads);
+        Assert.Equal(0, transport.PackageDownloads);
+        Assert.False(Directory.Exists(Path.Combine(root, "changed-manifest")));
     }
 
     [Fact]

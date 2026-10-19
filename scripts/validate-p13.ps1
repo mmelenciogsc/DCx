@@ -12,6 +12,7 @@ $desktopProject = Join-Path $repoRoot "src\DCx.Desktop\DCx.Desktop.csproj"
 $tests = Join-Path $repoRoot "tests\DCx.Core.Tests\DCx.Core.Tests.csproj"
 $msixBuilder = Join-Path $repoRoot "scripts\build-unsigned-msix.ps1"
 $webView2Validator = Join-Path $repoRoot "scripts\validate-p13-webview2.ps1"
+$controlledUpdateValidator = Join-Path $repoRoot "scripts\validate-p13-controlled-update-ui.ps1"
 $runRoot = Join-Path $repoRoot "artifacts\test-results\p13-$([Guid]::NewGuid().ToString('N'))"
 $publishOne = Join-Path $runRoot "publish-a"
 $publishTwo = Join-Path $runRoot "publish-b"
@@ -726,6 +727,37 @@ try {
         throw "The accessible WebView2 missing-runtime gate was not exact and inert."
     }
 
+    $controlledUpdateEvidence = & $controlledUpdateValidator `
+        -ExecutablePath $publishedExe `
+        -RunRoot $runRoot
+    if (-not $controlledUpdateEvidence.fixture_gate_denied_without_environment -or
+        -not $controlledUpdateEvidence.heading_keyboard_focus -or
+        -not $controlledUpdateEvidence.exact_review_exposed -or
+        $controlledUpdateEvidence.exact_review_digest_count -ne 3 -or
+        @($controlledUpdateEvidence.distinct_access_keys).Count -ne 4 -or
+        @($controlledUpdateEvidence.distinct_access_keys | Select-Object -Unique).Count -ne 4 -or
+        -not $controlledUpdateEvidence.approval_initially_unchecked -or
+        -not $controlledUpdateEvidence.unapproved_stage_denied_before_storage -or
+        -not $controlledUpdateEvidence.approval_reset_and_replay_denied -or
+        $controlledUpdateEvidence.staged_file_count -ne 2 -or
+        $controlledUpdateEvidence.staged_package_count -ne 1 -or
+        $controlledUpdateEvidence.staged_signed_manifest_count -ne 1 -or
+        $controlledUpdateEvidence.manifest_requests -ne 2 -or
+        $controlledUpdateEvidence.package_requests -ne 1 -or
+        $controlledUpdateEvidence.network_requests -ne 0 -or
+        $controlledUpdateEvidence.execution_permitted -or
+        $controlledUpdateEvidence.installer_processes_started -ne 0 -or
+        $controlledUpdateEvidence.elevation_requests -ne 0 -or
+        $controlledUpdateEvidence.activation_attempts -ne 0 -or
+        $controlledUpdateEvidence.restart_attempts -ne 0 -or
+        $controlledUpdateEvidence.production_actions -ne 0 -or
+        $controlledUpdateEvidence.normal_product_source -ne "not_configured" -or
+        $controlledUpdateEvidence.normal_product_manifest_requests -ne 0 -or
+        $controlledUpdateEvidence.normal_product_package_requests -ne 0 -or
+        $controlledUpdateEvidence.normal_product_update_state_inferred) {
+        throw "The accessible controlled-update review and inert staging gate was not exact."
+    }
+
     $result = [ordered]@{
         captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
         release_build_warnings = 0
@@ -780,6 +812,23 @@ try {
         webview2_missing_runtime_profile_created = [bool]$webView2MissingEvidence.webview2_profile_created
         webview2_missing_runtime_downloads = 0
         webview2_missing_runtime_installs = 0
+        controlled_update_fixture_gate = [bool]$controlledUpdateEvidence.fixture_gate_denied_without_environment
+        controlled_update_uia_heading_focus = [bool]$controlledUpdateEvidence.heading_keyboard_focus
+        controlled_update_exact_review_digests = [int]$controlledUpdateEvidence.exact_review_digest_count
+        controlled_update_access_keys = @($controlledUpdateEvidence.distinct_access_keys)
+        controlled_update_approval_default_unchecked = [bool]$controlledUpdateEvidence.approval_initially_unchecked
+        controlled_update_unapproved_stage_denied_before_storage = [bool]$controlledUpdateEvidence.unapproved_stage_denied_before_storage
+        controlled_update_approval_reset = [bool]$controlledUpdateEvidence.approval_reset_and_replay_denied
+        controlled_update_staged_files = [int]$controlledUpdateEvidence.staged_file_count
+        controlled_update_manifest_requests = [int]$controlledUpdateEvidence.manifest_requests
+        controlled_update_package_requests = [int]$controlledUpdateEvidence.package_requests
+        controlled_update_network_requests = [int]$controlledUpdateEvidence.network_requests
+        controlled_update_installer_processes = [int]$controlledUpdateEvidence.installer_processes_started
+        controlled_update_elevation_requests = [int]$controlledUpdateEvidence.elevation_requests
+        controlled_update_activation_attempts = [int]$controlledUpdateEvidence.activation_attempts
+        controlled_update_restart_attempts = [int]$controlledUpdateEvidence.restart_attempts
+        controlled_update_normal_source = [string]$controlledUpdateEvidence.normal_product_source
+        controlled_update_inferred_state = [bool]$controlledUpdateEvidence.normal_product_update_state_inferred
         sbom_components = $components.Count
         license_records = $licenseInventory.Count
         published_secret_scan_files = $publishedSecretScanFiles.Count
@@ -821,6 +870,9 @@ try {
     "WebView2 Evergreen Runtime required and not bundled=PASS"
     "Accessible WebView2 missing-runtime detection and fail-closed recheck=PASS"
     "Separately approved exact Microsoft default-browser prerequisite handoff=PASS"
+    "Accessible exact controlled-update review and one-use inert staging=PASS"
+    "Normal controlled-update source=not_configured; inferred state=false"
+    "Controlled-update network=0 installer=0 elevation=0 activation=0 restart=0 production=0"
     "CycloneDX components=$($components.Count)"
     "Third-party license records=$($licenseInventory.Count)"
     "DCx-owned binary and published text secret-scan files=$($publishedSecretScanFiles.Count)"

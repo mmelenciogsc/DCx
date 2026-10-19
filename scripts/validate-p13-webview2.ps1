@@ -163,8 +163,17 @@ try {
     if ($childrenAfter -ne $childrenBefore) {
         throw "The fixture official-page handoff started an external child process."
     }
-    $heading.SetFocus()
-    $null = Wait-For { $heading.Current.HasKeyboardFocus } "The missing-runtime heading did not accept keyboard focus."
+    $heading = Wait-For {
+        $candidate = Find-ById $window "WebView2PrerequisiteHeading"
+        if ($null -eq $candidate) { return $null }
+        try {
+            $candidate.SetFocus()
+            if ($candidate.Current.HasKeyboardFocus) { return $candidate }
+        }
+        catch [System.Windows.Automation.ElementNotAvailableException] {}
+        catch [InvalidOperationException] {}
+        return $null
+    } "The missing-runtime heading did not accept keyboard focus."
     $recheck.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For {
         $status.Current.Name -eq $expectedStatus -and $recheck.Current.IsEnabled

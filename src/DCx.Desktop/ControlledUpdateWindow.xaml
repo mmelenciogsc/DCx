@@ -1,0 +1,109 @@
+<Window x:Class="DCx.Desktop.ControlledUpdateWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Controlled updates — DCx"
+        Width="760"
+        Height="660"
+        MinWidth="620"
+        MinHeight="520"
+        AutomationProperties.AutomationId="ControlledUpdateWindow"
+        AutomationProperties.Name="Controlled updates">
+    <DockPanel Margin="20">
+        <TextBlock x:Name="StatusText"
+                   DockPanel.Dock="Bottom"
+                   Margin="0,16,0,0"
+                   Padding="10"
+                   Background="#FFF4CE"
+                   TextWrapping="Wrap"
+                   Focusable="True"
+                   AutomationProperties.AutomationId="ControlledUpdateStatus"
+                   AutomationProperties.Name="Controlled update status"
+                   AutomationProperties.LiveSetting="Assertive" />
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock x:Name="HeadingText"
+                           FontSize="28"
+                           FontWeight="SemiBold"
+                           Focusable="True"
+                           Text="Controlled updates"
+                           AutomationProperties.AutomationId="ControlledUpdateHeading"
+                           AutomationProperties.Name="Controlled updates heading" />
+                <TextBlock Margin="0,8,0,0"
+                           Text="Review a signature-verified exact update before staging. Staging never installs, elevates, activates, or restarts DCx."
+                           TextWrapping="Wrap" />
+
+                <Border Margin="0,16,0,0"
+                        Padding="12"
+                        BorderBrush="#707070"
+                        BorderThickness="1">
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="Security boundary" />
+                        <TextBlock x:Name="BoundaryText"
+                                   Margin="0,6,0,0"
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="ControlledUpdateBoundary" />
+                    </StackPanel>
+                </Border>
+
+                <TextBlock x:Name="CurrentVersionText"
+                           Margin="0,16,0,0"
+                           Text="Current version: unavailable."
+                           TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="ControlledUpdateCurrentVersion" />
+
+                <Button x:Name="CheckButton"
+                        Width="190"
+                        MinHeight="38"
+                        Margin="0,14,0,0"
+                        HorizontalAlignment="Left"
+                        Content="_Check for update"
+                        AutomationProperties.AutomationId="CheckControlledUpdateButton"
+                        AutomationProperties.Name="Check for a controlled update"
+                        Click="OnCheckClick" />
+
+                <GroupBox Margin="0,18,0,0" Header="Exact update review">
+                    <TextBox x:Name="ReviewDetails"
+                             MinHeight="220"
+                             Margin="12,8"
+                             Padding="8"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             Text="No update has been reviewed."
+                             AutomationProperties.AutomationId="ControlledUpdateReviewDetails"
+                             AutomationProperties.Name="No update has been reviewed." />
+                </GroupBox>
+
+                <CheckBox x:Name="ApprovalBox"
+                          Margin="0,16,0,0"
+                          IsEnabled="False"
+                          FontWeight="SemiBold"
+                          Content="I reviewed this exact signed manifest, package identity, publisher, version, length, and digests and _approve inert staging"
+                          AutomationProperties.AutomationId="ApproveControlledUpdateStagingBox"
+                          AutomationProperties.Name="I reviewed this exact signed update and approve inert staging"
+                          AutomationProperties.HelpText="Unchecked by default. It authorizes only bounded package staging, never installation, elevation, activation, or restart." />
+
+                <WrapPanel Margin="0,16,0,0">
+                    <Button x:Name="StageButton"
+                            MinWidth="190"
+                            MinHeight="38"
+                            Margin="0,0,10,0"
+                            IsEnabled="False"
+                            Content="_Stage verified package"
+                            AutomationProperties.AutomationId="StageControlledUpdateButton"
+                            AutomationProperties.Name="Stage the exact reviewed update package"
+                            AutomationProperties.HelpText="Revalidates the signed manifest and package. No installer is invoked."
+                            Click="OnStageClick" />
+                    <Button MinWidth="120"
+                            MinHeight="38"
+                            Content="C_lose"
+                            AutomationProperties.AutomationId="CloseControlledUpdateButton"
+                            AutomationProperties.Name="Close controlled updates"
+                            Click="OnCloseClick" />
+                </WrapPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

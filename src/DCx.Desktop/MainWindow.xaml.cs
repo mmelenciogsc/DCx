@@ -67,6 +67,7 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
     private CareOperationsWindow? _careOperationsWindow;
     private CareContributorDashboardWindow? _careContributorDashboardWindow;
     private CrashDiagnosticsWindow? _crashDiagnosticsWindow;
+    private ControlledUpdateWindow? _controlledUpdateWindow;
     private Task<LocalModelSelectionStore>? _localModelSelectionStore;
     private Task<OllamaRuntimeSelectionStore>? _ollamaRuntimeSelectionStore;
     private Task<OllamaApprovedRuntimeHost>? _ollamaRuntimeHost;
@@ -1511,6 +1512,26 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
         };
         _crashDiagnosticsWindow.Closed += (_, _) => _crashDiagnosticsWindow = null;
         _crashDiagnosticsWindow.Show();
+    }
+
+    private void OnControlledUpdatesClick(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Opening controlled updates. No production update service or installer is configured.");
+        if (_controlledUpdateWindow is { IsVisible: true })
+        {
+            _controlledUpdateWindow.Activate();
+            return;
+        }
+
+        var currentVersion = typeof(ProductIdentity).Assembly.GetName().Version?.ToString(4)
+            ?? "1.0.0.0";
+        _controlledUpdateWindow = new ControlledUpdateWindow(
+            new UnavailableControlledUpdateReviewSource(currentVersion))
+        {
+            Owner = this,
+        };
+        _controlledUpdateWindow.Closed += (_, _) => _controlledUpdateWindow = null;
+        _controlledUpdateWindow.Show();
     }
 
     private void OnReadinessClick(object sender, RoutedEventArgs e)
