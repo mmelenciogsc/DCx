@@ -1,8 +1,8 @@
 # P14 — Pilot and release readiness
 
 - Status: BLOCKED / NO_GO (local readiness controls pass; pilot and production activation are off)
-- Product implementation commits: local consent `9745e33`; strict local QuickBooks XLSX `da4187a`; tagged flattened PDF `3b35701`; aspect-preserved visual layer `1528e60`; changed-source denial gate `b9c4cad`; local pilot administration preview `4ff1a38`; staged cohort preview `98f2306`; accessible inert-update review `c506bb7`; atomic complete update-set publication `2f0c64d`; zero-authority final staged-set integrity review `b4fa789`; workflow-order correction `c5a4ecd`; lease-held activation-transaction foundation `9f28ae0`
-- Evidence-retention commit: `7f6e707`; current exact validation source: `9f28ae0`
+- Product implementation commits: local consent `9745e33`; strict local QuickBooks XLSX `da4187a`; tagged flattened PDF `3b35701`; aspect-preserved visual layer `1528e60`; changed-source denial gate `b9c4cad`; local pilot administration preview `4ff1a38`; staged cohort preview `98f2306`; accessible inert-update review `c506bb7`; atomic complete update-set publication `2f0c64d`; zero-authority final staged-set integrity review `b4fa789`; workflow-order correction `c5a4ecd`; lease-held activation-transaction foundation `9f28ae0`; internal uncomposed Windows package adapter `fc23b48`
+- Evidence-retention commit: `7f6e707`; current exact validation source: `fc23b48`
 - Documentation commit: recorded by the commit containing this file
 
 No pilot was started, no telemetry was collected, no user was enrolled, and no production service or payment was activated.
@@ -40,7 +40,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 exact-namespace release/readiness tests: passed 17, failed 0, skipped 0. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
-- Current product expanded full suite at `9f28ae0`: passed 677, failed 0, skipped 0; native Windows with zero build warnings/errors.
+- Current product expanded full suite at `fc23b48`: passed 682, failed 0, skipped 0; native Windows with zero build warnings/errors.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -49,7 +49,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled/zero-bucket consent state, blocker/metric/recent-aggregate lists and refresh action. It proved separate initially unchecked opt-in and stop/purge approvals, successful local enable, focused completion, approval reset, successful stop/purge back to zero buckets, focused purge completion, six distinct access keys, the zero-authority administration boundary, four read-only future cohort list items and a focused seven-scenario incident dry-run. The validator confirmed that no control named `Enroll pilot`, `Send metrics` or `Activate production` exists.
 - The P11 readiness gate was rerun after composing the default-off contributor process transport with the native dashboard under a separate validation-only startup gate. It proves a read-only digest-authenticated token-to-subject mapping, operator/contributor role separation, hardened literal-loopback transport, real ledger projection and native focus/keyboard behavior. P11 remains blocking because this is not production contributor identity, MFA/TLS/credential rotation/multi-subject authorization/deployment, and production close/adjustment/hold/dispute/tax authority, exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider plus closure/requeue policy, centralized audit, deployed distributed fencing, external alert delivery/human acknowledgment/escalation and authorized provider acceptance remain absent.
-- Evidence: `artifacts/test-results/p14-c33dfa9f3505488395a79b14c801a688/`, generated from exact source `9f28ae0` and intentionally not committed. It contains `go-no-go.json`, `p14-readiness.trx` and schema-v3 `native-readiness-uia.json` consent/focus/access-key/privacy/administration/cohort/incident-boundary evidence. The current product expanded full suite passes 677/677 at the same source with zero build warnings/errors. The uncomposed activation-transaction foundation did not alter the seven blockers, `NO_GO` or production-activation false result.
+- Evidence: `artifacts/test-results/p14-b7f1ff2fe3674e698c8c83fdd3042e34/`, generated from exact source `fc23b48` and intentionally not committed. It contains `go-no-go.json`, `p14-readiness.trx` and schema-v3 `native-readiness-uia.json` consent/focus/access-key/privacy/administration/cohort/incident-boundary evidence. The current product expanded full suite passes 682/682 at the same source with zero build warnings/errors. The internal Windows package adapter remains uncomposed and did not alter the seven blockers, `NO_GO` or production-activation false result; the real package API was not invoked.
 
 ## Changed files in the latest milestone
 

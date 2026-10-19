@@ -1,6 +1,6 @@
 # P12 package-install review accessibility checklist
 
-Automated Windows UIA validation passed on 2026-10-17 for the inert package-installation review. It verified the heading and validation disclosure; complete read-only request details; default-unchecked approval; unchecked denial; exact approval; cancellation; disabled reuse; assertive statuses; and zero child installer processes. It is not a human screen-reader result and no package was installed.
+Automated Windows UIA validation was rerun on 2026-10-19 from `fc23b48`; evidence is `artifacts/test-results/p12-package-approval-d582b16ecdf9444183027b7dc0271c5b/`. It verified 12/12 policy cases, the heading and validation disclosure; complete read-only request details; default-unchecked approval; unchecked denial; exact approval; cancellation; disabled reuse; assertive statuses; and zero child installer processes. It is not a human screen-reader result, no package was installed, and P13's internal adapter is not reachable from this review.
 
 | Assistive technology | Check | Status | Notes |
 |---|---|---|---|

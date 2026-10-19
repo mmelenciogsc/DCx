@@ -1,6 +1,6 @@
 # P13 controlled-update accessibility checklist
 
-Automated Windows UIA evidence: PASS at exact validation source `9f28ae0`, in `artifacts/test-results/p13-fb44e61153d341269cbc320388cdb72f/controlled-update-ui/validation.json`. Close follows the final-review group in XAML reading/tab order. The activation-transaction foundation is deliberately absent from the user-facing source and has no UI until a production executor, signed lifecycle and separate human-AT gate are approved.
+Automated Windows UIA evidence: PASS at exact validation source `fc23b48`, in `artifacts/test-results/p13-e0abd97bf39849e792dec2f561fa1b37/controlled-update-ui/validation.json`. Close follows the final-review group in XAML reading/tab order. The activation transaction and internal Windows `PackageManager` adapter are deliberately absent from normal user-facing composition and have no UI or command route until a signed lifecycle, one-use accessible authority and separate human-AT gate are approved. The real Windows package API was not invoked.
 
 | Scenario | Automated UIA | Human JAWS/NVDA/Narrator |
 |---|---|---|

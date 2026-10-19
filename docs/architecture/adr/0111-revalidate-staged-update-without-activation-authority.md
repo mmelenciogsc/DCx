@@ -19,7 +19,7 @@ ADR 0110 made publication of the inert package and signed manifest atomic, but t
 
 ## Validation
 
-Implementation `b4fa789` plus workflow-order correction `c5a4ecd` and the later ADR 0112 transaction hardening pass 37/37 P13 reliability tests and the full 677/677 Windows suite. Current exact P13 evidence is `artifacts/test-results/p13-fb44e61153d341269cbc320388cdb72f/` at `9f28ae0`.
+Implementation `b4fa789` plus workflow-order correction `c5a4ecd`, ADR 0112 transaction hardening and ADR 0113's uncomposed adapter pass 42/42 P13 reliability tests and the full 682/682 Windows suite. Current exact P13 evidence is `artifacts/test-results/p13-e0abd97bf39849e792dec2f561fa1b37/` at `fc23b48`.
 
 Core cases cover unchecked denial before trust work, successful local-only revalidation, bound receipt fields, current-version substitution, expiry, cancellation, missing set, package tamper, wrong-key manifest substitution, extra members and every nonzero authority field. Native UIA proves six distinct access keys, default-unchecked request, denial focus, one readiness digest, request reset, unchanged two-file staged set and zero network/installer/elevation/activation/restart/production actions.
 
