@@ -349,6 +349,11 @@ try {
         $request.Dispose()
     }
 
+    Remove-Item -LiteralPath $signingKeyPath -Force
+    if (Test-Path -LiteralPath $signingKeyPath) {
+        throw "The ephemeral CARE operations fixture signing key was retained."
+    }
+
     [ordered]@{
         schema_version = 1
         source = "authenticated_loopback_synthetic_care_ledger"
@@ -367,6 +372,7 @@ try {
         payout_attempts = 0
         notification_transports = 0
         production_actions = 0
+        ephemeral_signing_key_retained = $false
         boundary = [string]$boundary.Current.Name
         summary = $summary
         details_before = $detailsBefore
@@ -378,6 +384,9 @@ finally {
     Stop-OwnedProcess $desktopProcess
     Stop-OwnedProcess $deniedProcess
     Stop-OwnedProcess $serverProcess
+    if (Test-Path -LiteralPath $signingKeyPath) {
+        Remove-Item -LiteralPath $signingKeyPath -Force
+    }
     if ($null -ne $serverOutputTask -and $null -ne $serverErrorTask) {
         $diagnostics = $serverOutputTask.GetAwaiter().GetResult() +
             $serverErrorTask.GetAwaiter().GetResult()
