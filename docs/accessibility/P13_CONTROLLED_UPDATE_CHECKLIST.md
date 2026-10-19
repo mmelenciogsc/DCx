@@ -1,6 +1,6 @@
 # P13 controlled-update accessibility checklist
 
-Automated Windows UIA evidence: PASS at exact validation source `b4fa789`, in `artifacts/test-results/p13-9e268fb218504acab25b0548f82e37a8/controlled-update-ui/validation.json`.
+Automated Windows UIA evidence: PASS at exact validation source `c5a4ecd`, in `artifacts/test-results/p13-611d9d30107847d992e6b6f543be2f58/controlled-update-ui/validation.json`. Close follows the final-review group in XAML reading/tab order.
 
 | Scenario | Automated UIA | Human JAWS/NVDA/Narrator |
 |---|---|---|
