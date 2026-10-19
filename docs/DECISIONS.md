@@ -113,5 +113,6 @@
 | [0109](architecture/adr/0109-review-controlled-updates-before-inert-staging.md) | Review controlled updates before inert staging | Accepted for local inert staging; production update service and activation remain blocked | 2026-10-19 |
 | [0110](architecture/adr/0110-atomically-publish-controlled-update-sets.md) | Atomically publish complete controlled-update sets | Accepted for local inert staging; activation remains absent and blocked | 2026-10-19 |
 | [0111](architecture/adr/0111-revalidate-staged-update-without-activation-authority.md) | Revalidate the final staged update without activation authority | Accepted for a read-only local readiness review; installation and activation remain absent and blocked | 2026-10-19 |
+| [0112](architecture/adr/0112-hold-staged-update-files-across-activation-transaction.md) | Hold staged update files across the activation transaction | Accepted for the activation-transaction foundation; production execution and lifecycle acceptance remain blocked | 2026-10-19 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
