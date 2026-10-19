@@ -1,10 +1,12 @@
 using System.IO;
+using System.Net.Http;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using DCx.Core.Content;
 using DCx.Core.Documents;
 using DCx.Core.LocalModels;
+using DCx.Core.Storage;
 using DCx.Desktop.Media;
 using Microsoft.Win32;
 
@@ -20,10 +22,12 @@ public partial class ContentViewerWindow : Window
     private readonly LocalModelSelectionStore _localModelSelectionStore;
     private readonly WhisperBackendSelectionStore _whisperBackendSelectionStore;
     private readonly FfmpegBackendSelectionStore _ffmpegBackendSelectionStore;
+    private readonly ScannedPdfUrlDownloader _scannedPdfUrlDownloader = CreateScannedPdfUrlDownloader();
     private CancellationTokenSource? _frameDescriptionCancellation;
     private CancellationTokenSource? _webVideoCancellation;
     private CancellationTokenSource? _transcriptionCancellation;
     private string? _currentMediaPath;
+    private CancellationTokenSource? _pdfDownloadCancellation;
 
     public ContentViewerWindow(
         LocalModelSelectionStore localModelSelectionStore,
@@ -50,6 +54,9 @@ public partial class ContentViewerWindow : Window
             _webVideoCancellation?.Dispose();
             _webVideoCancellation = null;
             _transcriptionCancellation?.Cancel();
+            _pdfDownloadCancellation?.Cancel();
+            _pdfDownloadCancellation?.Dispose();
+            _scannedPdfUrlDownloader.Dispose();
         };
     }
 
@@ -74,6 +81,55 @@ public partial class ContentViewerWindow : Window
     }
 
     private void OnOpenFileClick(object sender, RoutedEventArgs e) => OpenLocalFile(FilePathBox.Text);
+
+    private async void OnDownloadScannedPdfClick(object sender, RoutedEventArgs e)
+    {
+        _pdfDownloadCancellation?.Cancel();
+        _pdfDownloadCancellation?.Dispose();
+        var cancellation = new CancellationTokenSource();
+        _pdfDownloadCancellation = cancellation;
+        DownloadScannedPdfButton.IsEnabled = false;
+        SetStatus("Downloading the bounded scanned PDF. Redirects, cookies, proxies and private-network destinations are denied.");
+        try
+        {
+            var downloaded = await _scannedPdfUrlDownloader.DownloadAsync(
+                ScannedPdfUrlBox.Text,
+                ApplicationDataRoot.Resolve(),
+                cancellation.Token);
+            try
+            {
+                var wizard = new ScannedPdfWizardWindow(downloaded.Path) { Owner = this };
+                wizard.Closed += (_, _) => downloaded.Dispose();
+                wizard.Show();
+            }
+            catch
+            {
+                downloaded.Dispose();
+                throw;
+            }
+            SetStatus("Scanned PDF downloaded to a private temporary and opened in the accessibility wizard. The temporary is deleted when the wizard closes.");
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("Scanned PDF download canceled. No wizard was opened.");
+        }
+        catch (Exception exception) when (
+            exception is HttpRequestException or IOException or UnauthorizedAccessException or
+                InvalidOperationException or ArgumentException or UriFormatException)
+        {
+            SetStatus("Scanned PDF download failed safely. No file or wizard was retained.");
+            ScannedPdfUrlBox.Focus();
+        }
+        finally
+        {
+            if (ReferenceEquals(_pdfDownloadCancellation, cancellation))
+            {
+                _pdfDownloadCancellation = null;
+                DownloadScannedPdfButton.IsEnabled = true;
+            }
+            cancellation.Dispose();
+        }
+    }
 
     private void OpenLocalFile(string path)
     {
@@ -483,4 +539,15 @@ public partial class ContentViewerWindow : Window
     }
 
     private void SetStatus(string message) => ContentStatusText.Text = message;
+
+    private static ScannedPdfUrlDownloader CreateScannedPdfUrlDownloader()
+    {
+        if (string.Equals(Environment.GetEnvironmentVariable("DCX_P12_PDF_URL_FIXTURE"), "1", StringComparison.Ordinal) &&
+            Uri.TryCreate(Environment.GetEnvironmentVariable("DCX_P12_PDF_URL_FIXTURE_ORIGIN"), UriKind.Absolute, out var origin))
+        {
+            return new ScannedPdfUrlDownloader(ScannedPdfUrlDownloader.CreateLoopbackFixtureHandler(), origin);
+        }
+
+        return ScannedPdfUrlDownloader.CreateProduction();
+    }
 }

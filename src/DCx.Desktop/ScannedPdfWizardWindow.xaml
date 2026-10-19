@@ -1,6 +1,7 @@
 <Window x:Class="DCx.Desktop.ScannedPdfWizardWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="Scanned PDF accessibility wizard — DCx"
         Width="720" Height="680" MinWidth="580" MinHeight="520"
         AutomationProperties.AutomationId="ScannedPdfWizardWindow"
@@ -38,10 +39,17 @@
                 <Button x:Name="ExportHtmlButton" MinWidth="160" Margin="0,0,8,0" Content="Export semantic HTML"
                         IsEnabled="False" AutomationProperties.AutomationId="ExportHtmlButton"
                         Click="OnExportHtmlClick" />
-                <Button x:Name="ExportDocxButton" MinWidth="160" Content="Export structured DOCX"
+                <Button x:Name="ExportDocxButton" MinWidth="160" Margin="0,0,8,0" Content="Export structured DOCX"
                         IsEnabled="False" AutomationProperties.AutomationId="ExportDocxButton"
                         Click="OnExportDocxClick" />
+                <Button x:Name="ExportPdfButton" MinWidth="180" Content="_Export flattened PDF"
+                        IsEnabled="False" AutomationProperties.AutomationId="ExportPdfButton"
+                        AutomationProperties.Name="Export flattened accessible PDF"
+                        AutomationProperties.HelpText="Creates a non-editable PDF from reviewed OCR text and page geometry."
+                        Click="OnExportPdfClick" />
             </WrapPanel>
+            <wv2:WebView2 x:Name="PdfExportWebView" Width="1" Height="1"
+                         Focusable="False" IsHitTestVisible="False" />
         </StackPanel>
         <ListBox x:Name="OcrBlocksList" AutomationProperties.AutomationId="OcrBlocksList"
                  AutomationProperties.Name="OCR blocks in page reading order"

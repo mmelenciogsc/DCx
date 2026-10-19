@@ -26,6 +26,19 @@
                          AutomationProperties.Name="Local file path" />
             </DockPanel>
 
+            <Label Target="{Binding ElementName=ScannedPdfUrlBox}" Padding="0" Content="Scanned PDF URL" />
+            <DockPanel Margin="0,4,0,10">
+                <Button x:Name="DownloadScannedPdfButton" DockPanel.Dock="Right" MinWidth="190" Margin="8,0,0,0"
+                        Content="_Download and open wizard"
+                        AutomationProperties.AutomationId="DownloadScannedPdfButton"
+                        AutomationProperties.Name="Download scanned PDF and open accessibility wizard"
+                        AutomationProperties.HelpText="Requires a public HTTPS PDF. The private temporary is deleted when the wizard closes."
+                        Click="OnDownloadScannedPdfClick" />
+                <TextBox x:Name="ScannedPdfUrlBox" Padding="5"
+                         AutomationProperties.AutomationId="ScannedPdfUrlBox"
+                         AutomationProperties.Name="Scanned PDF URL" />
+            </DockPanel>
+
             <Label Target="{Binding ElementName=FolderPathBox}" Padding="0" Content="Folder path" />
             <DockPanel Margin="0,4,0,10">
                 <Button DockPanel.Dock="Right" MinWidth="110" Margin="8,0,0,0" Content="List folder"

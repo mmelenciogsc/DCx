@@ -11,6 +11,7 @@ public partial class ScannedPdfWizardWindow : Window
     private readonly WindowsOcrService _ocrService = new();
     private readonly AccessibleDocumentValidator _validator = new();
     private readonly AccessibleDocumentExporter _exporter = new();
+    private WebView2AccessiblePdfExporter? _pdfExporter;
     private AccessibleDocument? _document;
     private DocumentBlock[] _orderedBlocks = [];
 
@@ -20,6 +21,11 @@ public partial class ScannedPdfWizardWindow : Window
         InitializeComponent();
         PdfPathText.Text = $"Source: {Path.GetFileName(_pdfPath)}";
         RepairRoleBox.ItemsSource = Enum.GetValues<DocumentBlockRole>();
+        Closed += (_, _) =>
+        {
+            _pdfExporter?.Dispose();
+            _pdfExporter = null;
+        };
     }
 
     private async void OnRecognizeClick(object sender, RoutedEventArgs e)
@@ -36,6 +42,7 @@ public partial class ScannedPdfWizardWindow : Window
                 .ToArray();
             ExportHtmlButton.IsEnabled = validation.IsValid;
             ExportDocxButton.IsEnabled = validation.IsValid;
+            ExportPdfButton.IsEnabled = validation.IsValid;
             SetStatus(validation.IsValid
                 ? $"OCR complete. {_document.Blocks.Count} ordered blocks passed semantic and geometry validation. Review before exporting."
                 : $"OCR requires correction. {string.Join(" ", validation.Errors)}");
@@ -75,6 +82,7 @@ public partial class ScannedPdfWizardWindow : Window
         var validation = _validator.Validate(_document);
         ExportHtmlButton.IsEnabled = validation.IsValid;
         ExportDocxButton.IsEnabled = validation.IsValid;
+        ExportPdfButton.IsEnabled = validation.IsValid;
         SetStatus(validation.IsValid
             ? $"Semantic repair applied to {replacement.Id}. Exports remain valid."
             : $"Repair requires correction. {string.Join(" ", validation.Errors)}");
@@ -125,6 +133,30 @@ public partial class ScannedPdfWizardWindow : Window
         }
     }
 
+    private async void OnExportPdfClick(object sender, RoutedEventArgs e)
+    {
+        if (_document is null) return;
+        var path = GetExportPath("pdf");
+        SetExportActionsEnabled(false);
+        SetStatus("Preparing a flattened accessible PDF from reviewed text and geometry. The output is not an editable form.");
+        try
+        {
+            _pdfExporter ??= new WebView2AccessiblePdfExporter(PdfExportWebView);
+            await _pdfExporter.ExportFlattenedAsync(_document, path);
+            SetStatus($"Flattened accessible PDF exported atomically: {Path.GetFileName(path)}. Human assistive-technology review is still required.");
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidOperationException or
+                ArgumentException or System.Runtime.InteropServices.COMException)
+        {
+            SetStatus("Flattened PDF export failed safely. An existing export was not replaced.");
+        }
+        finally
+        {
+            SetExportActionsEnabled(_validator.Validate(_document).IsValid);
+        }
+    }
+
     private string GetExportPath(string extension)
     {
         var configured = Environment.GetEnvironmentVariable("DCX_EXPORT_ROOT");
@@ -139,6 +171,7 @@ public partial class ScannedPdfWizardWindow : Window
     {
         ExportHtmlButton.IsEnabled = enabled;
         ExportDocxButton.IsEnabled = enabled;
+        ExportPdfButton.IsEnabled = enabled;
     }
 
     private void SetStatus(string message) => WizardStatusText.Text = message;

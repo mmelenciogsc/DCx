@@ -193,6 +193,43 @@ public sealed class AccessibleDocumentTests : IDisposable
     }
 
     [Fact]
+    public void FlattenedPdfLayout_PreservesReviewedGeometryAndSemanticText()
+    {
+        var document = new AccessibleDocument("Scanned & reviewed",
+        [
+            new("heading", 1, 0, DocumentBlockRole.Heading, "Account <summary>", new(0.1, 0.1, 0.8, 0.1)),
+            new("field", 1, 1, DocumentBlockRole.FormField, "Draft & ready", new(0.2, 0.4, 0.5, 0.08), "Status", true),
+            new("image", 2, 0, DocumentBlockRole.ImageDescription, "A chart", new(0.05, 0.1, 0.9, 0.7), "Revenue chart"),
+        ], "fil-PH");
+
+        var html = new AccessiblePdfHtmlBuilder().BuildFlattenedLayout(document);
+
+        Assert.Contains("<html lang=\"fil-PH\">", html, StringComparison.Ordinal);
+        Assert.Contains("default-src 'none'", html, StringComparison.Ordinal);
+        Assert.Contains("<section class=\"page\" aria-label=\"Page 1\">", html, StringComparison.Ordinal);
+        Assert.Contains("left:10%;top:10%;width:80%;height:10%", html, StringComparison.Ordinal);
+        Assert.Contains("Account &lt;summary&gt;", html, StringComparison.Ordinal);
+        Assert.Contains("<span class=\"field-label\">Status: </span><span>Draft &amp; ready</span>", html, StringComparison.Ordinal);
+        Assert.Contains("role=\"img\" aria-label=\"Revenue chart\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("<script", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FlattenedPdfLayout_RequiresGeometryAndSequentialPages()
+    {
+        var missingGeometry = new AccessibleDocument(
+            "Missing geometry",
+            [new("text", 1, 0, DocumentBlockRole.Paragraph, "Text")]);
+        var missingPage = new AccessibleDocument(
+            "Missing page",
+            [new("text", 2, 0, DocumentBlockRole.Paragraph, "Text", new(0.1, 0.1, 0.8, 0.1))]);
+        var builder = new AccessiblePdfHtmlBuilder();
+
+        Assert.Throws<InvalidOperationException>(() => builder.BuildFlattenedLayout(missingGeometry));
+        Assert.Throws<InvalidOperationException>(() => builder.BuildFlattenedLayout(missingPage));
+    }
+
+    [Fact]
     public void OfficeExtractor_ReadsWordPresentationAndSpreadsheetFixtures()
     {
         var extractor = new OfficeTextExtractor();

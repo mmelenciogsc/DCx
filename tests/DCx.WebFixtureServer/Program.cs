@@ -15,9 +15,19 @@ var mediaArgument = args
 var mediaPath = mediaArgument.value is not null && mediaArgument.index + 1 < args.Length
     ? Path.GetFullPath(args[mediaArgument.index + 1])
     : null;
+var pdfArgument = args
+    .Select((value, index) => (value, index))
+    .FirstOrDefault(item => string.Equals(item.value, "--pdf", StringComparison.Ordinal));
+var pdfPath = pdfArgument.value is not null && pdfArgument.index + 1 < args.Length
+    ? Path.GetFullPath(args[pdfArgument.index + 1])
+    : null;
 if (mediaPath is not null && !File.Exists(mediaPath))
 {
     throw new FileNotFoundException("The optional web-video fixture does not exist.", mediaPath);
+}
+if (pdfPath is not null && !File.Exists(pdfPath))
+{
+    throw new FileNotFoundException("The optional scanned-PDF fixture does not exist.", pdfPath);
 }
 builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
 
@@ -71,6 +81,9 @@ app.MapGet("/web-video", () => mediaPath is null
 app.MapGet("/media-fixture.mp4", () => mediaPath is null
     ? Results.NotFound()
     : Results.File(mediaPath, "video/mp4", enableRangeProcessing: true));
+app.MapGet("/scanned-source.pdf", () => pdfPath is null
+    ? Results.NotFound()
+    : Results.File(pdfPath, "application/pdf", enableRangeProcessing: false));
 app.MapGet("/social-login", () => Results.Content(
     """
     <!doctype html>

@@ -13,6 +13,8 @@ $magick = (Get-Command magick -ErrorAction Stop).Source
 $previousRepoRoot = $env:DCX_REPO_ROOT
 $previousDataRoot = $env:DCX_DATA_ROOT
 $previousExportRoot = $env:DCX_EXPORT_ROOT
+$previousPdfUrlFixture = $env:DCX_P12_PDF_URL_FIXTURE
+$previousPdfUrlFixtureOrigin = $env:DCX_P12_PDF_URL_FIXTURE_ORIGIN
 $runRoot = Join-Path $repoRoot "artifacts\test-results\p07-$([Guid]::NewGuid().ToString('N'))"
 $textFixture = Join-Path $runRoot "accessible-fixture.txt"
 $videoFixture = Join-Path $runRoot "media-fixture.mp4"
@@ -21,6 +23,7 @@ $scanImage = Join-Path $runRoot "scanned-source.png"
 $pdfFixture = Join-Path $runRoot "scanned-source.pdf"
 $exportRoot = Join-Path $runRoot "exports"
 $webFixtureServer = Join-Path $repoRoot "tests\DCx.WebFixtureServer\bin\Release\net10.0\DCx.WebFixtureServer.dll"
+$pdfInspector = Join-Path $repoRoot "tests\DCx.PdfInspector\bin\Release\net10.0\DCx.PdfInspector.dll"
 $webServerProcess = $null
 $webServerOutputTask = $null
 $webServerErrorTask = $null
@@ -113,6 +116,8 @@ $null = $serverStart.ArgumentList.Add("--port")
 $null = $serverStart.ArgumentList.Add($webPort.ToString([Globalization.CultureInfo]::InvariantCulture))
 $null = $serverStart.ArgumentList.Add("--media")
 $null = $serverStart.ArgumentList.Add($videoFixture)
+$null = $serverStart.ArgumentList.Add("--pdf")
+$null = $serverStart.ArgumentList.Add($pdfFixture)
 $webServerProcess = [Diagnostics.Process]::Start($serverStart)
 if ($null -eq $webServerProcess) { throw "The local web-video fixture server did not start." }
 $webServerOutputTask = $webServerProcess.StandardOutput.ReadToEndAsync()
@@ -130,6 +135,8 @@ $env:DCX_REPO_ROOT = $repoRoot
 $dataRoot = Join-Path $runRoot "data"
 $env:DCX_DATA_ROOT = $dataRoot
 $env:DCX_EXPORT_ROOT = $exportRoot
+$env:DCX_P12_PDF_URL_FIXTURE = "1"
+$env:DCX_P12_PDF_URL_FIXTURE_ORIGIN = $webOrigin
 $visionDigest = "ef33995bb2ac37689e49c1a15cd627354d05a3c21d1f4bdcd6a5c83825349c1f"
 $visionModel = "llamacpp:$visionDigest"
 $licenseDigest = "d0fa3710cf6cf8e18009051c28988e4aa8114b0d4cd6e3f102bb9ccba50d7cc7"
@@ -439,9 +446,15 @@ try {
         $status.Current.Name -eq "Web video resumed after explicit user action."
     } "The web video did not resume after explicit user action."
 
-    $filePath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($pdfFixture)
-    $openFile.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $pdfUrl = Require-ById $viewer "ScannedPdfUrlBox" "The scanned-PDF URL field was not exposed."
+    $downloadPdf = Require-ById $viewer "DownloadScannedPdfButton" "The scanned-PDF URL download action was not exposed."
+    $pdfUrl.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue(
+        ([Uri]::new([Uri]$webOrigin, "scanned-source.pdf")).AbsoluteUri)
+    $downloadPdf.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $wizard = Wait-For { Find-WindowByProcessAndId $process.Id "ScannedPdfWizardWindow" } "The scanned PDF wizard did not open."
+    $null = Wait-For {
+        $status.Current.Name -like "Scanned PDF downloaded to a private temporary*"
+    } "The bounded URL-to-private-temporary handoff did not complete."
     $recognizePdf = Require-ById $wizard "RecognizePdfButton" "The scanned-PDF recognition action was not exposed."
     $wizardStatus = Require-ById $wizard "WizardStatusText" "The scanned-PDF wizard status was not exposed."
     $recognizePdf.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -524,6 +537,61 @@ try {
         throw "Atomic document export left a same-directory temporary file."
     }
 
+    $exportPdf = Require-ById $wizard "ExportPdfButton" "The flattened accessible PDF export action was not exposed."
+    $pdfExport = Join-Path $exportRoot "scanned-source-accessible.pdf"
+    [IO.File]::WriteAllText($pdfExport, "prior export placeholder")
+    $exportPdf.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        if (-not (Test-Path -LiteralPath $pdfExport -PathType Leaf) -or
+            $wizardStatus.Current.Name -notlike "Flattened accessible PDF exported atomically:*") { return $false }
+        try {
+            $candidate = [IO.File]::ReadAllBytes($pdfExport)
+            return $candidate.Length -gt 128 -and
+                [Text.Encoding]::ASCII.GetString($candidate, 0, 5) -eq "%PDF-"
+        }
+        catch { return $false }
+    } "The flattened accessible PDF was not produced atomically." 100
+    $pdfBytes = [IO.File]::ReadAllBytes($pdfExport)
+    if ($pdfBytes.Length -gt 20MB) { throw "The one-page PDF fixture exceeded its validation bound." }
+    $pdfAscii = [Text.Encoding]::ASCII.GetString($pdfBytes)
+    if ($pdfAscii -notmatch '%%EOF') { throw "The flattened PDF lacks a complete end marker." }
+    $pdfHasStructureTree = $pdfAscii -match '/StructTreeRoot'
+    $pdfHasMarkedContent = $pdfAscii -match '/MarkInfo'
+    if (-not $pdfHasStructureTree -or -not $pdfHasMarkedContent) {
+        throw "The flattened PDF lacks the required tagged structure metadata."
+    }
+    $pdfInspectionPath = Join-Path $runRoot "flattened-pdf-inspection.json"
+    & dotnet $pdfInspector $pdfExport $pdfInspectionPath
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $pdfInspectionPath -PathType Leaf)) {
+        throw "The flattened PDF text/coordinate inspector failed."
+    }
+    $pdfInspection = Get-Content -LiteralPath $pdfInspectionPath -Raw | ConvertFrom-Json
+    if ([int]$pdfInspection.page_count -ne 1 -or [int]$pdfInspection.word_count -lt 3) {
+        throw "The flattened PDF did not preserve its expected page or word structure."
+    }
+    $pdfWords = @($pdfInspection.pages[0].words)
+    $dcxWord = @($pdfWords | Where-Object { $_.text -eq "DCX" }) | Select-Object -First 1
+    $numberWord = @($pdfWords | Where-Object { $_.text -eq "42" }) | Select-Object -First 1
+    if ($null -eq $dcxWord -or $null -eq $numberWord -or
+        [double]$dcxWord.left_normalized -lt 0.03 -or [double]$dcxWord.left_normalized -gt 0.30 -or
+        [double]$dcxWord.top_normalized -lt 0.20 -or [double]$dcxWord.top_normalized -gt 0.70 -or
+        [Math]::Abs([double]$dcxWord.top_normalized - [double]$numberWord.top_normalized) -gt 0.05) {
+        throw "The flattened PDF failed extracted-text or reviewed-coordinate validation."
+    }
+    if (@(Get-ChildItem -LiteralPath $exportRoot -Filter "*.tmp.pdf" -File -Force).Count -ne 0) {
+        throw "Atomic PDF export left a same-directory temporary file."
+    }
+
+    $wizard.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
+    $null = Wait-For {
+        $null -eq (Find-WindowByProcessAndId $process.Id "ScannedPdfWizardWindow")
+    } "The scanned-PDF wizard did not close after export validation."
+    $downloadRoot = Join-Path $dataRoot "temporary-pdf-downloads"
+    if ((Test-Path -LiteralPath $downloadRoot -PathType Container) -and
+        @(Get-ChildItem -LiteralPath $downloadRoot -Force).Count -ne 0) {
+        throw "The private URL-downloaded PDF survived wizard closure."
+    }
+
     $filePath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($docxExport)
     $openFile.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { $status.Current.Name -like "Opened scanned-source-accessible.docx as Word*" } "The exported DOCX did not reopen in the accessible viewer."
@@ -550,6 +618,12 @@ try {
         docx_atomic_replacement = $true
         docx_title_heading_language_semantics = $true
         docx_viewer_round_trip = $true
+        flattened_pdf_atomic_replacement = $true
+        flattened_pdf_structure_tree_observed = $pdfHasStructureTree
+        flattened_pdf_mark_info_observed = $pdfHasMarkedContent
+        flattened_pdf_extracted_words = [int]$pdfInspection.word_count
+        flattened_pdf_coordinate_validation = $true
+        scanned_pdf_url_private_temporary_cleanup = $true
         local_vlm_cold_milliseconds = $localDescriptionClock.ElapsedMilliseconds
         retained_model_web_video_milliseconds = $webDescriptionClock.ElapsedMilliseconds
         production_actions = 0
@@ -590,6 +664,11 @@ try {
     "Structured DOCX semantic styles and language=PASS"
     "Structured DOCX atomic replacement=PASS"
     "Structured DOCX viewer round-trip=PASS"
+    "Flattened PDF export and atomic replacement=PASS"
+    "Flattened PDF structure tree observed=$pdfHasStructureTree"
+    "Flattened PDF marked-content metadata observed=$pdfHasMarkedContent"
+    "Flattened PDF extracted text and reviewed coordinates=PASS"
+    "Scanned PDF URL strict download and private temporary cleanup=PASS"
     "P07 content viewer UIA validation=PASS"
 }
 finally {
@@ -645,6 +724,8 @@ finally {
     $env:DCX_REPO_ROOT = $previousRepoRoot
     $env:DCX_DATA_ROOT = $previousDataRoot
     $env:DCX_EXPORT_ROOT = $previousExportRoot
+    $env:DCX_P12_PDF_URL_FIXTURE = $previousPdfUrlFixture
+    $env:DCX_P12_PDF_URL_FIXTURE_ORIGIN = $previousPdfUrlFixtureOrigin
     if ($null -ne $webServerProcess -and -not $webServerProcess.HasExited) {
         $webServerProcess.Kill($true)
         $webServerProcess.WaitForExit()
