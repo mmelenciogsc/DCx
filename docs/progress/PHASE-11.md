@@ -67,8 +67,8 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\audit-paypal-contrac
 
 - Locked Release build: 0 warnings, 0 errors.
 - P11 exact-namespace tests: passed 127, failed 0, skipped 0; about 4 seconds.
-- P11 evidence: `artifacts/test-results/p11-d511791678374e39932b500a77d4bbcd/` with `p11-finance.trx`, schema-v3 `recipient-snapshot-uia.json` and `contributor-loopback-uia.json` (generated from implementation committed as `4acac23` and intentionally not committed).
-- Full native suite: passed 616, failed 0, skipped 0; zero build warnings/errors.
+- P11 evidence: `artifacts/test-results/p11-cc5338249ea94c64a436edab4cf83acd/` with `p11-finance.trx`, schema-v3 `recipient-snapshot-uia.json` and `contributor-loopback-uia.json` (P11 implementation `4acac23`, rerun from clean aggregate source `c3360af`, intentionally not committed).
+- Full native suite: passed 621, failed 0, skipped 0; zero build warnings/errors.
 - Twenty-nine focused transport/API cases prove exact routes, duplicate-free success/error/request JSON, media/charset/encoding/size admission, privacy headers, role/subject binding and real child-Kestrel compatibility.
 - The first exact-source P11 run, `artifacts/test-results/p11-a8708146739140b69a5f7b80e0c47665/`, passed 122/122 and the existing native surfaces but exposed an asynchronous initial-refresh focus race in the new composed window. Refocusing the heading after the awaited refresh fixed it; three consecutive focused native runs and the complete official rerun then passed. This is automated UIA evidence, not human assistive-technology acceptance.
 - One preceding official P11 run passed finance 96/96 but failed the native recipient protected-store reopen assertion; an immediate isolated UIA run then timed out on review exposure, while the next isolated run and the complete official rerun passed. Treat this as an intermittent native UIA timing observation, not evidence of human assistive-technology acceptance; the failed artifacts remain under `artifacts/test-results/p11-7859f8e386a94ec28196498db250ea79/` and `artifacts/test-results/p11-ui-rerun/`.
