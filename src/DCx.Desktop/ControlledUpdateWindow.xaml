@@ -89,19 +89,12 @@
                     <Button x:Name="StageButton"
                             MinWidth="190"
                             MinHeight="38"
-                            Margin="0,0,10,0"
                             IsEnabled="False"
                             Content="_Stage verified package"
                             AutomationProperties.AutomationId="StageControlledUpdateButton"
                             AutomationProperties.Name="Stage the exact reviewed update package"
                             AutomationProperties.HelpText="Revalidates the signed manifest and package. No installer is invoked."
                             Click="OnStageClick" />
-                    <Button MinWidth="120"
-                            MinHeight="38"
-                            Content="C_lose"
-                            AutomationProperties.AutomationId="CloseControlledUpdateButton"
-                            AutomationProperties.Name="Close controlled updates"
-                            Click="OnCloseClick" />
                 </WrapPanel>
 
                 <GroupBox Margin="0,18,0,0" Header="Final staged-set integrity review">
@@ -129,6 +122,15 @@
                                 Click="OnActivationReviewClick" />
                     </StackPanel>
                 </GroupBox>
+
+                <Button MinWidth="120"
+                        MinHeight="38"
+                        Margin="0,16,0,0"
+                        HorizontalAlignment="Left"
+                        Content="C_lose"
+                        AutomationProperties.AutomationId="CloseControlledUpdateButton"
+                        AutomationProperties.Name="Close controlled updates"
+                        Click="OnCloseClick" />
             </StackPanel>
         </ScrollViewer>
     </DockPanel>
