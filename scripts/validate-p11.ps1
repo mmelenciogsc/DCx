@@ -57,6 +57,8 @@ try {
         "DCx.Core.Tests.Finance.CareFailedPayoutReviewTests.Policy_RejectsDuplicateOrExcessReviewsAndUnapprovedDisposition",
         "DCx.Core.Tests.Finance.CareFailedPayoutReviewTests.Policy_RejectsAnyDispositionAuthorityCounter",
         "DCx.Core.Tests.Finance.CareFailedPayoutReviewTests.UnavailableSource_DoesNotInventReviewsOrRecordDisposition",
+        "DCx.Core.Tests.Finance.LoopbackCareOperationsSourceTests.FailedPayoutList_AcceptsMinimizedResponseAndRejectsSensitiveUnknownField",
+        "DCx.Core.Tests.Finance.LoopbackCareOperationsSourceTests.FailedPayoutDisposition_BindsExactRouteAndRejectsAuthorityEffects",
         "DCx.Core.Tests.Finance.CareOperationsApiE2eTests.LoopbackApi_AuthenticatesBindsExactReviewAndNeverCallsProviderDuringReplay"
     )
     foreach ($requiredContract in $requiredLiabilityContracts) {
@@ -70,6 +72,7 @@ try {
 
     & (Join-Path $repoRoot "scripts\validate-p11-recipient-ui.ps1") -RunRoot $runRoot
     & (Join-Path $repoRoot "scripts\validate-p11-contributor-loopback-ui.ps1") -RunRoot $runRoot
+    & (Join-Path $repoRoot "scripts\validate-p11-operations-loopback-ui.ps1") -RunRoot $runRoot
 
     "P11 finance tests=PASS ($financeTestsPassed/$financeTestsPassed)"
     "US`$3 monthly subscription fixture=PASS"
@@ -105,6 +108,7 @@ try {
     "Accessible fixture-only bounded CARE operations review and approval=PASS"
     "Durable CARE operations exact-review immediate-transaction rollback and cross-repository concurrency gates=PASS"
     "Authenticated default-off loopback CARE operations API strict transport and replay gates=PASS"
+    "Authenticated durable failed-payout hold transport and native desktop composition=PASS"
     "Authenticated default-off loopback contributor dashboard subject origin and privacy gates=PASS"
     "Chained privacy-minimized append-only CARE operator decision audit=PASS"
     "Default-off read-only aggregate CARE transition monitor=PASS"

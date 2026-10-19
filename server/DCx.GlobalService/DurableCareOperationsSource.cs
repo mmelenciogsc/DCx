@@ -6,7 +6,10 @@ namespace DCx.GlobalService;
 /// Exposes aggregate verified-event quarantine health and an explicitly gated,
 /// local-only replay operation. It never contacts a payment provider.
 /// </summary>
-public sealed class DurableCareOperationsSource : ICareOperationsSource, ICareBlockedCaseReviewSource
+public sealed class DurableCareOperationsSource :
+    ICareOperationsSource,
+    ICareBlockedCaseReviewSource,
+    ICareFailedPayoutReviewSource
 {
     private readonly DurableCareRepository repository;
     private readonly bool processingCapabilityEnabled;
@@ -76,6 +79,27 @@ public sealed class DurableCareOperationsSource : ICareOperationsSource, ICareBl
         }
 
         return repository.RecordBlockedCaseDispositionAsync(
+            request,
+            operatorPseudonymSha256,
+            timeProvider.GetUtcNow(),
+            cancellationToken);
+    }
+
+    public Task<IReadOnlyList<CareFailedPayoutReview>> ListFailedPayoutReviewsAsync(
+        CancellationToken cancellationToken = default) =>
+        repository.ListFailedPayoutReviewsAsync(cancellationToken);
+
+    public Task<CareFailedPayoutDispositionResult> RecordFailedPayoutDispositionAsync(
+        CareFailedPayoutDispositionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (operatorPseudonymSha256 is null)
+        {
+            throw new InvalidOperationException(
+                "CARE failed-payout disposition identity is not configured.");
+        }
+
+        return repository.RecordFailedPayoutDispositionAsync(
             request,
             operatorPseudonymSha256,
             timeProvider.GetUtcNow(),

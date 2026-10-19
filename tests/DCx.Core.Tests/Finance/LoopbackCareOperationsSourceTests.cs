@@ -183,6 +183,84 @@ public sealed class LoopbackCareOperationsSourceTests
         Assert.Equal("care_blocked_case_response_invalid", error.Code);
     }
 
+    [Fact]
+    public async Task FailedPayoutList_AcceptsMinimizedResponseAndRejectsSensitiveUnknownField()
+    {
+        const string minimized =
+            """
+            [{"reviewId":"0123456789abcdef0123456789abcdef","carePeriodId":"care:2026-05","amountCents":700,"failureCode":"provider_rejected","holdCode":"failed_item_hold","noticeCode":"not_ready","failedAtUtc":"2026-10-18T00:40:00+00:00","reviewSha256":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789","dispositionCode":"unreviewed"}]
+            """;
+        var acceptedHandler = new StaticHandler(request => Json(request, minimized));
+        using (var source = new LoopbackCareOperationsSource(
+                   acceptedHandler, Origin, Token))
+        {
+            var review = Assert.Single(await source.ListFailedPayoutReviewsAsync());
+            Assert.Equal("0123456789abcdef0123456789abcdef", review.ReviewId);
+            Assert.Equal(700, review.AmountCents);
+        }
+
+        var sensitive = minimized.Replace(
+            "\"dispositionCode\":\"unreviewed\"",
+            "\"dispositionCode\":\"unreviewed\",\"contributorPseudonym\":\"must-not-cross\"",
+            StringComparison.Ordinal);
+        var deniedHandler = new StaticHandler(request => Json(request, sensitive));
+        using var deniedSource = new LoopbackCareOperationsSource(
+            deniedHandler, Origin, Token);
+
+        var error = await Assert.ThrowsAsync<CareOperationsTransportException>(
+            () => deniedSource.ListFailedPayoutReviewsAsync());
+
+        Assert.Equal("care_operations_response_invalid", error.Code);
+    }
+
+    [Fact]
+    public async Task FailedPayoutDisposition_BindsExactRouteAndRejectsAuthorityEffects()
+    {
+        var request = new CareFailedPayoutDispositionRequest(
+            "0123456789abcdef0123456789abcdef",
+            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+            CareFailedPayoutReviewPolicy.RequestRecipientUpdate,
+            ExplicitlyApproved: true);
+        var acceptedHandler = new StaticHandler(message =>
+        {
+            Assert.Equal(HttpMethod.Post, message.Method);
+            Assert.Equal(
+                "/api/care/operations/failed-payout-holds/0123456789abcdef0123456789abcdef/disposition",
+                message.RequestUri!.AbsolutePath);
+            var body = message.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            Assert.DoesNotContain("contributor", body, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(request.ReviewedSha256, body, StringComparison.Ordinal);
+            return Json(
+                message,
+                """
+                {"reviewId":"0123456789abcdef0123456789abcdef","dispositionCode":"request_recipient_update","noticeCode":"local_dashboard_notice_ready","recordedUtc":"2026-10-18T01:02:00+00:00","providerCalls":0,"financialMutations":0,"payoutAttempts":0,"notificationTransports":0}
+                """);
+        });
+        using (var source = new LoopbackCareOperationsSource(
+                   acceptedHandler, Origin, Token))
+        {
+            var result = await source.RecordFailedPayoutDispositionAsync(request);
+            Assert.Equal(CareFailedPayoutReviewPolicy.RequestRecipientUpdate, result.DispositionCode);
+            Assert.Equal(0, result.ProviderCalls);
+            Assert.Equal(0, result.FinancialMutations);
+            Assert.Equal(0, result.PayoutAttempts);
+            Assert.Equal(0, result.NotificationTransports);
+        }
+
+        var deniedHandler = new StaticHandler(message => Json(
+            message,
+            """
+            {"reviewId":"0123456789abcdef0123456789abcdef","dispositionCode":"request_recipient_update","noticeCode":"local_dashboard_notice_ready","recordedUtc":"2026-10-18T01:02:00+00:00","providerCalls":0,"financialMutations":0,"payoutAttempts":1,"notificationTransports":0}
+            """));
+        using var deniedSource = new LoopbackCareOperationsSource(
+            deniedHandler, Origin, Token);
+
+        var error = await Assert.ThrowsAsync<CareOperationsTransportException>(
+            () => deniedSource.RecordFailedPayoutDispositionAsync(request));
+
+        Assert.Equal("care_failed_payout_response_invalid", error.Code);
+    }
+
     private static string ClearHealth() =>
         """
         {"statusCode":"clear","pending":0,"due":0,"blocked":0,"completed":0,"maximumAttemptCount":0,"oldestPendingUtc":null,"nextAttemptUtc":null,"canProcessDue":false}

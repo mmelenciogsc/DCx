@@ -5,29 +5,53 @@ using DCx.Core.Finance;
 
 namespace DCx.Desktop;
 
+internal enum CareOperationsSourceKind
+{
+    Unavailable,
+    GeneratedFixture,
+    AuthenticatedLoopbackFixture,
+}
+
 public partial class CareOperationsWindow : Window
 {
     private readonly ICareOperationsSource source;
     private readonly ICareBlockedCaseReviewSource blockedCaseSource;
     private readonly ICareFailedPayoutReviewSource failedPayoutSource;
-    private readonly bool isFixture;
+    private readonly CareOperationsSourceKind sourceKind;
     private readonly CancellationTokenSource lifetime = new();
     private CareOperationsHealth? current;
     private bool actionsEnabled;
     private bool closed;
 
     public CareOperationsWindow(ICareOperationsSource source, bool isFixture)
+        : this(
+            source,
+            isFixture
+                ? CareOperationsSourceKind.GeneratedFixture
+                : CareOperationsSourceKind.Unavailable)
+    {
+    }
+
+    internal CareOperationsWindow(
+        ICareOperationsSource source,
+        CareOperationsSourceKind sourceKind)
     {
         this.source = source ?? throw new ArgumentNullException(nameof(source));
         blockedCaseSource = source as ICareBlockedCaseReviewSource ??
             UnavailableCareBlockedCaseReviewSource.Instance;
         failedPayoutSource = source as ICareFailedPayoutReviewSource ??
             UnavailableCareFailedPayoutReviewSource.Instance;
-        this.isFixture = isFixture;
+        this.sourceKind = sourceKind;
         InitializeComponent();
-        BoundaryText.Text = isFixture
-            ? "Deterministic local validation fixture. Generated aggregate data only. Provider credentials, network requests, payments, payouts, subscriptions, and production actions are unavailable."
-            : "The CARE operator connection is not configured. No queue state or provider availability is inferred. Processing is unavailable.";
+        BoundaryText.Text = sourceKind switch
+        {
+            CareOperationsSourceKind.GeneratedFixture =>
+                "Deterministic local validation fixture. Generated aggregate data only. Provider credentials, network requests, payments, payouts, subscriptions, and production actions are unavailable.",
+            CareOperationsSourceKind.AuthenticatedLoopbackFixture =>
+                "Default-off authenticated local validation transport over an integrity-verified synthetic CARE ledger. This is not production authentication. Provider credentials, PayPal requests, payments, payout attempts, notification transports, and production actions are unavailable.",
+            _ =>
+                "The CARE operator connection is not configured. No queue state or provider availability is inferred. Processing is unavailable.",
+        };
         AutomationProperties.SetName(BoundaryText, BoundaryText.Text);
         Loaded += OnLoaded;
         Closed += (_, _) =>
@@ -35,6 +59,7 @@ public partial class CareOperationsWindow : Window
             closed = true;
             lifetime.Cancel();
             lifetime.Dispose();
+            if (source is IDisposable disposable) disposable.Dispose();
         };
     }
 
@@ -418,7 +443,13 @@ public partial class CareOperationsWindow : Window
             $"Oldest pending UTC: {FormatTime(health.OldestPendingUtc)}.{Environment.NewLine}" +
             $"Next attempt UTC: {FormatTime(health.NextAttemptUtc)}.{Environment.NewLine}" +
             $"Local processing available: {(health.CanProcessDue ? "yes" : "no")}.{Environment.NewLine}" +
-            $"Data source: {(isFixture ? "deterministic local fixture" : "not configured")}.";
+            $"Data source: {sourceKind switch
+            {
+                CareOperationsSourceKind.GeneratedFixture => "deterministic local fixture",
+                CareOperationsSourceKind.AuthenticatedLoopbackFixture =>
+                    "authenticated local CARE ledger fixture",
+                _ => "not configured",
+            }}.";
         AutomationProperties.SetName(SummaryText, SummaryText.Text);
     }
 

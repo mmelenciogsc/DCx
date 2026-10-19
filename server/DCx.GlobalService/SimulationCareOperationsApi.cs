@@ -81,6 +81,7 @@ internal static class SimulationCareOperationsApi
         SimulationContributionRequestLimiter rateLimiter)
     {
         var group = app.MapGroup("/api/care/operations");
+        group.AddEndpointFilter(new SimulationCareOperationsPrivacyFilter());
         group.AddEndpointFilter(new SimulationCareOperationsRateLimitFilter(rateLimiter));
         group.MapGet("/health", async (
             HttpRequest request,
@@ -226,6 +227,106 @@ internal static class SimulationCareOperationsApi
                 };
             }
         });
+        group.MapGet("/failed-payout-holds", async (
+            HttpRequest request,
+            CancellationToken cancellationToken) =>
+        {
+            var error = Authorize(request, options);
+            if (error is not null) return error;
+            try
+            {
+                var reviews = await source.ListFailedPayoutReviewsAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                CareFailedPayoutReviewPolicy.RequireList(reviews);
+                return Results.Ok(reviews);
+            }
+            catch (InvalidOperationException)
+            {
+                return Error(
+                    StatusCodes.Status409Conflict,
+                    "care_failed_payout_holds_state_invalid");
+            }
+        });
+        group.MapPost("/failed-payout-holds/{reviewId}/disposition", async (
+            string reviewId,
+            HttpRequest request,
+            CancellationToken cancellationToken) =>
+        {
+            var authorizationError = Authorize(request, options);
+            if (authorizationError is not null) return authorizationError;
+            CareFailedPayoutDispositionRequest dispositionRequest;
+            try
+            {
+                dispositionRequest = await ReadRequestAsync<CareFailedPayoutDispositionRequest>(
+                        request, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!string.Equals(
+                        reviewId,
+                        dispositionRequest.ReviewId,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        "The failed-payout hold route does not match the request.");
+                }
+
+                if (!dispositionRequest.ExplicitlyApproved)
+                {
+                    return Error(
+                        StatusCodes.Status403Forbidden,
+                        "care_failed_payout_approval_required");
+                }
+
+                CareFailedPayoutReviewPolicy.RequireRequest(dispositionRequest);
+            }
+            catch (InvalidDataException)
+            {
+                return Error(
+                    StatusCodes.Status400BadRequest,
+                    "care_failed_payout_request_invalid");
+            }
+            catch (IOException)
+            {
+                return Error(
+                    StatusCodes.Status400BadRequest,
+                    "care_failed_payout_request_invalid");
+            }
+            catch (InvalidOperationException)
+            {
+                return Error(
+                    StatusCodes.Status400BadRequest,
+                    "care_failed_payout_request_invalid");
+            }
+            catch (ArgumentException)
+            {
+                return Error(
+                    StatusCodes.Status400BadRequest,
+                    "care_failed_payout_request_invalid");
+            }
+
+            try
+            {
+                var result = await source.RecordFailedPayoutDispositionAsync(
+                        dispositionRequest, cancellationToken)
+                    .ConfigureAwait(false);
+                CareFailedPayoutReviewPolicy.RequireResult(result, dispositionRequest);
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return exception.Message switch
+                {
+                    "The failed-payout hold changed after review." =>
+                        Error(StatusCodes.Status409Conflict, "care_failed_payout_review_stale"),
+                    "The failed-payout hold is unavailable or already has remediation lineage." =>
+                        Error(StatusCodes.Status409Conflict, "care_failed_payout_unavailable"),
+                    "The failed-payout hold already has a conflicting decision." =>
+                        Error(StatusCodes.Status409Conflict, "care_failed_payout_conflict"),
+                    _ => Error(
+                        StatusCodes.Status409Conflict,
+                        "care_failed_payout_disposition_failed"),
+                };
+            }
+        });
     }
 
     private static IResult? Authorize(
@@ -364,6 +465,19 @@ internal static class SimulationCareOperationsApi
             {
                 return await next(context).ConfigureAwait(false);
             }
+        }
+    }
+
+    private sealed class SimulationCareOperationsPrivacyFilter : IEndpointFilter
+    {
+        public async ValueTask<object?> InvokeAsync(
+            EndpointFilterInvocationContext context,
+            EndpointFilterDelegate next)
+        {
+            context.HttpContext.Response.Headers.CacheControl = "no-store";
+            context.HttpContext.Response.Headers.Pragma = "no-cache";
+            context.HttpContext.Response.Headers.Vary = "Authorization";
+            return await next(context).ConfigureAwait(false);
         }
     }
 }

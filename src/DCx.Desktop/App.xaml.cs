@@ -47,6 +47,16 @@ public partial class App : Application
         if (e.Args.Length == 1 &&
             string.Equals(
                 e.Args[0],
+                "--care-operations-loopback-fixture",
+                StringComparison.Ordinal))
+        {
+            StartCareOperationsLoopbackFixture();
+            return;
+        }
+
+        if (e.Args.Length == 1 &&
+            string.Equals(
+                e.Args[0],
                 "--care-contributor-loopback-fixture",
                 StringComparison.Ordinal))
         {
@@ -474,6 +484,54 @@ public partial class App : Application
             MainWindow = new CareContributorDashboardWindow(
                 source,
                 CareContributorDashboardSourceKind.AuthenticatedLoopbackFixture);
+            MainWindow.Show();
+            source = null;
+        }
+        catch
+        {
+            source?.Dispose();
+            Shutdown(2);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(tokenEnvironmentVariable, null);
+        }
+    }
+
+    private void StartCareOperationsLoopbackFixture()
+    {
+        const string tokenEnvironmentVariable =
+            "DCX_CARE_OPERATIONS_LOOPBACK_FIXTURE_TOKEN";
+        LoopbackCareOperationsSource? source = null;
+        try
+        {
+            if (!string.Equals(
+                    Environment.GetEnvironmentVariable(
+                        "DCX_CARE_OPERATIONS_LOOPBACK_FIXTURE"),
+                    "1",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The CARE operations loopback fixture is disabled.");
+            }
+
+            var originText = Environment.GetEnvironmentVariable(
+                "DCX_CARE_OPERATIONS_LOOPBACK_FIXTURE_ORIGIN");
+            var token = Environment.GetEnvironmentVariable(tokenEnvironmentVariable);
+            if (!Uri.TryCreate(originText, UriKind.Absolute, out var origin) || token is null)
+            {
+                throw new InvalidOperationException(
+                    "The CARE operations loopback fixture configuration is incomplete.");
+            }
+
+            source = new LoopbackCareOperationsSource(
+                origin,
+                token,
+                TimeSpan.FromSeconds(10));
+            Environment.SetEnvironmentVariable(tokenEnvironmentVariable, null);
+            MainWindow = new CareOperationsWindow(
+                source,
+                CareOperationsSourceKind.AuthenticatedLoopbackFixture);
             MainWindow.Show();
             source = null;
         }

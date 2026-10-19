@@ -23,6 +23,7 @@ public sealed class CareOperationsTransportException(string code) : Exception(co
 public sealed class LoopbackCareOperationsSource :
     ICareOperationsSource,
     ICareBlockedCaseReviewSource,
+    ICareFailedPayoutReviewSource,
     IDisposable
 {
     private const int MaximumResponseBytes = 64 * 1024;
@@ -235,6 +236,81 @@ public sealed class LoopbackCareOperationsSource :
             {
                 throw new CareOperationsTransportException(
                     "care_blocked_case_response_invalid");
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(responseBody);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(body);
+        }
+    }
+
+    public async Task<IReadOnlyList<CareFailedPayoutReview>> ListFailedPayoutReviewsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        using var request = CreateAuthorizedRequest(
+            HttpMethod.Get, "api/care/operations/failed-payout-holds");
+        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        EnsureJsonResponse(response);
+        var body = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                throw new CareOperationsTransportException(ReadErrorCode(body));
+            }
+
+            var reviews = Deserialize<List<CareFailedPayoutReview>>(body);
+            CareFailedPayoutReviewPolicy.RequireList(reviews);
+            return reviews;
+        }
+        catch (InvalidOperationException)
+        {
+            throw new CareOperationsTransportException(
+                "care_failed_payout_holds_response_invalid");
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(body);
+        }
+    }
+
+    public async Task<CareFailedPayoutDispositionResult> RecordFailedPayoutDispositionAsync(
+        CareFailedPayoutDispositionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        CareFailedPayoutReviewPolicy.RequireRequest(request);
+        var body = JsonSerializer.SerializeToUtf8Bytes(request, JsonOptions);
+        try
+        {
+            using var message = CreateAuthorizedRequest(
+                HttpMethod.Post,
+                $"api/care/operations/failed-payout-holds/{request.ReviewId}/disposition");
+            message.Content = new ByteArrayContent(body);
+            message.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            using var response = await SendAsync(message, cancellationToken).ConfigureAwait(false);
+            EnsureJsonResponse(response);
+            var responseBody = await ReadBoundedAsync(
+                    response.Content, cancellationToken)
+                .ConfigureAwait(false);
+            try
+            {
+                if (response.StatusCode != HttpStatusCode.OK)
+                {
+                    throw new CareOperationsTransportException(ReadErrorCode(responseBody));
+                }
+
+                var result = Deserialize<CareFailedPayoutDispositionResult>(responseBody);
+                CareFailedPayoutReviewPolicy.RequireResult(result, request);
+                return result;
+            }
+            catch (InvalidOperationException)
+            {
+                throw new CareOperationsTransportException(
+                    "care_failed_payout_response_invalid");
             }
             finally
             {

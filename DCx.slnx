@@ -8,6 +8,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DCx.BossBenchmark/DCx.BossBenchmark.csproj" />
+    <Project Path="tests/DCx.CareFixtureSeeder/DCx.CareFixtureSeeder.csproj" />
     <Project Path="tests/DCx.Core.Tests/DCx.Core.Tests.csproj" />
     <Project Path="tests/DCx.FakeCodexAppServer/DCx.FakeCodexAppServer.csproj" />
     <Project Path="tests/DCx.FakeOllamaServer/DCx.FakeOllamaServer.csproj" />

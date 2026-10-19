@@ -317,6 +317,114 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             Assert.DoesNotContain(operatorToken, serializedAudit, StringComparison.Ordinal);
             Assert.DoesNotContain("WH-CARE-API", serializedAudit, StringComparison.Ordinal);
             Assert.DoesNotContain("I-CARE-API", serializedAudit, StringComparison.Ordinal);
+
+            var failedPayout = await CreateFailedPayoutAsync(repository, received);
+            var cashBeforeDecision = await repository.BalanceAsync(LedgerAccount.Cash);
+            var payableBeforeDecision = await repository.BalanceAsync(
+                LedgerAccount.ContributorPayable);
+            var holdsUri = new Uri(endpoint, "api/care/operations/failed-payout-holds");
+            using (var contributorCannotReadHolds = await SendAuthorizedAsync(
+                       client, HttpMethod.Get, holdsUri, contributorToken))
+            {
+                await AssertErrorAsync(
+                    contributorCannotReadHolds,
+                    HttpStatusCode.Unauthorized,
+                    "authentication_invalid");
+                Assert.True(contributorCannotReadHolds.Headers.CacheControl?.NoStore);
+            }
+
+            var hold = Assert.Single(await source.ListFailedPayoutReviewsAsync());
+            Assert.Equal(failedPayout.CarePeriodId, hold.CarePeriodId);
+            Assert.Equal(700, hold.AmountCents);
+            Assert.Equal(CareFailedPayoutReviewPolicy.ProviderRejected, hold.FailureCode);
+            var serializedHold = JsonSerializer.Serialize(hold);
+            Assert.DoesNotContain("batch:care-api-hold", serializedHold, StringComparison.Ordinal);
+            Assert.DoesNotContain("contributor:", serializedHold, StringComparison.Ordinal);
+            Assert.DoesNotContain("personal.example", serializedHold, StringComparison.Ordinal);
+            Assert.DoesNotContain("snapshot:", serializedHold, StringComparison.Ordinal);
+
+            var approvedHoldRequest = new CareFailedPayoutDispositionRequest(
+                hold.ReviewId,
+                hold.ReviewSha256,
+                CareFailedPayoutReviewPolicy.RequestRecipientUpdate,
+                ExplicitlyApproved: true);
+            var holdDispositionUri = new Uri(
+                endpoint,
+                $"api/care/operations/failed-payout-holds/{hold.ReviewId}/disposition");
+            var unapprovedHoldBody = JsonSerializer.SerializeToUtf8Bytes(
+                approvedHoldRequest with { ExplicitlyApproved = false },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            using (var unapprovedHold = await SendRawProcessAsync(
+                       client,
+                       holdDispositionUri,
+                       operatorToken,
+                       unapprovedHoldBody))
+            {
+                await AssertErrorAsync(
+                    unapprovedHold,
+                    HttpStatusCode.Forbidden,
+                    "care_failed_payout_approval_required");
+                Assert.True(unapprovedHold.Headers.CacheControl?.NoStore);
+            }
+
+            var mismatchedRouteBody = JsonSerializer.SerializeToUtf8Bytes(
+                approvedHoldRequest,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            using (var mismatchedRoute = await SendRawProcessAsync(
+                       client,
+                       new Uri(
+                           endpoint,
+                           "api/care/operations/failed-payout-holds/ffffffffffffffffffffffffffffffff/disposition"),
+                       operatorToken,
+                       mismatchedRouteBody))
+            {
+                await AssertErrorAsync(
+                    mismatchedRoute,
+                    HttpStatusCode.BadRequest,
+                    "care_failed_payout_request_invalid");
+            }
+
+            var staleHold = await Assert.ThrowsAsync<CareOperationsTransportException>(() =>
+                source.RecordFailedPayoutDispositionAsync(approvedHoldRequest with
+                {
+                    ReviewedSha256 = new string('f', 64),
+                }));
+            Assert.Equal("care_failed_payout_review_stale", staleHold.Code);
+            var holdResult = await source.RecordFailedPayoutDispositionAsync(
+                approvedHoldRequest);
+            CareFailedPayoutReviewPolicy.RequireResult(holdResult, approvedHoldRequest);
+            Assert.Equal(0, holdResult.ProviderCalls);
+            Assert.Equal(0, holdResult.FinancialMutations);
+            Assert.Equal(0, holdResult.PayoutAttempts);
+            Assert.Equal(0, holdResult.NotificationTransports);
+            Assert.Equal(
+                holdResult,
+                await source.RecordFailedPayoutDispositionAsync(approvedHoldRequest));
+
+            var updatedHold = Assert.Single(await source.ListFailedPayoutReviewsAsync());
+            Assert.Equal(
+                CareFailedPayoutReviewPolicy.RequestRecipientUpdate,
+                updatedHold.DispositionCode);
+            Assert.Equal(
+                CareFailedPayoutReviewPolicy.LocalDashboardNoticeReady,
+                updatedHold.NoticeCode);
+            Assert.NotEqual(hold.ReviewSha256, updatedHold.ReviewSha256);
+            var conflictingHold = await Assert.ThrowsAsync<CareOperationsTransportException>(() =>
+                source.RecordFailedPayoutDispositionAsync(new CareFailedPayoutDispositionRequest(
+                    updatedHold.ReviewId,
+                    updatedHold.ReviewSha256,
+                    CareFailedPayoutReviewPolicy.CancelRetryIntent,
+                    ExplicitlyApproved: true)));
+            Assert.Equal("care_failed_payout_conflict", conflictingHold.Code);
+            var holdAudit = Assert.Single(
+                await repository.GetFailedPayoutDispositionAuditAsync());
+            Assert.Equal(operatorPseudonymSha256, holdAudit.OperatorPseudonymSha256);
+            Assert.Equal(hold.ReviewSha256, holdAudit.ReviewedSha256);
+            Assert.Equal(cashBeforeDecision, await repository.BalanceAsync(LedgerAccount.Cash));
+            Assert.Equal(
+                payableBeforeDecision,
+                await repository.BalanceAsync(LedgerAccount.ContributorPayable));
+            Assert.Equal(16, providerHandler.Calls);
         }
         finally
         {
@@ -369,7 +477,7 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             "WH-CARE-API-BLOCKED-REFUND",
             "PAYMENT.SALE.REFUNDED",
             "refund",
-            "{\"id\":\"REFUND-CARE-API-BLOCKED\",\"state\":\"completed\",\"sale_id\":\"SALE-CARE-API-BLOCKED\",\"amount\":{\"total\":\"2.50\",\"currency\":\"USD\"}}" );
+            "{\"id\":\"REFUND-CARE-API-BLOCKED\",\"state\":\"completed\",\"sale_id\":\"SALE-CARE-API-BLOCKED\",\"amount\":{\"total\":\"2.50\",\"currency\":\"USD\"}}");
         var activation = OfficialWebhook(
             "WH-CARE-API-BLOCKED-ACTIVE",
             "BILLING.SUBSCRIPTION.ACTIVATED",
@@ -379,12 +487,12 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             "WH-CARE-API-BLOCKED-PAYMENT",
             "PAYMENT.SALE.COMPLETED",
             "sale",
-            "{\"id\":\"SALE-CARE-API-BLOCKED\",\"state\":\"completed\",\"billing_agreement_id\":\"I-CARE-API-BLOCKED\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}" );
+            "{\"id\":\"SALE-CARE-API-BLOCKED\",\"state\":\"completed\",\"billing_agreement_id\":\"I-CARE-API-BLOCKED\",\"amount\":{\"total\":\"3.00\",\"currency\":\"USD\"}}");
         var acceptedRefund = OfficialWebhook(
             "WH-CARE-API-BLOCKED-ACCEPTED",
             "PAYMENT.SALE.REFUNDED",
             "refund",
-            "{\"id\":\"REFUND-CARE-API-ACCEPTED\",\"state\":\"completed\",\"sale_id\":\"SALE-CARE-API-BLOCKED\",\"amount\":{\"total\":\"1.00\",\"currency\":\"USD\"}}" );
+            "{\"id\":\"REFUND-CARE-API-ACCEPTED\",\"state\":\"completed\",\"sale_id\":\"SALE-CARE-API-BLOCKED\",\"amount\":{\"total\":\"1.00\",\"currency\":\"USD\"}}");
 
         Assert.True(await repository.ProcessOfficialSandboxWebhookAsync(
             adapter, Evidence("transmission:care-api-blocked-refund"),
@@ -421,6 +529,79 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             webhook,
             PlanId,
             received));
+    }
+
+    private static async Task<PayoutBatchPreview> CreateFailedPayoutAsync(
+        DurableCareRepository repository,
+        DateTimeOffset now)
+    {
+        var usage = new[]
+        {
+            new ContributorUsageWeight("contributor:hold-one", 500),
+            new ContributorUsageWeight("contributor:hold-two", 700),
+        };
+        var closeReview = DurableCareRepository.ReviewCarePeriodClose(
+            new CarePeriodInput(
+                2026,
+                5,
+                SubscriptionRevenueCents: 3000,
+                RefundAndChargebackCents: 0,
+                PaymentFeeCents: 0,
+                ApprovedOperatingCostCents: 0,
+                TaxAndRiskReserveCents: 0,
+                ContributorPoolBasisPoints: 4000,
+                MinimumPayoutCents: 0),
+            usage,
+            now);
+        var period = await repository.RegisterReviewedCarePeriodAsync(
+            closeReview,
+            ownerApproved: true,
+            now);
+        var preview = new PayoutBatchPreview(
+            "batch:care-api-hold",
+            PayoutExecutionMode.Sandbox,
+            period.Net60EligibilityDate,
+            [
+                new PayoutItem(
+                    usage[0].ContributorPseudonym,
+                    decimal.ToInt64(usage[0].Weight),
+                    PayoutRecipientApproval.Create(
+                        "snapshot:care-api-hold-one",
+                        "care-api-hold-one@personal.example.com")),
+                new PayoutItem(
+                    usage[1].ContributorPseudonym,
+                    decimal.ToInt64(usage[1].Weight),
+                    PayoutRecipientApproval.Create(
+                        "snapshot:care-api-hold-two",
+                        "care-api-hold-two@personal.example.com")),
+            ],
+            PayoutBatchPreviewFactory.CarePeriodId(period));
+        Assert.True(await repository.ReservePayoutAsync(
+            preview,
+            accountEligibilityVerified: true,
+            ownerApproved: true,
+            preview.EligibilityDate,
+            now));
+        Assert.True(await repository.CompletePayoutAsync(
+            preview,
+            new PayoutBatchResult(
+                preview.BatchId,
+                PayoutBatchOutcome.PartiallySucceeded,
+                "SUCCESS",
+                [
+                    new PayoutItemResult(
+                        usage[0].ContributorPseudonym,
+                        decimal.ToInt64(usage[0].Weight),
+                        Succeeded: true,
+                        ProviderStatus: "SUCCESS"),
+                    new PayoutItemResult(
+                        usage[1].ContributorPseudonym,
+                        decimal.ToInt64(usage[1].Weight),
+                        Succeeded: false,
+                        ProviderStatus: "FAILED"),
+                ]),
+            now));
+        return preview;
     }
 
     private static PayPalSandboxHttpAdapter Adapter(HttpMessageHandler handler) => new(
