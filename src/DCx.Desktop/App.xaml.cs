@@ -37,6 +37,13 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 1 &&
+            string.Equals(e.Args[0], "--package-removal-fixture", StringComparison.Ordinal))
+        {
+            StartPackageRemovalFixture();
+            return;
+        }
+
         if (e.Args.Length == 2 &&
             string.Equals(e.Args[0], "--whisper-staging-fixture", StringComparison.Ordinal))
         {
@@ -325,6 +332,28 @@ public partial class App : Application
             MainWindow.Show();
         }
         catch (PackageInstallReviewException)
+        {
+            Shutdown(2);
+        }
+    }
+
+    private void StartPackageRemovalFixture()
+    {
+        try
+        {
+            if (!string.Equals(
+                    Environment.GetEnvironmentVariable("DCX_PACKAGE_REMOVAL_FIXTURE"),
+                    "1",
+                    StringComparison.Ordinal))
+            {
+                throw new PackageRemovalWorkflowException("package_removal_fixture_disabled");
+            }
+
+            MainWindow = new PackageRemovalWindow(
+                Deployment.PackageRemovalWorkflowFactory.CreateValidationFixture());
+            MainWindow.Show();
+        }
+        catch
         {
             Shutdown(2);
         }

@@ -9,14 +9,15 @@ public sealed class CurrentUserPackageRemovalExecutorTests
     {
         var terminal = new TaskCompletionSource<CurrentUserPackageRemovalResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        var api = new FixtureRemovalApi(_ => terminal.Task);
+        var api = new FixtureRemovalApi((_, _) => terminal.Task);
         var executor = new CurrentUserPackageRemovalExecutor(api);
         using var cancellation = new CancellationTokenSource();
 
-        var pending = executor.ExecuteAsync(cancellation.Token);
+        var pending = executor.ExecuteAsync(PackageFullName, cancellation.Token);
 
         Assert.False(pending.IsCompleted);
         Assert.Equal(1, api.Calls);
+        Assert.Equal(PackageFullName, api.ExpectedPackageFullName);
         AssertSafeOptions(api.Options);
 
         cancellation.Cancel();
@@ -41,14 +42,14 @@ public sealed class CurrentUserPackageRemovalExecutorTests
     [Fact]
     public async Task Executor_HonorsCancellationOnlyBeforePackageManagerEntry()
     {
-        var api = new FixtureRemovalApi(_ => Task.FromResult(
+        var api = new FixtureRemovalApi((_, _) => Task.FromResult(
             new CurrentUserPackageRemovalResult(false, 0)));
         var executor = new CurrentUserPackageRemovalExecutor(api);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            executor.ExecuteAsync(cancellation.Token));
+            executor.ExecuteAsync(PackageFullName, cancellation.Token));
 
         Assert.Equal(0, api.Calls);
     }
@@ -57,28 +58,28 @@ public sealed class CurrentUserPackageRemovalExecutorTests
     public async Task Executor_RejectsIncompleteRemovalAndRedactsApiFailure()
     {
         var incomplete = new CurrentUserPackageRemovalExecutor(
-            new FixtureRemovalApi(_ => Task.FromResult(
+            new FixtureRemovalApi((_, _) => Task.FromResult(
                 new CurrentUserPackageRemovalResult(
                     IsRegistered: true,
                     ExtendedErrorHResult: 0))));
         await AssertCodeAsync(
             "package_removal_incomplete",
-            () => incomplete.ExecuteAsync(default));
+            () => incomplete.ExecuteAsync(PackageFullName, default));
 
         var failedResult = new CurrentUserPackageRemovalExecutor(
-            new FixtureRemovalApi(_ => Task.FromResult(
+            new FixtureRemovalApi((_, _) => Task.FromResult(
                 new CurrentUserPackageRemovalResult(
                     IsRegistered: true,
                     ExtendedErrorHResult: unchecked((int)0x80073CF1)))));
         await AssertCodeAsync(
             "package_removal_package_manager_failed",
-            () => failedResult.ExecuteAsync(default));
+            () => failedResult.ExecuteAsync(PackageFullName, default));
 
         var failedApi = new CurrentUserPackageRemovalExecutor(
-            new FixtureRemovalApi(_ =>
+            new FixtureRemovalApi((_, _) =>
                 throw new InvalidOperationException("private removal diagnostic")));
         var exception = await Assert.ThrowsAsync<ControlledUpdateException>(() =>
-            failedApi.ExecuteAsync(default));
+            failedApi.ExecuteAsync(PackageFullName, default));
         Assert.Equal("package_removal_package_manager_failed", exception.Code);
         Assert.DoesNotContain("private", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -140,6 +141,28 @@ public sealed class CurrentUserPackageRemovalExecutorTests
         }
     }
 
+    [Fact]
+    public async Task Executor_RejectsInvalidExpectedIdentityBeforePackageManagerEntry()
+    {
+        var api = new FixtureRemovalApi((_, _) => Task.FromResult(
+            new CurrentUserPackageRemovalResult(false, 0)));
+        var executor = new CurrentUserPackageRemovalExecutor(api);
+        foreach (var invalid in new[]
+                 {
+                     string.Empty,
+                     " ",
+                     "DCx\nInjected",
+                     new string('a', 513),
+                 })
+        {
+            await AssertCodeAsync(
+                "package_removal_identity_invalid",
+                () => executor.ExecuteAsync(invalid, default));
+        }
+
+        Assert.Equal(0, api.Calls);
+    }
+
     private static void AssertSafeOptions(CurrentUserPackageRemovalOptions? options)
     {
         Assert.NotNull(options);
@@ -164,19 +187,25 @@ public sealed class CurrentUserPackageRemovalExecutorTests
         Assert.Equal(expected, exception.Message);
     }
 
+    private const string PackageFullName =
+        "DCx.AgenticBrowser.ValidationFixture_1.2.3.4_x64__fixture123456";
+
     private sealed class FixtureRemovalApi(
-        Func<CurrentUserPackageRemovalOptions, Task<CurrentUserPackageRemovalResult>> handler)
+        Func<string, CurrentUserPackageRemovalOptions, Task<CurrentUserPackageRemovalResult>> handler)
         : ICurrentUserPackageRemovalApi
     {
         public int Calls { get; private set; }
+        public string? ExpectedPackageFullName { get; private set; }
         public CurrentUserPackageRemovalOptions? Options { get; private set; }
 
         public Task<CurrentUserPackageRemovalResult> RemoveCurrentPackageAsync(
+            string expectedPackageFullName,
             CurrentUserPackageRemovalOptions options)
         {
             Calls++;
+            ExpectedPackageFullName = expectedPackageFullName;
             Options = options;
-            return handler(options);
+            return handler(expectedPackageFullName, options);
         }
     }
 }

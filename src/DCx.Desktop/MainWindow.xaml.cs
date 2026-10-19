@@ -20,6 +20,7 @@ using DCx.Core.Reliability;
 using DCx.Core.Social;
 using DCx.Core.Storage;
 using DCx.Desktop.Automation;
+using DCx.Desktop.Deployment;
 using DCx.Desktop.Media;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
@@ -68,6 +69,7 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
     private CareContributorDashboardWindow? _careContributorDashboardWindow;
     private CrashDiagnosticsWindow? _crashDiagnosticsWindow;
     private ControlledUpdateWindow? _controlledUpdateWindow;
+    private PackageRemovalWindow? _packageRemovalWindow;
     private Task<LocalModelSelectionStore>? _localModelSelectionStore;
     private Task<OllamaRuntimeSelectionStore>? _ollamaRuntimeSelectionStore;
     private Task<OllamaApprovedRuntimeHost>? _ollamaRuntimeHost;
@@ -1532,6 +1534,24 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
         };
         _controlledUpdateWindow.Closed += (_, _) => _controlledUpdateWindow = null;
         _controlledUpdateWindow.Show();
+    }
+
+    private void OnPackageRemovalClick(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Opening the exact current-package uninstall review. No removal starts by opening it.");
+        if (_packageRemovalWindow is { IsVisible: true })
+        {
+            _packageRemovalWindow.Activate();
+            return;
+        }
+
+        _packageRemovalWindow = new PackageRemovalWindow(
+            PackageRemovalWorkflowFactory.CreateDefault())
+        {
+            Owner = this,
+        };
+        _packageRemovalWindow.Closed += (_, _) => _packageRemovalWindow = null;
+        _packageRemovalWindow.Show();
     }
 
     private void OnReadinessClick(object sender, RoutedEventArgs e)

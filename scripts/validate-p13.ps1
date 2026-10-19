@@ -13,6 +13,7 @@ $tests = Join-Path $repoRoot "tests\DCx.Core.Tests\DCx.Core.Tests.csproj"
 $msixBuilder = Join-Path $repoRoot "scripts\build-unsigned-msix.ps1"
 $webView2Validator = Join-Path $repoRoot "scripts\validate-p13-webview2.ps1"
 $controlledUpdateValidator = Join-Path $repoRoot "scripts\validate-p13-controlled-update-ui.ps1"
+$packageRemovalValidator = Join-Path $repoRoot "scripts\validate-p13-package-removal-ui.ps1"
 $runRoot = Join-Path $repoRoot "artifacts\test-results\p13-$([Guid]::NewGuid().ToString('N'))"
 $publishOne = Join-Path $runRoot "publish-a"
 $publishTwo = Join-Path $runRoot "publish-b"
@@ -802,6 +803,39 @@ try {
         throw "The accessible controlled-update review and inert staging gate was not exact."
     }
 
+    $packageRemovalEvidence = & $packageRemovalValidator `
+        -ExecutablePath $publishedExe `
+        -RunRoot $runRoot
+    if (-not $packageRemovalEvidence.fixture_gate_denied_without_environment -or
+        -not $packageRemovalEvidence.heading_keyboard_focus -or
+        -not $packageRemovalEvidence.exact_review_exposed -or
+        $packageRemovalEvidence.exact_review_digest_count -ne 1 -or
+        @($packageRemovalEvidence.distinct_access_keys).Count -ne 4 -or
+        @($packageRemovalEvidence.distinct_access_keys | Select-Object -Unique).Count -ne 4 -or
+        -not $packageRemovalEvidence.consequences_acknowledgment_initially_unchecked -or
+        -not $packageRemovalEvidence.backup_acknowledgment_initially_unchecked -or
+        -not $packageRemovalEvidence.denial_invocations_originated_with_keyboard_focus -or
+        -not $packageRemovalEvidence.consequences_denial_focus -or
+        -not $packageRemovalEvidence.backup_denial_focus -or
+        -not $packageRemovalEvidence.acknowledgments_reset -or
+        $packageRemovalEvidence.execution_status -ne "validation_no_op" -or
+        $packageRemovalEvidence.execution_permitted -or
+        $packageRemovalEvidence.package_manager_invocations -ne 0 -or
+        $packageRemovalEvidence.removal_completed -or
+        $packageRemovalEvidence.application_close_expected -or
+        $packageRemovalEvidence.installer_processes_started -ne 0 -or
+        $packageRemovalEvidence.elevation_requests -ne 0 -or
+        $packageRemovalEvidence.child_processes_started -ne 0 -or
+        $packageRemovalEvidence.production_actions -ne 0 -or
+        $packageRemovalEvidence.normal_product_source -ne "unavailable" -or
+        $packageRemovalEvidence.normal_product_availability -ne "not_packaged" -or
+        -not $packageRemovalEvidence.normal_product_controls_disabled -or
+        $packageRemovalEvidence.normal_product_package_manager_invocations -ne 0 -or
+        $packageRemovalEvidence.normal_product_application_close_requests -ne 0 -or
+        $packageRemovalEvidence.normal_product_production_actions -ne 0) {
+        throw "The accessible current-package removal gate was not exact and inert."
+    }
+
     $result = [ordered]@{
         captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
         release_build_warnings = 0
@@ -846,6 +880,7 @@ try {
         signed_msix_positive_acceptance = $false
         msix_signing_attempted = $false
         msix_install_attempted = $false
+        msix_uninstall_attempted = $false
         webview2_runtime_bundled = $false
         webview2_evergreen_required = $true
         webview2_missing_runtime_fixture_gate = [bool]$webView2MissingEvidence.fixture_gate_denied_without_environment
@@ -897,6 +932,27 @@ try {
         controlled_update_restart_attempts = [int]$controlledUpdateEvidence.restart_attempts
         controlled_update_normal_source = [string]$controlledUpdateEvidence.normal_product_source
         controlled_update_inferred_state = [bool]$controlledUpdateEvidence.normal_product_update_state_inferred
+        package_removal_fixture_gate = [bool]$packageRemovalEvidence.fixture_gate_denied_without_environment
+        package_removal_uia_heading_focus = [bool]$packageRemovalEvidence.heading_keyboard_focus
+        package_removal_exact_review_digests = [int]$packageRemovalEvidence.exact_review_digest_count
+        package_removal_access_keys = @($packageRemovalEvidence.distinct_access_keys)
+        package_removal_consequences_acknowledgment_default_unchecked = [bool]$packageRemovalEvidence.consequences_acknowledgment_initially_unchecked
+        package_removal_backup_acknowledgment_default_unchecked = [bool]$packageRemovalEvidence.backup_acknowledgment_initially_unchecked
+        package_removal_denials_originated_with_keyboard_focus = [bool]$packageRemovalEvidence.denial_invocations_originated_with_keyboard_focus
+        package_removal_consequences_denial_focus = [bool]$packageRemovalEvidence.consequences_denial_focus
+        package_removal_backup_denial_focus = [bool]$packageRemovalEvidence.backup_denial_focus
+        package_removal_acknowledgments_reset = [bool]$packageRemovalEvidence.acknowledgments_reset
+        package_removal_execution_status = [string]$packageRemovalEvidence.execution_status
+        package_removal_execution_permitted = [bool]$packageRemovalEvidence.execution_permitted
+        package_removal_package_manager_invocations = [int]$packageRemovalEvidence.package_manager_invocations
+        package_removal_completed = [bool]$packageRemovalEvidence.removal_completed
+        package_removal_application_close_expected = [bool]$packageRemovalEvidence.application_close_expected
+        package_removal_installer_processes = [int]$packageRemovalEvidence.installer_processes_started
+        package_removal_elevation_requests = [int]$packageRemovalEvidence.elevation_requests
+        package_removal_child_processes = [int]$packageRemovalEvidence.child_processes_started
+        package_removal_normal_source = [string]$packageRemovalEvidence.normal_product_source
+        package_removal_normal_availability = [string]$packageRemovalEvidence.normal_product_availability
+        package_removal_normal_controls_disabled = [bool]$packageRemovalEvidence.normal_product_controls_disabled
         sbom_components = $components.Count
         license_records = $licenseInventory.Count
         published_secret_scan_files = $publishedSecretScanFiles.Count
@@ -943,6 +999,10 @@ try {
     "Accessible lease-held activation transaction validation no-op=PASS"
     "Normal controlled-update source=not_configured; inferred state=false"
     "Controlled-update network=0 installer=0 elevation=0 activation=0 restart=0 production=0"
+    "Accessible exact current-package uninstall review and two acknowledgments=PASS"
+    "Accessible one-use uninstall validation no-op=PASS"
+    "Normal package-removal source=unavailable; availability=not_packaged"
+    "Package removal PackageManager=0 child=0 close=0 elevation=0 production=0"
     "CycloneDX components=$($components.Count)"
     "Third-party license records=$($licenseInventory.Count)"
     "DCx-owned binary and published text secret-scan files=$($publishedSecretScanFiles.Count)"

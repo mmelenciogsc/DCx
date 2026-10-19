@@ -11,12 +11,14 @@ public sealed record CurrentUserPackageRemovalResult(
     int ExtendedErrorHResult);
 
 /// <summary>
-/// Removes only the package identity of the process implementing this API. A caller cannot
-/// supply a package identity. Windows does not support cancellation after removal begins.
+/// Removes only the package identity of the process implementing this API. The expected full
+/// name is an equality constraint, not a caller-selected target. Windows does not support
+/// cancellation after removal begins.
 /// </summary>
 public interface ICurrentUserPackageRemovalApi
 {
     Task<CurrentUserPackageRemovalResult> RemoveCurrentPackageAsync(
+        string expectedPackageFullName,
         CurrentUserPackageRemovalOptions options);
 }
 
@@ -75,15 +77,29 @@ public static class CurrentUserPackageRemovalExecutionPolicy
 /// before API entry because Windows documents RemovePackageAsync as noncancellable. DCx does
 /// not currently compose or expose this executor.
 /// </summary>
+public interface ICurrentUserPackageRemovalExecutor
+{
+    Task<CurrentUserPackageRemovalExecutionResult> ExecuteAsync(
+        string expectedPackageFullName,
+        CancellationToken cancellationToken);
+}
+
 public sealed class CurrentUserPackageRemovalExecutor(
     ICurrentUserPackageRemovalApi removalApi)
+    : ICurrentUserPackageRemovalExecutor
 {
     private readonly ICurrentUserPackageRemovalApi removalApi =
         removalApi ?? throw new ArgumentNullException(nameof(removalApi));
 
     public async Task<CurrentUserPackageRemovalExecutionResult> ExecuteAsync(
+        string expectedPackageFullName,
         CancellationToken cancellationToken)
     {
+        if (!IsBoundedPackageFullName(expectedPackageFullName))
+        {
+            throw new ControlledUpdateException("package_removal_identity_invalid");
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
         var options = CurrentUserPackageRemovalPolicy.CreateOptions();
         CurrentUserPackageRemovalPolicy.Require(options);
@@ -91,7 +107,10 @@ public sealed class CurrentUserPackageRemovalExecutor(
         CurrentUserPackageRemovalResult? result;
         try
         {
-            result = await removalApi.RemoveCurrentPackageAsync(options).ConfigureAwait(false);
+            result = await removalApi.RemoveCurrentPackageAsync(
+                    expectedPackageFullName,
+                    options)
+                .ConfigureAwait(false);
         }
         catch
         {
@@ -121,4 +140,8 @@ public sealed class CurrentUserPackageRemovalExecutor(
         CurrentUserPackageRemovalExecutionPolicy.Require(execution);
         return execution;
     }
+
+    private static bool IsBoundedPackageFullName(string? value) =>
+        value is { Length: > 0 and <= 512 } && !string.IsNullOrWhiteSpace(value) &&
+        value.All(character => !char.IsControl(character));
 }

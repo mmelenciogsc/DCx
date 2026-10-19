@@ -1,0 +1,109 @@
+<Window x:Class="DCx.Desktop.PackageRemovalWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Uninstall DCx"
+        Width="780"
+        Height="760"
+        MinWidth="640"
+        MinHeight="560"
+        AutomationProperties.AutomationId="PackageRemovalWindow"
+        AutomationProperties.Name="Uninstall DCx"
+        Closing="OnClosing">
+    <DockPanel Margin="20">
+        <Border DockPanel.Dock="Bottom"
+                Margin="0,16,0,0"
+                Padding="10"
+                Background="#FFF4CE"
+                BorderBrush="#707070"
+                BorderThickness="1">
+            <TextBlock x:Name="StatusText"
+                       Focusable="True"
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="PackageRemovalStatus"
+                       AutomationProperties.Name="Package removal status"
+                       AutomationProperties.LiveSetting="Assertive" />
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock x:Name="HeadingText"
+                           FontSize="28"
+                           FontWeight="SemiBold"
+                           Focusable="True"
+                           Text="Uninstall DCx"
+                           AutomationProperties.AutomationId="PackageRemovalHeading"
+                           AutomationProperties.Name="Uninstall DCx heading" />
+
+                <Border Margin="0,14,0,0"
+                        Padding="12"
+                        BorderBrush="#707070"
+                        BorderThickness="1">
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="Security boundary" />
+                        <TextBlock x:Name="BoundaryText"
+                                   Margin="0,6,0,0"
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="PackageRemovalBoundary" />
+                    </StackPanel>
+                </Border>
+
+                <GroupBox Margin="0,16,0,0"
+                          Header="Exact current-package review"
+                          AutomationProperties.Name="Exact current-package uninstall review">
+                    <TextBox x:Name="ReviewDetailsText"
+                             MinHeight="245"
+                             Margin="12,8"
+                             Padding="8"
+                             IsReadOnly="True"
+                             IsReadOnlyCaretVisible="True"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             AutomationProperties.AutomationId="PackageRemovalReviewDetails"
+                             AutomationProperties.Name="Exact current-package uninstall review details" />
+                </GroupBox>
+
+                <CheckBox x:Name="ConsequencesApprovalBox"
+                          Margin="0,16,0,0"
+                          IsChecked="False"
+                          FontWeight="SemiBold"
+                          AutomationProperties.AutomationId="PackageRemovalConsequencesApproval"
+                          AutomationProperties.Name="Acknowledge uninstall consequences"
+                          AutomationProperties.HelpText="Unchecked by default. Windows may close DCx and removal cannot be canceled after it starts.">
+                    <AccessText Text="I understand the _consequences: Windows may close DCx, removal cannot be canceled after it starts, package data is not preserved, and unused dependencies may be removed."
+                                TextWrapping="Wrap" />
+                </CheckBox>
+
+                <CheckBox x:Name="BackupApprovalBox"
+                          Margin="0,12,0,0"
+                          IsChecked="False"
+                          FontWeight="SemiBold"
+                          AutomationProperties.AutomationId="PackageRemovalBackupApproval"
+                          AutomationProperties.Name="Acknowledge backup choice"
+                          AutomationProperties.HelpText="Unchecked by default. Confirm that you created the separate DCx backup you want, or chose to continue without one.">
+                    <AccessText Text="I created the separate DCx _backup I want, or I choose to continue without one. I understand backups exclude browser sessions, cookies, credentials, global replicas, and protected settings."
+                                TextWrapping="Wrap" />
+                </CheckBox>
+
+                <WrapPanel Margin="0,18,0,0">
+                    <Button x:Name="ExecuteButton"
+                            MinWidth="220"
+                            MinHeight="38"
+                            Margin="0,0,8,0"
+                            Content="_Validate uninstall review"
+                            AutomationProperties.AutomationId="ExecutePackageRemovalButton"
+                            AutomationProperties.Name="Validate the uninstall review without removal"
+                            AutomationProperties.HelpText="Validation mode performs no package removal, process close, installer, elevation, or production action."
+                            Click="OnExecuteClick" />
+                    <Button x:Name="CloseButton"
+                            MinWidth="120"
+                            MinHeight="38"
+                            Content="C_lose"
+                            AutomationProperties.AutomationId="ClosePackageRemovalButton"
+                            AutomationProperties.Name="Close uninstall review"
+                            Click="OnCloseClick" />
+                </WrapPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

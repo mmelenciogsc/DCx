@@ -226,6 +226,13 @@
                             AutomationProperties.HelpText="Review controlled-update availability. No production service or installer is configured."
                             Click="OnControlledUpdatesClick" />
                     <Button MinWidth="100"
+                            Margin="0,0,6,0"
+                            Content="Uninstall"
+                            AutomationProperties.AutomationId="PackageRemovalButton"
+                            AutomationProperties.Name="Review uninstalling DCx"
+                            AutomationProperties.HelpText="Review the exact current package, uninstall consequences, and backup choice. Uninstall remains unavailable until a production package identity is approved."
+                            Click="OnPackageRemovalClick" />
+                    <Button MinWidth="100"
                             Content="Readiness"
                             AutomationProperties.AutomationId="ReadinessButton"
                             AutomationProperties.Name="Open release readiness dashboard"

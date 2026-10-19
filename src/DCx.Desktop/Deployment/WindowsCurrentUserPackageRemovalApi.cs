@@ -12,6 +12,7 @@ internal sealed class WindowsCurrentUserPackageRemovalApi : ICurrentUserPackageR
     private const int MaximumPackageFullNameLength = 512;
 
     public async Task<CurrentUserPackageRemovalResult> RemoveCurrentPackageAsync(
+        string expectedPackageFullName,
         CurrentUserPackageRemovalOptions options)
     {
         CurrentUserPackageRemovalPolicy.Require(options);
@@ -32,7 +33,8 @@ internal sealed class WindowsCurrentUserPackageRemovalApi : ICurrentUserPackageR
 
         if (string.IsNullOrWhiteSpace(packageFullName) ||
             packageFullName.Length > MaximumPackageFullNameLength ||
-            packageFullName.Any(char.IsControl))
+            packageFullName.Any(char.IsControl) ||
+            !string.Equals(packageFullName, expectedPackageFullName, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("package_removal_identity_invalid");
         }
