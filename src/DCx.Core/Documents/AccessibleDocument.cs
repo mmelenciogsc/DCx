@@ -24,6 +24,9 @@ public sealed record DocumentBlock(
     string? AccessibleLabel = null,
     bool IsEditable = false);
 
-public sealed record AccessibleDocument(string Title, IReadOnlyList<DocumentBlock> Blocks);
+public sealed record AccessibleDocument(
+    string Title,
+    IReadOnlyList<DocumentBlock> Blocks,
+    string Language = "en-US");
 
 public sealed record DocumentValidationResult(bool IsValid, IReadOnlyList<string> Errors);

@@ -469,7 +469,7 @@ try {
     $exportHtml.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $htmlExport = Join-Path $exportRoot "scanned-source-accessible.html"
     $null = Wait-For {
-        (Test-Path $htmlExport) -and $wizardStatus.Current.Name -like "Semantic HTML exported:*"
+        (Test-Path $htmlExport) -and $wizardStatus.Current.Name -like "Semantic HTML exported atomically:*"
     } "Semantic HTML export did not finish."
     $htmlContents = Get-Content -LiteralPath $htmlExport -Raw
     if ($htmlContents -notmatch "<main><h1>scanned-source</h1>") { throw "HTML export lacks semantic main/title structure." }
@@ -479,14 +479,50 @@ try {
     $exportDocx.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $docxExport = Join-Path $exportRoot "scanned-source-accessible.docx"
     $null = Wait-For {
-        (Test-Path $docxExport) -and $wizardStatus.Current.Name -like "Structured DOCX exported:*"
+        (Test-Path $docxExport) -and $wizardStatus.Current.Name -like "Structured DOCX exported atomically:*"
     } "Structured DOCX export did not finish."
+    [IO.File]::WriteAllText($docxExport, "prior export placeholder")
+    $exportDocx.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        if (-not (Test-Path -LiteralPath $docxExport -PathType Leaf)) { return $false }
+        try {
+            $header = [IO.File]::ReadAllBytes($docxExport)
+            return $header.Length -gt 4 -and $header[0] -eq 0x50 -and $header[1] -eq 0x4b
+        }
+        catch { return $false }
+    } "A prior DOCX export was not replaced atomically by a complete OOXML package."
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($docxExport)
     try {
         if ($null -eq $archive.GetEntry("word/document.xml")) { throw "DOCX export lacks word/document.xml." }
+        $stylesEntry = $archive.GetEntry("word/styles.xml")
+        $coreEntry = $archive.GetEntry("docProps/core.xml")
+        $relationshipsEntry = $archive.GetEntry("word/_rels/document.xml.rels")
+        if ($null -eq $stylesEntry -or $null -eq $coreEntry -or $null -eq $relationshipsEntry) {
+            throw "DOCX export lacks semantic styles, core metadata or the styles relationship."
+        }
+        $stylesReader = [IO.StreamReader]::new($stylesEntry.Open())
+        try { $stylesXml = $stylesReader.ReadToEnd() }
+        finally { $stylesReader.Dispose() }
+        $coreReader = [IO.StreamReader]::new($coreEntry.Open())
+        try { $coreXml = $coreReader.ReadToEnd() }
+        finally { $coreReader.Dispose() }
+        if ($stylesXml -notmatch 'w:styleId="Title"' -or
+            $stylesXml -notmatch 'w:styleId="Heading1"' -or
+            $stylesXml -notmatch 'w:outlineLvl w:val="0"' -or
+            $stylesXml -notmatch 'w:lang w:val="en-US"' -or
+            $coreXml -notmatch '<dc:title>scanned-source</dc:title>' -or
+            $coreXml -notmatch '<dc:language>en-US</dc:language>') {
+            throw "DOCX export lacks the required title, heading-outline or language semantics."
+        }
+        if (@($archive.Entries | Where-Object { $_.FullName -like '*.tmp' }).Count -ne 0) {
+            throw "DOCX package retained a temporary export artifact."
+        }
     }
     finally { $archive.Dispose() }
+    if (@(Get-ChildItem -LiteralPath $exportRoot -Filter "*.tmp" -File -Force).Count -ne 0) {
+        throw "Atomic document export left a same-directory temporary file."
+    }
 
     $filePath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($docxExport)
     $openFile.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -494,6 +530,30 @@ try {
     $documentText = Require-ById $viewer "DocumentText" "The reopened DOCX text surface was not exposed."
     $docxText = $documentText.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
     if ($docxText -notmatch "(?i)DCX" -or $docxText -notmatch "42") { throw "The structured DOCX did not round-trip its OCR text." }
+
+    $sourceCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') {
+        throw "The P07 gate could not bind evidence to a source commit."
+    }
+    $worktreeState = @(& git -C $repoRoot status --porcelain --untracked-files=no)
+    if ($LASTEXITCODE -ne 0) { throw "The P07 gate could not inspect source worktree state." }
+    $evidence = [ordered]@{
+        captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
+        source_commit = $sourceCommit
+        source_tracked_worktree_clean = $worktreeState.Count -eq 0
+        native_windows_uia = $true
+        windows_ocr_golden = $true
+        normalized_ocr_geometry = $true
+        semantic_repair = $true
+        semantic_html_export = $true
+        docx_atomic_replacement = $true
+        docx_title_heading_language_semantics = $true
+        docx_viewer_round_trip = $true
+        local_vlm_cold_milliseconds = $localDescriptionClock.ElapsedMilliseconds
+        retained_model_web_video_milliseconds = $webDescriptionClock.ElapsedMilliseconds
+        production_actions = 0
+    }
+    $evidence | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot "p07-evidence.json") -Encoding utf8
 
     "Accessible text content=True"
     "Folder item count=$($listed.Count)"
@@ -526,6 +586,8 @@ try {
     "Accessible semantic repair=PASS"
     "Semantic HTML export=PASS"
     "Structured DOCX export=PASS"
+    "Structured DOCX semantic styles and language=PASS"
+    "Structured DOCX atomic replacement=PASS"
     "Structured DOCX viewer round-trip=PASS"
     "P07 content viewer UIA validation=PASS"
 }

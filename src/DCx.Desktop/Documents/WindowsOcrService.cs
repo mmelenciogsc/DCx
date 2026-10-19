@@ -46,6 +46,9 @@ public sealed class WindowsOcrService
             }
         }
 
-        return new AccessibleDocument(Path.GetFileNameWithoutExtension(path), blocks);
+        return new AccessibleDocument(
+            Path.GetFileNameWithoutExtension(path),
+            blocks,
+            engine.RecognizerLanguage.LanguageTag);
     }
 }

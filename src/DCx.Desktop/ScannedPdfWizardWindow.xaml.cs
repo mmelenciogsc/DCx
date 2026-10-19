@@ -84,16 +84,45 @@ public partial class ScannedPdfWizardWindow : Window
     {
         if (_document is null) return;
         var path = GetExportPath("html");
-        await _exporter.ExportHtmlAsync(_document, path);
-        SetStatus($"Semantic HTML exported: {Path.GetFileName(path)}.");
+        SetExportActionsEnabled(false);
+        SetStatus("Preparing semantic HTML export. An existing export will be replaced only after the new file is complete.");
+        try
+        {
+            await _exporter.ExportHtmlAsync(_document, path);
+            SetStatus($"Semantic HTML exported atomically: {Path.GetFileName(path)}.");
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            SetStatus("Semantic HTML export failed safely. An existing export was not replaced.");
+        }
+        finally
+        {
+            SetExportActionsEnabled(_validator.Validate(_document).IsValid);
+        }
     }
 
-    private void OnExportDocxClick(object sender, RoutedEventArgs e)
+    private async void OnExportDocxClick(object sender, RoutedEventArgs e)
     {
         if (_document is null) return;
         var path = GetExportPath("docx");
-        _exporter.ExportDocx(_document, path);
-        SetStatus($"Structured DOCX exported: {Path.GetFileName(path)}.");
+        var document = _document;
+        SetExportActionsEnabled(false);
+        SetStatus("Preparing structured DOCX export. An existing export will be replaced only after the new file is complete.");
+        try
+        {
+            await Task.Run(() => _exporter.ExportDocx(document, path));
+            SetStatus($"Structured DOCX exported atomically: {Path.GetFileName(path)}.");
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            SetStatus("Structured DOCX export failed safely. An existing export was not replaced.");
+        }
+        finally
+        {
+            SetExportActionsEnabled(_validator.Validate(_document).IsValid);
+        }
     }
 
     private string GetExportPath(string extension)
@@ -104,6 +133,12 @@ public partial class ScannedPdfWizardWindow : Window
             : Path.GetFullPath(configured);
         Directory.CreateDirectory(root);
         return Path.Combine(root, $"{Path.GetFileNameWithoutExtension(_pdfPath)}-accessible.{extension}");
+    }
+
+    private void SetExportActionsEnabled(bool enabled)
+    {
+        ExportHtmlButton.IsEnabled = enabled;
+        ExportDocxButton.IsEnabled = enabled;
     }
 
     private void SetStatus(string message) => WizardStatusText.Text = message;
