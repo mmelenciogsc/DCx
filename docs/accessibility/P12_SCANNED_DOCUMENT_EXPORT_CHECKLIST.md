@@ -26,8 +26,8 @@ Automated Windows UIA status does not substitute for a human screen-reader or do
 ## Tagged flattened PDF extension
 
 - [x] Admit a strictly bounded URL and delete the private downloaded temporary after wizard close.
-- [x] Produce an atomically replaced tagged flattened textual PDF with extracted-text, coordinate, `/StructTreeRoot` and `/MarkInfo` evidence.
-- [ ] Preserve scanned raster/non-text visual fidelity or provide fillable AcroForm fields.
+- [x] Produce an atomically replaced tagged flattened PDF with digest-bound aspect-preserved source raster, extracted-text, coordinate, `/StructTreeRoot` and `/MarkInfo` evidence.
+- [ ] Independently compare representative source/output pixels and provide fillable AcroForm fields if that branch is selected.
 - [ ] Pass an approved PDF/UA/accessibility validator and human Adobe Reader/assistive-technology review.
 
-See `P12_TAGGED_PDF_CHECKLIST.md`. Automated PDF success must not be cited as PDF/UA conformance, visual fidelity, fillability or human acceptance.
+See `P12_TAGGED_PDF_CHECKLIST.md`. Automated PDF success must not be cited as PDF/UA conformance, independent pixel fidelity, fillability or human acceptance.

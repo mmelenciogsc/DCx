@@ -1,7 +1,7 @@
 # P13 — Packaging, security and reliability
 
 - Status: BLOCKED (substantial local reliability, self-contained unsigned-MSIX staging, Defender and dependency-advisory checks pass; signed installer, clean-VM, independent security and human-AT gates remain absent)
-- Implementation commits through current exact validation source: `287660b` (tagged flattened PDF `3b35701`; corrected P12 blocker `287660b`; strict local QuickBooks XLSX `da4187a`; prior strict CARE change `4acac23`)
+- Implementation commits through current exact validation source: `1528e60` (tagged flattened PDF `3b35701`; aspect-preserved visual layer `1528e60`; strict local QuickBooks XLSX `da4187a`; prior strict CARE change `4acac23`)
 - Documentation commit: recorded by the commit containing this file
 
 The generated ZIP and synthetic-identity MSIX are unsigned self-contained x64 local-validation artifacts. Neither is an installer or production release.
@@ -48,15 +48,15 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 ## Measured result
 
-Recorded evidence directory: `artifacts/test-results/p13-ad83689e0aad493b9cefa877582908b9/` (generated from exact clean validation source `287660b`; evidence is intentionally not committed).
+Recorded evidence directory: `artifacts/test-results/p13-c22d414a7d7f4accb440005818866e0c/` (generated from exact clean validation source `1528e60`; evidence is intentionally not committed).
 
 - Locked Release build: 0 warnings, 0 errors.
 - Reliability tests: passed 23, failed 0, skipped 0; exact counters parsed from the retained TRX.
 - Package trust tests: passed 21, failed 0, skipped 0; exact counters parsed from the retained TRX. The native Windows probe denied the complete unsigned local-validation package; positive `Valid` composition used an injected fixture only.
 - Current product full suite: passed 641, failed 0, skipped 0; native Windows with zero build warnings/errors.
-- Publish trees: 419 files, 178,625,856 bytes each; no path/length/SHA-256 differences. They embed .NET Core and Windows Desktop 10.0.12 plus the reviewed P09–P12 product contracts. Microsoft Open XML SDK and PdfPig remain test-only and are absent from the nine-component shipped SBOM. No authority, protected state or production endpoint is bundled.
-- Reproducible staging ZIP SHA-256: `7b6348e793f6354f696a7139ad74597018f65127afec32ba5cf1e0dfdac7ec1a`.
-- Reproducible unsigned MSIX: 73,395,403 bytes; SHA-256 `34da2ed371d9796721120763267d34cf18483bedddd7a4d52518a73a8b58a544`; synthetic identity `DCx.AgenticBrowser.LocalValidation`, publisher `CN=DCx Local Validation`, version `1.0.0.0`, x64. MakeAppx semantic pack and exact post-canonicalization unpack passed; real Windows trust returned `NotSigned` and denied it. Signing/install attempts and production actions: 0.
+- Publish trees: 419 files, 178,643,776 bytes each; no path/length/SHA-256 differences. They embed .NET Core and Windows Desktop 10.0.12 plus the reviewed P09–P12 product contracts. Microsoft Open XML SDK and PdfPig remain test-only and are absent from the nine-component shipped SBOM. No authority, protected state or production endpoint is bundled.
+- Reproducible staging ZIP SHA-256: `9d54a4e58bb75cbd1a7926752d198a522fe83c28199dccde3d0079174d0c824a`.
+- Reproducible unsigned MSIX: 73,401,989 bytes; SHA-256 `2b7e31762b912d93f8673ffb9fe42603aaa7371254355f554b7fa20909d36b44`; synthetic identity `DCx.AgenticBrowser.LocalValidation`, publisher `CN=DCx Local Validation`, version `1.0.0.0`, x64. MakeAppx semantic pack and exact post-canonicalization unpack passed; real Windows trust returned `NotSigned` and denied it. Signing/install attempts and production actions: 0.
 - Trusted MakeAppx version `10.0.19041.5609 (WinBuild.160101.0800)`; executable SHA-256 `f6901ebd5818a623b08a2306499f09334c7dab14bf9c9381814506aa80475f78`; signer-certificate SHA-256 `da209e0fe8bf6363318b5a41e5b65f3391d17bcb8b99b91c320ad2d22ef3469f`.
 - CycloneDX components: 9; third-party license records: 9. Three embedded-runtime notice files were copied and hashed.
 - Unexpected secret matches: 0 across repository source and 12 selected DCx-owned/published-text files; exact synthetic scanner-fixture matches: 2.
@@ -79,7 +79,7 @@ Recorded evidence directory: `artifacts/test-results/p13-ad83689e0aad493b9cefa87
 - The packaged desktop includes the local-only, separate-approval metric enable and stop/purge surface from `9745e33`; it has no event producer, transport, enrollment or activation path, and per-user consent/database state is excluded. ADR 0087 records the boundary.
 - Live NVIDIA resource admission and verified complete-runtime cleanup are included through `NvidiaNvmlGpuTelemetry`, `WindowsLocalHardwareProfile`, `LocalModelResourceAdmission`, `LocalModelSelector` and `OllamaLocalClient`; no NVIDIA library or model is bundled. ADRs 0086 and 0089 record the boundary.
 - The packaged desktop now includes the default-production assisted Facebook current-post inspector, but no fixture origin, credential, query, post content or result address. Controlled fixture mode remains environment-gated. The same exact source includes notification- and response-bound Codex cancellation, the timing-hardened P07 validator, cooperative cross-process Ollama sequencing, live resource admission and quiet-runtime cleanup; ADRs 0082–0086 and 0089 record those boundaries.
-- The packaged desktop includes the bounded semantic HTML/DOCX and tagged flattened PDF exporters plus strict scanned-PDF URL downloader from `3b35701`. It bundles no source URL/document, OCR text, reviewed repair, test-only PDF inspector, export, WebView profile or temporary file. ADRs 0097/0099 record atomic replacement and the still-blocked PDF/UA/visual/human-AT boundary.
+- The packaged desktop includes the bounded semantic HTML/DOCX and tagged flattened PDF exporters plus strict scanned-PDF URL downloader from `3b35701`/`1528e60`. It bundles no source URL/document/raster, OCR text, reviewed repair, source digest, test-only PDF inspector, export, WebView profile or temporary file. ADRs 0097/0099 record atomic replacement and the still-blocked PDF/UA/independent-visual/human-AT boundary.
 - The exact implementation commit includes the minimized CARE contract, native read-only dashboard, authoritative server-side ledger projection and validation-only hardened loopback client. Only the unavailable source is normal-launch reachable; generated and authenticated-ledger fixture states require separate explicit validation environment gates. GlobalService, including the contributor endpoint/durable source and finance database, remains excluded from the desktop publish; no token, configured pseudonym, allocation/liability/review state, payout preview, PayPal credential or provider response is bundled. ADRs 0078–0081 record the boundaries.
 - Transactional authoritative usage-receipt binding included in the packaged core: `src/DCx.Core/Contributions/UsageReceiptPolicy.cs`, `server/DCx.GlobalService/ContributionGovernanceService.cs`, their concurrency/security tests and `docs/architecture/adr/0074-bind-and-atomically-admit-usage-receipts.md`.
 - Replica-scoped cooperating-process operation lease included in the packaged client: `src/DCx.Core/GlobalKnowledge/GlobalReplicaOperationLease.cs`, `src/DCx.Core/GlobalKnowledge/GlobalReplicaClient.cs`, its hostile/concurrency tests and `docs/architecture/adr/0073-serialize-shared-global-replica-operations.md`.
