@@ -38,6 +38,8 @@ public sealed record PilotMetricAggregate(
 public sealed class PilotMetricAggregateStore : IAsyncDisposable
 {
     private const long MaximumAbsoluteValue = 1_000_000_000_000;
+    private const long MaximumAggregateSamples = 1_000_000_000;
+    private const int MaximumQueryRows = 10_000;
 
     private static readonly HashSet<PilotMetricDimension> RouteDimensions =
     [
@@ -297,7 +299,7 @@ public sealed class PilotMetricAggregateStore : IAsyncDisposable
             FROM metric_aggregates
             WHERE day_utc >= $first AND day_utc <= $last
             ORDER BY day_utc, metric_key, dimension
-            LIMIT 10000;
+            LIMIT 10001;
             """;
         command.Parameters.AddWithValue("$first", firstDayUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$last", lastDayUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
@@ -305,19 +307,12 @@ public sealed class PilotMetricAggregateStore : IAsyncDisposable
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            if (!Enum.TryParse<PilotMetricDimension>(reader.GetString(2), out var dimension))
+            if (results.Count == MaximumQueryRows)
             {
-                throw new InvalidOperationException("A stored pilot metric dimension is invalid.");
+                throw new InvalidOperationException("The requested pilot metric range exceeds the bounded result set.");
             }
 
-            results.Add(new PilotMetricAggregate(
-                reader.GetString(0),
-                DateOnly.ParseExact(reader.GetString(1), "yyyy-MM-dd", CultureInfo.InvariantCulture),
-                dimension,
-                reader.GetInt64(3),
-                reader.GetInt64(4),
-                reader.GetInt64(5),
-                reader.GetInt64(6)));
+            results.Add(ReadStoredAggregate(reader));
         }
 
         return results;
@@ -379,6 +374,74 @@ public sealed class PilotMetricAggregateStore : IAsyncDisposable
         command.CommandText = "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         return connection;
+    }
+
+    private static PilotMetricAggregate ReadStoredAggregate(SqliteDataReader reader)
+    {
+        string metricKey;
+        string storedDay;
+        string storedDimension;
+        long sampleCount;
+        long valueSum;
+        long minimum;
+        long maximum;
+        try
+        {
+            metricKey = reader.GetString(0);
+            storedDay = reader.GetString(1);
+            storedDimension = reader.GetString(2);
+            sampleCount = reader.GetInt64(3);
+            valueSum = reader.GetInt64(4);
+            minimum = reader.GetInt64(5);
+            maximum = reader.GetInt64(6);
+        }
+        catch (Exception exception) when (exception is InvalidCastException or OverflowException)
+        {
+            throw new InvalidOperationException("A stored pilot metric aggregate has invalid field types.", exception);
+        }
+
+        if (!DateOnly.TryParseExact(
+                storedDay,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var dayUtc) ||
+            !Enum.TryParse<PilotMetricDimension>(storedDimension, ignoreCase: false, out var dimension) ||
+            !Enum.IsDefined(dimension))
+        {
+            throw new InvalidOperationException("A stored pilot metric day or dimension is invalid.");
+        }
+
+        if (sampleCount is < 1 or > MaximumAggregateSamples || minimum > maximum)
+        {
+            throw new InvalidOperationException("A stored pilot metric aggregate has invalid numeric bounds.");
+        }
+
+        try
+        {
+            ValidateMeasurement(metricKey, dayUtc, minimum, dimension);
+            ValidateMeasurement(metricKey, dayUtc, maximum, dimension);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new InvalidOperationException("A stored pilot metric aggregate violates the reviewed catalog.", exception);
+        }
+
+        var lowestPossibleSum = (decimal)minimum * sampleCount;
+        var highestPossibleSum = (decimal)maximum * sampleCount;
+        if (valueSum < lowestPossibleSum || valueSum > highestPossibleSum)
+        {
+            throw new InvalidOperationException("A stored pilot metric aggregate has an impossible sum.");
+        }
+
+        return new PilotMetricAggregate(
+            metricKey,
+            dayUtc,
+            dimension,
+            sampleCount,
+            valueSum,
+            minimum,
+            maximum);
     }
 
     private static void ValidateMeasurement(

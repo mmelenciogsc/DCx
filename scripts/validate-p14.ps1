@@ -99,6 +99,20 @@ try {
             $element.Current.Name.StartsWith("Local aggregate metric recording is disabled. 0 daily aggregate buckets are stored.", [StringComparison]::Ordinal)) { $element }
     } "The default-off metric consent state was not exposed through UIA."
     $defaultConsentName = $consent.Current.Name
+    $pilotAdminPreview = Wait-For { Find-ById $window "PilotAdministrationPreview" } "The local pilot administration preview was not exposed through UIA."
+    $pilotAdminStatus = Wait-For {
+        $element = Find-ById $window "PilotAdministrationStatus"
+        if ($null -ne $element -and
+            $element.Current.Name -eq "Local pilot administration preview. Pilot enrollment unavailable. Product event sources 0. Network metric transports 0. Production activation unavailable.") { $element }
+    } "The local pilot administration boundary was not exposed accurately through UIA."
+    $pilotAggregateStatus = Wait-For {
+        $element = Find-ById $window "PilotAggregateStatus"
+        if ($null -ne $element -and
+            $element.Current.Name -eq "0 retained aggregate buckets are listed for the last 30 UTC days. 0 retained aggregate buckets exist in total. No raw events or network transport are available.") { $element }
+    } "The empty local aggregate administration summary was not exposed through UIA."
+    $pilotAggregates = Wait-For { Find-ById $window "PilotAggregates" } "The local aggregate administration list was not exposed through UIA."
+    $incidentDryRun = Wait-For { Find-ById $window "RunIncidentDryRun" } "The local incident stop drill action was not exposed through UIA."
+    $incidentResults = Wait-For { Find-ById $window "IncidentDryRunResults" } "The local incident stop drill results were not exposed through UIA."
     $privacyControls = Wait-For { Find-ById $window "MetricPrivacyControls" } "The local metric privacy controls were not exposed through UIA."
     $optInApproval = Wait-For { Find-ById $window "MetricOptInApproval" } "The local metric opt-in approval was not exposed through UIA."
     $enableMetrics = Wait-For { Find-ById $window "EnableMetricRecording" } "The local metric enable action was not exposed through UIA."
@@ -168,6 +182,13 @@ try {
         (Find-ById $window "StopAndPurgeMetrics").Current.IsEnabled) {
         throw "The one-use local metric stop-and-purge approval did not reset."
     }
+    ([System.Windows.Automation.InvokePattern]$incidentDryRun.GetCurrentPattern(
+        [System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
+    $incidentResult = Wait-For {
+        $element = Find-ById $window "IncidentDryRunStatus"
+        if ($null -ne $element -and $element.Current.HasKeyboardFocus -and
+            $element.Current.Name -eq "Dry-run incident stop exercise passed for 7 scenarios. External actions 0. Pilot enrollment, metric transport and production activation remain unavailable. A fresh readiness decision is required before resumption.") { $element }
+    } "The local incident stop drill did not expose its focused zero-authority result."
     $blockers = Wait-For { Find-ById $window "ReadinessBlockers" } "The blocker list was not exposed through UIA."
     $metrics = Wait-For { Find-ById $window "ReadinessMetrics" } "The metric-definition list was not exposed through UIA."
     $refresh = Wait-For { Find-ById $window "ReadinessRefresh" } "The refresh action was not exposed through UIA."
@@ -176,17 +197,20 @@ try {
         $enableMetrics.Current.AccessKey,
         $optOutApproval.Current.AccessKey,
         $stopAndPurge.Current.AccessKey,
+        $incidentDryRun.Current.AccessKey,
         $refresh.Current.AccessKey)
     if ($privacyAccessKeys -contains "" -or
         @($privacyAccessKeys | Select-Object -Unique).Count -ne $privacyAccessKeys.Count) {
         throw "The local metric privacy and refresh access keys were missing or conflicting."
     }
-    if ($null -ne (Find-ByName $window "Activate production")) {
-        throw "The read-only readiness dashboard exposed a production activation action."
+    if ($null -ne (Find-ByName $window "Activate production") -or
+        $null -ne (Find-ByName $window "Enroll pilot") -or
+        $null -ne (Find-ByName $window "Send metrics")) {
+        throw "The local pilot administration preview exposed enrollment, transport or production activation authority."
     }
 
     [ordered]@{
-        schema_version = 1
+        schema_version = 2
         captured_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
         fixture = "disposable local readiness data root"
         decision = "no_go"
@@ -203,8 +227,14 @@ try {
         purge_result_focused = $true
         distinct_access_keys = $privacyAccessKeys
         retained_aggregate_buckets_after_purge = 0
+        local_pilot_administration_preview = $true
+        recent_aggregate_list_exposed = $true
+        incident_dry_run_scenarios = 7
+        incident_dry_run_result_focused = $true
+        incident_dry_run_requires_fresh_readiness = $true
+        pilot_enrollment_controls = 0
         product_event_sources = 0
-        network_transfers = 0
+        network_metric_transports = 0
         production_activation_control_exposed = $false
         production_actions = 0
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $uiaEvidencePath -Encoding utf8NoBOM
@@ -225,8 +255,11 @@ try {
     "Native local consent stop and purge UIA=$disabledConsentName"
     "Native local consent focused results=PASS"
     "Native local consent access keys=$($privacyAccessKeys.Count) distinct"
+    "Native local pilot administration preview=PASS"
+    "Native recent aggregate administration list=PASS"
+    "Native seven-scenario incident stop drill=PASS"
     "Native readiness blocker and metric lists=PASS"
-    "Production activation control absent=PASS"
+    "Pilot enrollment metric transport and production activation controls absent=PASS"
     "Production activation approved=$($assessment.production_activation_approved)"
     "P14 decision=NO_GO"
     "P14 evidence=$report"

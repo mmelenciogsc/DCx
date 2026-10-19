@@ -8,8 +8,11 @@
         MinHeight="560"
         AutomationProperties.AutomationId="ReadinessWindow"
         AutomationProperties.Name="DCx release readiness window">
-    <DockPanel Margin="20">
-        <StackPanel DockPanel.Dock="Top">
+    <ScrollViewer Margin="20"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  Focusable="False">
+        <StackPanel>
             <TextBlock x:Name="Heading"
                        FontSize="26"
                        FontWeight="SemiBold"
@@ -93,6 +96,53 @@
                                AutomationProperties.LiveSetting="Assertive" />
                 </StackPanel>
             </GroupBox>
+            <GroupBox Margin="0,10,0,0"
+                      Header="Local pilot administration preview"
+                      AutomationProperties.AutomationId="PilotAdministrationPreview"
+                      AutomationProperties.Name="Local pilot administration preview">
+                <StackPanel Margin="10">
+                    <TextBlock x:Name="PilotAdministrationStatus"
+                               Text="Local pilot administration status is loading."
+                               TextWrapping="Wrap"
+                               FontWeight="SemiBold"
+                               AutomationProperties.AutomationId="PilotAdministrationStatus"
+                               AutomationProperties.Name="Local pilot administration status is loading." />
+                    <TextBlock x:Name="PilotAggregateStatus"
+                               Margin="0,8,0,0"
+                               Text="Retained aggregate summary is loading."
+                               TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="PilotAggregateStatus"
+                               AutomationProperties.Name="Retained aggregate summary is loading." />
+                    <ListBox x:Name="PilotAggregatesList"
+                             Height="90"
+                             Margin="0,8,0,0"
+                             AutomationProperties.AutomationId="PilotAggregates"
+                             AutomationProperties.Name="Retained local aggregate metric buckets from the last 30 UTC days" />
+                    <Button x:Name="RunIncidentDryRunButton"
+                            Width="250"
+                            MinHeight="36"
+                            Margin="0,10,0,0"
+                            HorizontalAlignment="Left"
+                            Content="Run local incident stop _drill"
+                            AutomationProperties.AutomationId="RunIncidentDryRun"
+                            AutomationProperties.Name="Run local incident stop drill"
+                            AutomationProperties.HelpText="Evaluates seven predefined incident stop scenarios without changing state or contacting any service."
+                            Click="OnRunIncidentDryRunClick" />
+                    <TextBlock x:Name="IncidentDryRunStatus"
+                               Margin="0,8,0,0"
+                               Focusable="True"
+                               Text="No local incident stop drill has run."
+                               TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="IncidentDryRunStatus"
+                               AutomationProperties.Name="No local incident stop drill has run."
+                               AutomationProperties.LiveSetting="Assertive" />
+                    <ListBox x:Name="IncidentDryRunResults"
+                             Height="120"
+                             Margin="0,8,0,0"
+                             AutomationProperties.AutomationId="IncidentDryRunResults"
+                             AutomationProperties.Name="Local incident stop drill results" />
+                </StackPanel>
+            </GroupBox>
             <TextBlock x:Name="SummaryText"
                        Margin="0,8,0,0"
                        Text="Readiness counts are loading."
@@ -108,9 +158,7 @@
                     AutomationProperties.AutomationId="ReadinessRefresh"
                     AutomationProperties.Name="Refresh readiness"
                     Click="OnRefreshClick" />
-        </StackPanel>
-
-        <Grid>
+            <Grid Height="300">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="3*" />
                 <ColumnDefinition Width="2*" />
@@ -127,6 +175,7 @@
                          AutomationProperties.AutomationId="ReadinessMetrics"
                          AutomationProperties.Name="Privacy-reviewed pilot metric definitions" />
             </GroupBox>
-        </Grid>
-    </DockPanel>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
 </Window>

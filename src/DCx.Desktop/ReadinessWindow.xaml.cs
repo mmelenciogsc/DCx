@@ -61,6 +61,29 @@ public partial class ReadinessWindow : Window
             "Local aggregate recording stopped. All retained local aggregate metrics were permanently deleted. No network request occurred.");
     }
 
+    private void OnRunIncidentDryRunClick(object sender, RoutedEventArgs e)
+    {
+        if (actionInProgress) return;
+        try
+        {
+            var report = LocalPilotAdministrationPolicy.RunIncidentStopDryRun(
+                CurrentReleaseReadiness.EvaluateLocalNoGo());
+            IncidentDryRunResults.ItemsSource = report.Results;
+            SetIncidentStatus(
+                $"Dry-run incident stop exercise passed for {report.ScenarioCount} scenarios. " +
+                $"External actions {report.ExternalActions}. Pilot enrollment, metric transport and production activation remain unavailable. " +
+                "A fresh readiness decision is required before resumption.",
+                moveFocus: true);
+        }
+        catch (Exception)
+        {
+            IncidentDryRunResults.ItemsSource = Array.Empty<string>();
+            SetIncidentStatus(
+                "The local incident stop exercise failed closed. No external or production action occurred.",
+                moveFocus: true);
+        }
+    }
+
     private async Task RefreshAsync()
     {
         if (actionInProgress) return;
@@ -83,6 +106,9 @@ public partial class ReadinessWindow : Window
                 $"{result.BlockingCriticalAndMajorIssues} blocking critical or major issues remain.");
             SetSummary(
                 $"{result.BlockingCriticalAndMajorIssues} blockers and {result.PilotMetrics.Count} privacy-reviewed metric definitions are listed.");
+            SetPilotAdministration(
+                "Local pilot administration preview. Pilot enrollment unavailable. Product event sources 0. " +
+                "Network metric transports 0. Production activation unavailable.");
 
             await RefreshConsentAsync();
         }
@@ -94,6 +120,9 @@ public partial class ReadinessWindow : Window
             SetDecision("Decision NO GO. Readiness data could not be fully loaded.");
             SetConsent("Metric recording remains unavailable.");
             SetSummary("Readiness counts are unavailable.");
+            SetPilotAdministration("Local pilot administration preview remains unavailable. No authority was granted.");
+            SetAggregateStatus("Retained aggregate summary is unavailable.");
+            PilotAggregatesList.ItemsSource = Array.Empty<string>();
         }
         finally
         {
@@ -152,12 +181,23 @@ public partial class ReadinessWindow : Window
             lifetime.Token);
         var consent = await store.GetConsentAsync(lifetime.Token);
         var aggregateCount = await store.GetAggregateRowCountAsync(lifetime.Token);
+        var lastDay = DateOnly.FromDateTime(DateTime.UtcNow);
+        var firstDay = lastDay.AddDays(-29);
+        var recentAggregates = await store.QueryAsync(firstDay, lastDay, lifetime.Token);
         metricRecordingEnabled = consent.Enabled;
         SetConsent(consent.Enabled
             ? $"Local aggregate metric recording is opted in under notice version {consent.NoticeVersion}. " +
               $"{aggregateCount} daily aggregate buckets are stored. No product event source or network transport is connected."
             : "Local aggregate metric recording is disabled. 0 daily aggregate buckets are stored. " +
               "No pilot event collection or network transport is active.");
+        PilotAggregatesList.ItemsSource = recentAggregates
+            .Select(aggregate =>
+                $"{aggregate.DayUtc:yyyy-MM-dd}. {aggregate.MetricKey}. {aggregate.Dimension}. " +
+                $"Count {aggregate.SampleCount}. Sum {aggregate.ValueSum}. Minimum {aggregate.Minimum}. Maximum {aggregate.Maximum}.")
+            .ToArray();
+        SetAggregateStatus(
+            $"{recentAggregates.Count} retained aggregate buckets are listed for the last 30 UTC days. " +
+            $"{aggregateCount} retained aggregate buckets exist in total. No raw events or network transport are available.");
     }
 
     private async Task TryRefreshConsentAsync()
@@ -173,6 +213,8 @@ public partial class ReadinessWindow : Window
         {
             metricRecordingEnabled = false;
             SetConsent("Metric recording remains unavailable.");
+            SetAggregateStatus("Retained aggregate summary is unavailable.");
+            PilotAggregatesList.ItemsSource = Array.Empty<string>();
         }
     }
 
@@ -186,6 +228,7 @@ public partial class ReadinessWindow : Window
         MetricOptInApprovalBox.IsEnabled = !actionInProgress && !metricRecordingEnabled;
         MetricOptOutApprovalBox.IsEnabled = !actionInProgress && metricRecordingEnabled;
         RefreshButton.IsEnabled = !actionInProgress;
+        RunIncidentDryRunButton.IsEnabled = !actionInProgress;
     }
 
     private void SetActionStatus(string value, bool moveFocus = false)
@@ -211,5 +254,24 @@ public partial class ReadinessWindow : Window
     {
         SummaryText.Text = value;
         AutomationProperties.SetName(SummaryText, value);
+    }
+
+    private void SetPilotAdministration(string value)
+    {
+        PilotAdministrationStatus.Text = value;
+        AutomationProperties.SetName(PilotAdministrationStatus, value);
+    }
+
+    private void SetAggregateStatus(string value)
+    {
+        PilotAggregateStatus.Text = value;
+        AutomationProperties.SetName(PilotAggregateStatus, value);
+    }
+
+    private void SetIncidentStatus(string value, bool moveFocus = false)
+    {
+        IncidentDryRunStatus.Text = value;
+        AutomationProperties.SetName(IncidentDryRunStatus, value);
+        if (moveFocus && !closed) IncidentDryRunStatus.Focus();
     }
 }

@@ -1,4 +1,5 @@
 using DCx.Core.Release;
+using Microsoft.Data.Sqlite;
 
 namespace DCx.Core.Tests.Release;
 
@@ -109,6 +110,64 @@ public sealed class PilotMetricAggregateStoreTests : IDisposable
         Assert.Equal(new PilotMetricConsentStatus(false, 4, Now.AddMinutes(1)), await store.GetConsentAsync());
         Assert.Equal(0, await store.GetAggregateRowCountAsync());
     }
+
+    [Fact]
+    public async Task Query_RejectsTamperedUncatalogedMalformedAndImpossibleRows()
+    {
+        var invalidRows = new[]
+        {
+            new StoredRow("raw_prompt", "2026-10-17", "Aggregate", 1, 1, 1, 1),
+            new StoredRow("task_duration_ms", "2026-10-17", "StartupError", 1, 1, 1, 1),
+            new StoredRow("task_duration_ms", "2026-02-30", "Aggregate", 1, 1, 1, 1),
+            new StoredRow("task_duration_ms", "2026-10-17", "999", 1, 1, 1, 1),
+            new StoredRow("task_completion_rate", "2026-10-17", "Aggregate", 1, 2, 2, 2),
+            new StoredRow("task_duration_ms", "2026-10-17", "Aggregate", 2, 1_000, 100, 200),
+        };
+
+        foreach (var invalidRow in invalidRows)
+        {
+            var caseRoot = Path.Combine(root, Guid.NewGuid().ToString("N"));
+            await using var store = await PilotMetricAggregateStore.OpenAsync(caseRoot);
+            await InsertStoredRowAsync(store.DatabasePath, invalidRow);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.QueryAsync(new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31)));
+        }
+    }
+
+    private static async Task InsertStoredRowAsync(string databasePath, StoredRow row)
+    {
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadWrite,
+            Pooling = false,
+        }.ToString());
+        await connection.OpenAsync();
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO metric_aggregates(
+                metric_key, day_utc, dimension, sample_count, value_sum, minimum, maximum)
+            VALUES($metric, $day, $dimension, $count, $sum, $minimum, $maximum);
+            """;
+        command.Parameters.AddWithValue("$metric", row.MetricKey);
+        command.Parameters.AddWithValue("$day", row.DayUtc);
+        command.Parameters.AddWithValue("$dimension", row.Dimension);
+        command.Parameters.AddWithValue("$count", row.SampleCount);
+        command.Parameters.AddWithValue("$sum", row.ValueSum);
+        command.Parameters.AddWithValue("$minimum", row.Minimum);
+        command.Parameters.AddWithValue("$maximum", row.Maximum);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private sealed record StoredRow(
+        string MetricKey,
+        string DayUtc,
+        string Dimension,
+        long SampleCount,
+        long ValueSum,
+        long Minimum,
+        long Maximum);
 
     public void Dispose()
     {
