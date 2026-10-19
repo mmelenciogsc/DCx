@@ -5,6 +5,44 @@ namespace DCx.Core.Tests.Release;
 public sealed class LocalPilotAdministrationPolicyTests
 {
     [Fact]
+    public void CohortCatalog_IsClosedOrderedAndRequiresFreshStageApproval()
+    {
+        var stages = LocalPilotAdministrationPolicy.CohortStages;
+
+        Assert.Equal(4, stages.Count);
+        Assert.Equal(
+            ["owner-rehearsal", "assistive-technology", "limited-opt-in", "expanded-release-candidate"],
+            stages.Select(stage => stage.Id));
+        Assert.Equal(4, stages.Select(stage => stage.Id).Distinct(StringComparer.Ordinal).Count());
+        Assert.All(stages, stage =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(stage.Title));
+            Assert.False(string.IsNullOrWhiteSpace(stage.Audience));
+            Assert.Contains("approve", stage.EntryGate, StringComparison.OrdinalIgnoreCase);
+            Assert.False(string.IsNullOrWhiteSpace(stage.ExitGate));
+        });
+        Assert.Contains("production activation remains a separate explicit decision",
+            stages[^1].ExitGate, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CohortPreview_PreservesBlockedNotEnrolledZeroAuthorityState()
+    {
+        var preview = LocalPilotAdministrationPolicy.ReviewCohortPlan(
+            CurrentReleaseReadiness.EvaluateLocalNoGo());
+
+        Assert.Equal("blocked-not-enrolled", preview.State);
+        Assert.Equal(4, preview.StageCount);
+        Assert.Equal(0, preview.PilotEnrollmentControls);
+        Assert.Equal(0, preview.ProductEventSources);
+        Assert.Equal(0, preview.NetworkMetricTransports);
+        Assert.Equal(0, preview.ProductionActivationControls);
+        Assert.False(preview.OwnerApprovalRecorded);
+        Assert.False(preview.CohortSizeAndScheduleApproved);
+        Assert.Same(LocalPilotAdministrationPolicy.CohortStages, preview.Stages);
+    }
+
+    [Fact]
     public void IncidentCatalog_IsClosedUniqueAndCoversRequiredExercises()
     {
         var scenarios = LocalPilotAdministrationPolicy.IncidentScenarios;
@@ -66,5 +104,7 @@ public sealed class LocalPilotAdministrationPolicyTests
         Assert.Equal(ReleaseDecision.Go, result.Decision);
         Assert.Throws<InvalidOperationException>(() =>
             LocalPilotAdministrationPolicy.RunIncidentStopDryRun(result));
+        Assert.Throws<InvalidOperationException>(() =>
+            LocalPilotAdministrationPolicy.ReviewCohortPlan(result));
     }
 }

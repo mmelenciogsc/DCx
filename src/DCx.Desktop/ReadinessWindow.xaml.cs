@@ -109,6 +109,14 @@ public partial class ReadinessWindow : Window
             SetPilotAdministration(
                 "Local pilot administration preview. Pilot enrollment unavailable. Product event sources 0. " +
                 "Network metric transports 0. Production activation unavailable.");
+            var cohortPlan = LocalPilotAdministrationPolicy.ReviewCohortPlan(result);
+            SetCohortPlanStatus(
+                $"Staged pilot plan preview. State blocked, not enrolled. {cohortPlan.StageCount} future stages. " +
+                "Enrollment controls 0. Cohort size and schedule are not approved.");
+            PilotCohortStagesList.ItemsSource = cohortPlan.Stages
+                .Select(stage =>
+                    $"{stage.Title}. Audience: {stage.Audience}. Entry: {stage.EntryGate} Exit: {stage.ExitGate}")
+                .ToArray();
 
             await RefreshConsentAsync();
         }
@@ -121,6 +129,8 @@ public partial class ReadinessWindow : Window
             SetConsent("Metric recording remains unavailable.");
             SetSummary("Readiness counts are unavailable.");
             SetPilotAdministration("Local pilot administration preview remains unavailable. No authority was granted.");
+            SetCohortPlanStatus("Staged pilot plan preview remains unavailable. No enrollment authority was granted.");
+            PilotCohortStagesList.ItemsSource = Array.Empty<string>();
             SetAggregateStatus("Retained aggregate summary is unavailable.");
             PilotAggregatesList.ItemsSource = Array.Empty<string>();
         }
@@ -260,6 +270,12 @@ public partial class ReadinessWindow : Window
     {
         PilotAdministrationStatus.Text = value;
         AutomationProperties.SetName(PilotAdministrationStatus, value);
+    }
+
+    private void SetCohortPlanStatus(string value)
+    {
+        PilotCohortPlanStatus.Text = value;
+        AutomationProperties.SetName(PilotCohortPlanStatus, value);
     }
 
     private void SetAggregateStatus(string value)

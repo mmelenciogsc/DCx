@@ -107,6 +107,17 @@
                                FontWeight="SemiBold"
                                AutomationProperties.AutomationId="PilotAdministrationStatus"
                                AutomationProperties.Name="Local pilot administration status is loading." />
+                    <TextBlock x:Name="PilotCohortPlanStatus"
+                               Margin="0,8,0,0"
+                               Text="Staged pilot plan is loading."
+                               TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="PilotCohortPlanStatus"
+                               AutomationProperties.Name="Staged pilot plan is loading." />
+                    <ListBox x:Name="PilotCohortStagesList"
+                             Height="150"
+                             Margin="0,8,0,0"
+                             AutomationProperties.AutomationId="PilotCohortStages"
+                             AutomationProperties.Name="Future staged pilot cohorts with entry and exit gates" />
                     <TextBlock x:Name="PilotAggregateStatus"
                                Margin="0,8,0,0"
                                Text="Retained aggregate summary is loading."

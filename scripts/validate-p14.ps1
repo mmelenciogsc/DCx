@@ -105,6 +105,20 @@ try {
         if ($null -ne $element -and
             $element.Current.Name -eq "Local pilot administration preview. Pilot enrollment unavailable. Product event sources 0. Network metric transports 0. Production activation unavailable.") { $element }
     } "The local pilot administration boundary was not exposed accurately through UIA."
+    $pilotCohortPlanStatus = Wait-For {
+        $element = Find-ById $window "PilotCohortPlanStatus"
+        if ($null -ne $element -and
+            $element.Current.Name -eq "Staged pilot plan preview. State blocked, not enrolled. 4 future stages. Enrollment controls 0. Cohort size and schedule are not approved.") { $element }
+    } "The staged pilot plan did not preserve the blocked, not-enrolled boundary."
+    $pilotCohortStages = Wait-For { Find-ById $window "PilotCohortStages" } "The staged pilot cohort list was not exposed through UIA."
+    $cohortStageItems = $pilotCohortStages.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        (New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::ListItem)))
+    if ($cohortStageItems.Count -ne 4) {
+        throw "The staged pilot preview did not expose exactly four future cohort stages."
+    }
     $pilotAggregateStatus = Wait-For {
         $element = Find-ById $window "PilotAggregateStatus"
         if ($null -ne $element -and
@@ -210,7 +224,7 @@ try {
     }
 
     [ordered]@{
-        schema_version = 2
+        schema_version = 3
         captured_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
         fixture = "disposable local readiness data root"
         decision = "no_go"
@@ -228,6 +242,10 @@ try {
         distinct_access_keys = $privacyAccessKeys
         retained_aggregate_buckets_after_purge = 0
         local_pilot_administration_preview = $true
+        staged_pilot_state = "blocked-not-enrolled"
+        staged_pilot_future_cohorts = $cohortStageItems.Count
+        staged_pilot_owner_approval_recorded = $false
+        staged_pilot_size_and_schedule_approved = $false
         recent_aggregate_list_exposed = $true
         incident_dry_run_scenarios = 7
         incident_dry_run_result_focused = $true
@@ -256,6 +274,7 @@ try {
     "Native local consent focused results=PASS"
     "Native local consent access keys=$($privacyAccessKeys.Count) distinct"
     "Native local pilot administration preview=PASS"
+    "Staged pilot cohort preview=PASS (blocked-not-enrolled; 4 future stages; zero enrollment controls)"
     "Native recent aggregate administration list=PASS"
     "Native seven-scenario incident stop drill=PASS"
     "Native readiness blocker and metric lists=PASS"
