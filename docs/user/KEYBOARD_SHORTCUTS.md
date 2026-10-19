@@ -28,7 +28,7 @@ These keys are window-local. Global knowledge never synchronizes automatically. 
 | Global knowledge | `Alt+Y` | Explicitly synchronize from the exact enrolled registry. |
 | Global knowledge | `Alt+C` | Cancel active status/search/synchronization work. |
 | Global knowledge | `Alt+E` | Open registry enrollment. |
-| Global knowledge | `Alt+O` | Search the verified local replica offline. |
+| Global knowledge | `Alt+F` | Find results in the verified local replica offline. |
 | Registry enrollment | `Alt+B` | Browse for one local public trust-root file. |
 | Registry enrollment | `Alt+V` | Review the exact root fingerprint and canonical address without network access. |
 | Registry enrollment | `Alt+H` | Change the candidate and revoke its current review/approval. |

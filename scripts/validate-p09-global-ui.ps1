@@ -133,6 +133,12 @@ try {
         "SynchronizeGlobalKnowledgeButton",
         "CancelGlobalKnowledgeButton",
         "SearchGlobalKnowledgeButton")
+    $expectedActionAccessKeys = @{
+        RefreshGlobalKnowledgeButton = "R"
+        SynchronizeGlobalKnowledgeButton = "Y"
+        CancelGlobalKnowledgeButton = "C"
+        SearchGlobalKnowledgeButton = "F"
+    }
     $accessKeys = @()
     foreach ($automationId in $actionIds) {
         $action = Wait-For {
@@ -140,6 +146,9 @@ try {
             if ($null -ne $candidate -and
                 -not [string]::IsNullOrWhiteSpace($candidate.Current.AccessKey)) { $candidate }
         } "The $automationId action lacks its required access key."
+        if ($action.Current.AccessKey -ne $expectedActionAccessKeys[$automationId]) {
+            throw "The $automationId action exposes an unexpected access key."
+        }
         $accessKeys += $action.Current.AccessKey
     }
     if (@($accessKeys | Sort-Object -Unique).Count -ne $accessKeys.Count) {
@@ -241,6 +250,15 @@ try {
         "SaveGlobalRegistryEnrollmentButton",
         "ConfirmClearGlobalRegistryEnrollmentBox",
         "ClearGlobalRegistryEnrollmentButton")
+    $expectedEnrollmentAccessKeys = @{
+        BrowseGlobalTrustRootButton = "B"
+        ReviewGlobalRegistryEnrollmentButton = "V"
+        ChangeGlobalRegistryEnrollmentCandidateButton = "H"
+        ApproveGlobalRegistryEnrollmentBox = "A"
+        SaveGlobalRegistryEnrollmentButton = "S"
+        ConfirmClearGlobalRegistryEnrollmentBox = "C"
+        ClearGlobalRegistryEnrollmentButton = "L"
+    }
     $enrollmentAccessKeys = @()
     foreach ($automationId in $enrollmentActionIds) {
         $action = Wait-For {
@@ -248,6 +266,9 @@ try {
             if ($null -ne $candidate -and
                 -not [string]::IsNullOrWhiteSpace($candidate.Current.AccessKey)) { $candidate }
         } "The $automationId enrollment action lacks its required access key."
+        if ($action.Current.AccessKey -ne $expectedEnrollmentAccessKeys[$automationId]) {
+            throw "The $automationId enrollment action exposes an unexpected access key."
+        }
         $enrollmentAccessKeys += $action.Current.AccessKey
     }
     if (@($enrollmentAccessKeys | Sort-Object -Unique).Count -ne $enrollmentAccessKeys.Count) {

@@ -114,9 +114,8 @@
                                 MinHeight="36"
                                 Margin="0,10,0,0"
                                 HorizontalAlignment="Left"
-                                Content="Search _offline"
+                                Content="_Find offline"
                                 IsEnabled="False"
-                                IsDefault="True"
                                 AutomationProperties.AutomationId="SearchGlobalKnowledgeButton"
                                 AutomationProperties.Name="Search offline global knowledge"
                                 Click="OnSearchClick" />

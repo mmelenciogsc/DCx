@@ -78,6 +78,9 @@ public static class GlobalKnowledgeSourceFactory
         {
             AllowAutoRedirect = false,
             AutomaticDecompression = DecompressionMethods.None,
+            CheckCertificateRevocationList = true,
+            MaxConnectionsPerServer = 2,
+            MaxResponseHeadersLength = 16,
             UseCookies = false,
             UseProxy = false,
         };
