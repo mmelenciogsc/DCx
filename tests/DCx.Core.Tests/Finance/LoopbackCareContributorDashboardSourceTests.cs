@@ -11,6 +11,18 @@ public sealed class LoopbackCareContributorDashboardSourceTests
     private const string Contributor = "contributor:loopback-fixture";
     private static readonly Uri Origin = new("http://127.0.0.1:5087/");
 
+    [Fact]
+    public void Handler_BoundsHeadersConnectionsAndAmbientHttpFeatures()
+    {
+        using var handler = LoopbackCareContributorDashboardSource.CreateHardenedHandler();
+        Assert.False(handler.AllowAutoRedirect);
+        Assert.False(handler.UseCookies);
+        Assert.False(handler.UseProxy);
+        Assert.Equal(DecompressionMethods.None, handler.AutomaticDecompression);
+        Assert.Equal(2, handler.MaxConnectionsPerServer);
+        Assert.Equal(16, handler.MaxResponseHeadersLength);
+    }
+
     [Theory]
     [InlineData("https://127.0.0.1:5087/")]
     [InlineData("http://localhost:5087/")]
@@ -39,6 +51,7 @@ public sealed class LoopbackCareContributorDashboardSourceTests
             Assert.Contains(
                 request.Headers.Accept,
                 value => value.MediaType == "application/json");
+            Assert.Contains(request.Headers.AcceptEncoding, value => value.Value == "identity");
             return Json(request, Snapshot());
         });
         using var source = new LoopbackCareContributorDashboardSource(
@@ -100,6 +113,38 @@ public sealed class LoopbackCareContributorDashboardSourceTests
     }
 
     [Fact]
+    public async Task Load_RejectsChangedRouteAndInvalidJsonContentContracts()
+    {
+        var mutations = new Action<HttpResponseMessage>[]
+        {
+            response => response.RequestMessage = new HttpRequestMessage(
+                HttpMethod.Get, "http://127.0.0.1:5087/api/care/other"),
+            response => response.Content.Headers.ContentType =
+                System.Net.Http.Headers.MediaTypeHeaderValue.Parse("text/plain"),
+            response => response.Content.Headers.ContentType!.CharSet = "utf-16",
+            response => response.Content.Headers.ContentEncoding.Add("gzip"),
+            response => response.Content.Headers.ContentLength = 64 * 1024 + 1,
+        };
+
+        foreach (var mutate in mutations)
+        {
+            var handler = new StaticHandler(request =>
+            {
+                var response = Json(request, Snapshot());
+                mutate(response);
+                return response;
+            });
+            using var source = new LoopbackCareContributorDashboardSource(
+                handler, Origin, Token, Contributor);
+            var error = await Assert.ThrowsAsync<CareContributorDashboardTransportException>(
+                () => source.LoadAsync());
+            Assert.Contains(
+                error.Code,
+                new[] { "care_contributor_response_invalid", "care_contributor_response_origin_invalid" });
+        }
+    }
+
+    [Fact]
     public async Task Load_RejectsOversizedResponseBeforeJsonParsing()
     {
         var handler = new StaticHandler(request => new HttpResponseMessage(HttpStatusCode.OK)
@@ -138,6 +183,21 @@ public sealed class LoopbackCareContributorDashboardSourceTests
 
         Assert.Equal("authentication_invalid", error.Code);
         Assert.DoesNotContain(Token, error.ToString(), StringComparison.Ordinal);
+
+        var duplicateHandler = new StaticHandler(request => new HttpResponseMessage(
+            HttpStatusCode.Unauthorized)
+        {
+            RequestMessage = request,
+            Content = new StringContent(
+                "{\"code\":\"authentication_invalid\",\"code\":\"authentication_invalid\"}",
+                Encoding.UTF8,
+                "application/json"),
+        });
+        using var duplicateSource = new LoopbackCareContributorDashboardSource(
+            duplicateHandler, Origin, Token, Contributor);
+        var duplicate = await Assert.ThrowsAsync<CareContributorDashboardTransportException>(
+            () => duplicateSource.LoadAsync());
+        Assert.Equal("care_contributor_rejected", duplicate.Code);
     }
 
     [Fact]

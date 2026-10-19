@@ -67,6 +67,12 @@ internal static class SimulationCareOperationsApi
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         MaxDepth = 8,
     };
+    private static readonly JsonDocumentOptions DocumentOptions = new()
+    {
+        AllowTrailingCommas = false,
+        CommentHandling = JsonCommentHandling.Disallow,
+        MaxDepth = 8,
+    };
 
     public static void Map(
         WebApplication app,
@@ -250,12 +256,12 @@ internal static class SimulationCareOperationsApi
         HttpRequest request,
         CancellationToken cancellationToken)
     {
-        var mediaType = request.ContentType is null
-            ? null
-            : MediaTypeHeaderValue.TryParse(request.ContentType, out var parsed)
-                ? parsed.MediaType
-                : null;
-        if (!string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase) ||
+        MediaTypeHeaderValue? parsed = null;
+        if (request.ContentType is null ||
+            !MediaTypeHeaderValue.TryParse(request.ContentType, out parsed) ||
+            !string.Equals(parsed.MediaType, "application/json", StringComparison.OrdinalIgnoreCase) ||
+            !HasOnlyOptionalUtf8Charset(parsed) ||
+            request.Headers.ContentEncoding.Count != 0 ||
             request.ContentLength is null or <= 0 or > MaximumRequestBytes)
         {
             throw new InvalidDataException("The CARE operations request type or length is invalid.");
@@ -280,7 +286,9 @@ internal static class SimulationCareOperationsApi
 
             try
             {
-                return JsonSerializer.Deserialize<T>(bytes, JsonOptions)
+                using var document = JsonDocument.Parse(bytes, DocumentOptions);
+                RejectDuplicateProperties(document.RootElement);
+                return document.RootElement.Deserialize<T>(JsonOptions)
                     ?? throw new InvalidDataException("The CARE operations request is empty.");
             }
             catch (JsonException)
@@ -291,6 +299,43 @@ internal static class SimulationCareOperationsApi
         finally
         {
             CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
+
+    private static bool HasOnlyOptionalUtf8Charset(MediaTypeHeaderValue contentType)
+    {
+        if (contentType.Parameters.Count == 0) return true;
+        if (contentType.Parameters.Count != 1) return false;
+        var parameter = contentType.Parameters.Single();
+        return string.Equals(parameter.Name, "charset", StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(
+                   parameter.Value?.Trim().Trim('"'),
+                   "utf-8",
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void RejectDuplicateProperties(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (!names.Add(property.Name))
+                    {
+                        throw new InvalidDataException(
+                            "The CARE operations request JSON contains a duplicate property.");
+                    }
+                    RejectDuplicateProperties(property.Value);
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    RejectDuplicateProperties(item);
+                }
+                break;
         }
     }
 

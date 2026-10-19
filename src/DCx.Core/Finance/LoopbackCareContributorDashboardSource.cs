@@ -27,6 +27,12 @@ public sealed class LoopbackCareContributorDashboardSource :
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         MaxDepth = 8,
     };
+    private static readonly JsonDocumentOptions DocumentOptions = new()
+    {
+        AllowTrailingCommas = false,
+        CommentHandling = JsonCommentHandling.Disallow,
+        MaxDepth = 8,
+    };
 
     private readonly HttpClient httpClient;
     private readonly Uri origin;
@@ -114,6 +120,7 @@ public sealed class LoopbackCareContributorDashboardSource :
     {
         using var request = CreateAuthorizedRequest();
         using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        EnsureJsonResponse(response);
         var body = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
         try
         {
@@ -122,7 +129,6 @@ public sealed class LoopbackCareContributorDashboardSource :
                 throw new CareContributorDashboardTransportException(ReadErrorCode(body));
             }
 
-            EnsureJsonResponse(response);
             var snapshot = Deserialize(body);
             CareContributorDashboardPolicy.RequireSnapshot(snapshot);
             if (snapshot.StatusCode != CareContributorDashboardPolicy.Available ||
@@ -155,13 +161,15 @@ public sealed class LoopbackCareContributorDashboardSource :
         if (bytes is not null) CryptographicOperations.ZeroMemory(bytes);
     }
 
-    private static SocketsHttpHandler CreateHardenedHandler() => new()
+    internal static SocketsHttpHandler CreateHardenedHandler() => new()
     {
         AllowAutoRedirect = false,
         UseCookies = false,
         UseProxy = false,
         AutomaticDecompression = DecompressionMethods.None,
         ConnectTimeout = TimeSpan.FromSeconds(10),
+        MaxConnectionsPerServer = 2,
+        MaxResponseHeadersLength = 16,
     };
 
     private HttpRequestMessage CreateAuthorizedRequest()
@@ -170,10 +178,11 @@ public sealed class LoopbackCareContributorDashboardSource :
             ?? throw new ObjectDisposedException(nameof(LoopbackCareContributorDashboardSource));
         var request = new HttpRequestMessage(
             HttpMethod.Get,
-            "api/care/contributor-dashboard");
+            new Uri(origin, "api/care/contributor-dashboard"));
         request.Headers.Authorization = new AuthenticationHeaderValue(
             "Bearer", Encoding.UTF8.GetString(tokenBytes));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("identity"));
         request.Headers.CacheControl = new CacheControlHeaderValue { NoStore = true };
         return request;
     }
@@ -203,9 +212,11 @@ public sealed class LoopbackCareContributorDashboardSource :
 
         var responseUri = response.RequestMessage?.RequestUri;
         if (responseUri is null || !responseUri.IsAbsoluteUri ||
-            responseUri.Scheme != Uri.UriSchemeHttp || !responseUri.IsLoopback ||
-            !string.Equals(responseUri.Host, origin.Host, StringComparison.OrdinalIgnoreCase) ||
-            responseUri.Port != origin.Port)
+            request.RequestUri is null ||
+            !string.Equals(
+                responseUri.AbsoluteUri,
+                request.RequestUri.AbsoluteUri,
+                StringComparison.Ordinal))
         {
             response.Dispose();
             throw new CareContributorDashboardTransportException(
@@ -219,14 +230,9 @@ public sealed class LoopbackCareContributorDashboardSource :
     {
         try
         {
-            using var document = JsonDocument.Parse(body, new JsonDocumentOptions
-            {
-                AllowTrailingCommas = false,
-                CommentHandling = JsonCommentHandling.Disallow,
-                MaxDepth = 8,
-            });
+            using var document = JsonDocument.Parse(body, DocumentOptions);
             RejectDuplicateProperties(document.RootElement);
-            return JsonSerializer.Deserialize<CareContributorDashboardSnapshot>(body, JsonOptions)
+            return document.RootElement.Deserialize<CareContributorDashboardSnapshot>(JsonOptions)
                 ?? throw new JsonException();
         }
         catch (JsonException)
@@ -258,7 +264,12 @@ public sealed class LoopbackCareContributorDashboardSource :
 
     private static void EnsureJsonResponse(HttpResponseMessage response)
     {
-        if (response.Content.Headers.ContentType?.MediaType is not "application/json")
+        var contentType = response.Content.Headers.ContentType;
+        var charset = contentType?.CharSet?.Trim().Trim('"');
+        if (!string.Equals(contentType?.MediaType, "application/json", StringComparison.OrdinalIgnoreCase) ||
+            response.Content.Headers.ContentEncoding.Count != 0 ||
+            (!string.IsNullOrEmpty(charset) &&
+             !string.Equals(charset, "utf-8", StringComparison.OrdinalIgnoreCase)))
         {
             throw new CareContributorDashboardTransportException(
                 "care_contributor_response_invalid");
@@ -269,7 +280,8 @@ public sealed class LoopbackCareContributorDashboardSource :
         HttpContent content,
         CancellationToken cancellationToken)
     {
-        if (content.Headers.ContentLength is > MaximumResponseBytes)
+        if (content.Headers.ContentLength is long contentLength &&
+            (contentLength < 0 || contentLength > MaximumResponseBytes))
         {
             throw new CareContributorDashboardTransportException(
                 "care_contributor_response_invalid");
@@ -306,11 +318,13 @@ public sealed class LoopbackCareContributorDashboardSource :
         }
     }
 
-    private static string ReadErrorCode(ReadOnlySpan<byte> body)
+    private static string ReadErrorCode(byte[] body)
     {
         try
         {
-            var error = JsonSerializer.Deserialize<ErrorResponse>(body, JsonOptions);
+            using var document = JsonDocument.Parse(body, DocumentOptions);
+            RejectDuplicateProperties(document.RootElement);
+            var error = document.RootElement.Deserialize<ErrorResponse>(JsonOptions);
             return error?.Code is { Length: > 0 and <= 128 } code &&
                    code.All(character =>
                        char.IsAsciiLetterOrDigit(character) || character is '_' or '-')

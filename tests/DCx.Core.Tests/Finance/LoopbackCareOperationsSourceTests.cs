@@ -9,6 +9,32 @@ public sealed class LoopbackCareOperationsSourceTests
     private const string Token = "care-loopback-token-fixture-1234567890";
     private static readonly Uri Origin = new("http://127.0.0.1:5087/");
 
+    [Fact]
+    public void Handler_BoundsHeadersConnectionsAndAmbientHttpFeatures()
+    {
+        using var handler = LoopbackCareOperationsSource.CreateHardenedHandler();
+        Assert.False(handler.AllowAutoRedirect);
+        Assert.False(handler.UseCookies);
+        Assert.False(handler.UseProxy);
+        Assert.Equal(DecompressionMethods.None, handler.AutomaticDecompression);
+        Assert.Equal(2, handler.MaxConnectionsPerServer);
+        Assert.Equal(16, handler.MaxResponseHeadersLength);
+    }
+
+    [Fact]
+    public async Task Refresh_SendsPrivacyHeadersAndAcceptsStrictResponse()
+    {
+        var handler = new StaticHandler(request =>
+        {
+            Assert.True(request.Headers.CacheControl!.NoStore);
+            Assert.Contains(request.Headers.Accept, item => item.MediaType == "application/json");
+            Assert.Contains(request.Headers.AcceptEncoding, item => item.Value == "identity");
+            return Json(request, ClearHealth());
+        });
+        using var source = new LoopbackCareOperationsSource(handler, Origin, Token);
+        Assert.Equal("clear", (await source.RefreshAsync()).StatusCode);
+    }
+
     [Theory]
     [InlineData("https://127.0.0.1:5087/")]
     [InlineData("http://localhost:5087/")]
@@ -58,6 +84,41 @@ public sealed class LoopbackCareOperationsSourceTests
             source.RefreshAsync());
 
         Assert.Equal("care_operations_response_origin_invalid", error.Code);
+    }
+
+    [Fact]
+    public async Task Refresh_RejectsDuplicateChangedRouteAndInvalidJsonContentContracts()
+    {
+        var duplicate = ClearHealth().Replace(
+            "\"statusCode\":\"clear\"",
+            "\"statusCode\":\"clear\",\"statusCode\":\"clear\"",
+            StringComparison.Ordinal);
+        var cases = new (string Body, Action<HttpResponseMessage>? Mutate)[]
+        {
+            (duplicate, null),
+            (ClearHealth(), response => response.RequestMessage = new HttpRequestMessage(
+                HttpMethod.Get, "http://127.0.0.1:5087/api/care/operations/other")),
+            (ClearHealth(), response => response.Content.Headers.ContentType =
+                System.Net.Http.Headers.MediaTypeHeaderValue.Parse("text/plain")),
+            (ClearHealth(), response => response.Content.Headers.ContentType!.CharSet = "utf-16"),
+            (ClearHealth(), response => response.Content.Headers.ContentEncoding.Add("gzip")),
+            (ClearHealth(), response => response.Content.Headers.ContentLength = 64 * 1024 + 1),
+        };
+        foreach (var item in cases)
+        {
+            var handler = new StaticHandler(request =>
+            {
+                var response = Json(request, item.Body);
+                item.Mutate?.Invoke(response);
+                return response;
+            });
+            using var source = new LoopbackCareOperationsSource(handler, Origin, Token);
+            var error = await Assert.ThrowsAsync<CareOperationsTransportException>(
+                () => source.RefreshAsync());
+            Assert.Contains(
+                error.Code,
+                new[] { "care_operations_response_invalid", "care_operations_response_origin_invalid" });
+        }
     }
 
     [Fact]
@@ -121,6 +182,11 @@ public sealed class LoopbackCareOperationsSourceTests
 
         Assert.Equal("care_blocked_case_response_invalid", error.Code);
     }
+
+    private static string ClearHealth() =>
+        """
+        {"statusCode":"clear","pending":0,"due":0,"blocked":0,"completed":0,"maximumAttemptCount":0,"oldestPendingUtc":null,"nextAttemptUtc":null,"canProcessDue":false}
+        """;
 
     private static HttpResponseMessage Json(HttpRequestMessage request, string body) => new(HttpStatusCode.OK)
     {

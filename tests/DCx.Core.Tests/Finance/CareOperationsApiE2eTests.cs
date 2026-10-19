@@ -173,6 +173,48 @@ public sealed class CareOperationsApiE2eTests : IDisposable
             var firstReview = await source.RefreshAsync();
             Assert.Equal(1, firstReview.Due);
             Assert.True(firstReview.CanProcessDue);
+            var unapprovedRequestJson = JsonSerializer.Serialize(
+                new CareOperationsProcessRequest(firstReview, ExplicitlyApproved: false),
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var duplicateRequestJson = unapprovedRequestJson.Replace(
+                "\"explicitlyApproved\":false",
+                "\"explicitlyApproved\":false,\"explicitlyApproved\":false",
+                StringComparison.Ordinal);
+            using (var duplicateRequest = await SendRawProcessAsync(
+                       client,
+                       new Uri(endpoint, "api/care/operations/process"),
+                       operatorToken,
+                       Encoding.UTF8.GetBytes(duplicateRequestJson)))
+            {
+                await AssertErrorAsync(
+                    duplicateRequest,
+                    HttpStatusCode.BadRequest,
+                    "care_operations_request_invalid");
+            }
+            using (var encodedRequest = await SendRawProcessAsync(
+                       client,
+                       new Uri(endpoint, "api/care/operations/process"),
+                       operatorToken,
+                       Encoding.UTF8.GetBytes(unapprovedRequestJson),
+                       contentEncoding: "gzip"))
+            {
+                await AssertErrorAsync(
+                    encodedRequest,
+                    HttpStatusCode.BadRequest,
+                    "care_operations_request_invalid");
+            }
+            using (var wrongCharsetRequest = await SendRawProcessAsync(
+                       client,
+                       new Uri(endpoint, "api/care/operations/process"),
+                       operatorToken,
+                       Encoding.UTF8.GetBytes(unapprovedRequestJson),
+                       charset: "utf-16"))
+            {
+                await AssertErrorAsync(
+                    wrongCharsetRequest,
+                    HttpStatusCode.BadRequest,
+                    "care_operations_request_invalid");
+            }
             var serializedHealth = JsonSerializer.Serialize(firstReview);
             Assert.DoesNotContain("FIRST", serializedHealth, StringComparison.Ordinal);
             Assert.DoesNotContain("subscription", serializedHealth, StringComparison.OrdinalIgnoreCase);
@@ -449,13 +491,20 @@ public sealed class CareOperationsApiE2eTests : IDisposable
         HttpClient client,
         Uri uri,
         string token,
-        byte[] body)
+        byte[] body,
+        string? charset = null,
+        string? contentEncoding = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, uri)
         {
             Content = new ByteArrayContent(body),
         };
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        request.Content.Headers.ContentType.CharSet = charset;
+        if (contentEncoding is not null)
+        {
+            request.Content.Headers.ContentEncoding.Add(contentEncoding);
+        }
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         try
         {

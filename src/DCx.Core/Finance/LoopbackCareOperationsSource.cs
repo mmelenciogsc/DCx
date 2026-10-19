@@ -32,6 +32,12 @@ public sealed class LoopbackCareOperationsSource :
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         MaxDepth = 8,
     };
+    private static readonly JsonDocumentOptions DocumentOptions = new()
+    {
+        AllowTrailingCommas = false,
+        CommentHandling = JsonCommentHandling.Disallow,
+        MaxDepth = 8,
+    };
 
     private readonly HttpClient httpClient;
     private readonly Uri origin;
@@ -93,6 +99,7 @@ public sealed class LoopbackCareOperationsSource :
     {
         using var request = CreateAuthorizedRequest(HttpMethod.Get, "api/care/operations/health");
         using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        EnsureJsonResponse(response);
         var body = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
         try
         {
@@ -101,7 +108,6 @@ public sealed class LoopbackCareOperationsSource :
                 throw new CareOperationsTransportException(ReadErrorCode(body));
             }
 
-            EnsureJsonResponse(response);
             var health = Deserialize<CareOperationsHealth>(body);
             CareOperationsPolicy.RequireHealth(health);
             return health;
@@ -131,6 +137,7 @@ public sealed class LoopbackCareOperationsSource :
             request.Content = new ByteArrayContent(body);
             request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
             using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+            EnsureJsonResponse(response);
             var responseBody = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
             try
             {
@@ -139,7 +146,6 @@ public sealed class LoopbackCareOperationsSource :
                     throw new CareOperationsTransportException(ReadErrorCode(responseBody));
                 }
 
-                EnsureJsonResponse(response);
                 var result = Deserialize<CareOperationsProcessResult>(responseBody);
                 CareOperationsPolicy.RequireProcessResult(result);
                 return result;
@@ -165,6 +171,7 @@ public sealed class LoopbackCareOperationsSource :
         using var request = CreateAuthorizedRequest(
             HttpMethod.Get, "api/care/operations/blocked-cases");
         using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        EnsureJsonResponse(response);
         var body = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
         try
         {
@@ -173,7 +180,6 @@ public sealed class LoopbackCareOperationsSource :
                 throw new CareOperationsTransportException(ReadErrorCode(body));
             }
 
-            EnsureJsonResponse(response);
             var cases = Deserialize<List<CareBlockedCaseReview>>(body);
             CareBlockedCaseReviewPolicy.RequireList(cases);
             return cases;
@@ -202,6 +208,7 @@ public sealed class LoopbackCareOperationsSource :
             message.Content = new ByteArrayContent(body);
             message.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
             using var response = await SendAsync(message, cancellationToken).ConfigureAwait(false);
+            EnsureJsonResponse(response);
             var responseBody = await ReadBoundedAsync(
                     response.Content, cancellationToken)
                 .ConfigureAwait(false);
@@ -212,7 +219,6 @@ public sealed class LoopbackCareOperationsSource :
                     throw new CareOperationsTransportException(ReadErrorCode(responseBody));
                 }
 
-                EnsureJsonResponse(response);
                 var result = Deserialize<CareBlockedCaseDispositionResult>(responseBody);
                 CareBlockedCaseReviewPolicy.RequireResult(result);
                 if (!string.Equals(result.CaseId, request.CaseId, StringComparison.Ordinal) ||
@@ -248,22 +254,27 @@ public sealed class LoopbackCareOperationsSource :
         if (bytes is not null) CryptographicOperations.ZeroMemory(bytes);
     }
 
-    private static SocketsHttpHandler CreateHardenedHandler() => new()
+    internal static SocketsHttpHandler CreateHardenedHandler() => new()
     {
         AllowAutoRedirect = false,
         UseCookies = false,
         UseProxy = false,
         AutomaticDecompression = DecompressionMethods.None,
         ConnectTimeout = TimeSpan.FromSeconds(10),
+        MaxConnectionsPerServer = 2,
+        MaxResponseHeadersLength = 16,
     };
 
     private HttpRequestMessage CreateAuthorizedRequest(HttpMethod method, string requestUri)
     {
         var tokenBytes = operatorTokenBytes
             ?? throw new ObjectDisposedException(nameof(LoopbackCareOperationsSource));
-        var request = new HttpRequestMessage(method, requestUri);
+        var request = new HttpRequestMessage(method, new Uri(origin, requestUri));
         request.Headers.Authorization = new AuthenticationHeaderValue(
             "Bearer", Encoding.UTF8.GetString(tokenBytes));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("identity"));
+        request.Headers.CacheControl = new CacheControlHeaderValue { NoStore = true };
         return request;
     }
 
@@ -288,9 +299,11 @@ public sealed class LoopbackCareOperationsSource :
         }
 
         var responseUri = response.RequestMessage?.RequestUri;
-        if (responseUri is null || !responseUri.IsAbsoluteUri || responseUri.Scheme != Uri.UriSchemeHttp ||
-            !responseUri.IsLoopback || !string.Equals(responseUri.Host, origin.Host, StringComparison.OrdinalIgnoreCase) ||
-            responseUri.Port != origin.Port)
+        if (responseUri is null || !responseUri.IsAbsoluteUri || request.RequestUri is null ||
+            !string.Equals(
+                responseUri.AbsoluteUri,
+                request.RequestUri.AbsoluteUri,
+                StringComparison.Ordinal))
         {
             response.Dispose();
             throw new CareOperationsTransportException("care_operations_response_origin_invalid");
@@ -299,11 +312,13 @@ public sealed class LoopbackCareOperationsSource :
         return response;
     }
 
-    private static T Deserialize<T>(ReadOnlySpan<byte> body)
+    private static T Deserialize<T>(ReadOnlyMemory<byte> body)
     {
         try
         {
-            return JsonSerializer.Deserialize<T>(body, JsonOptions)
+            using var document = JsonDocument.Parse(body, DocumentOptions);
+            RejectDuplicateProperties(document.RootElement);
+            return document.RootElement.Deserialize<T>(JsonOptions)
                 ?? throw new JsonException();
         }
         catch (JsonException)
@@ -312,9 +327,35 @@ public sealed class LoopbackCareOperationsSource :
         }
     }
 
+    private static void RejectDuplicateProperties(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (!names.Add(property.Name)) throw new JsonException();
+                    RejectDuplicateProperties(property.Value);
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    RejectDuplicateProperties(item);
+                }
+                break;
+        }
+    }
+
     private static void EnsureJsonResponse(HttpResponseMessage response)
     {
-        if (response.Content.Headers.ContentType?.MediaType is not "application/json")
+        var contentType = response.Content.Headers.ContentType;
+        var charset = contentType?.CharSet?.Trim().Trim('"');
+        if (!string.Equals(contentType?.MediaType, "application/json", StringComparison.OrdinalIgnoreCase) ||
+            response.Content.Headers.ContentEncoding.Count != 0 ||
+            (!string.IsNullOrEmpty(charset) &&
+             !string.Equals(charset, "utf-8", StringComparison.OrdinalIgnoreCase)))
         {
             throw new CareOperationsTransportException("care_operations_response_invalid");
         }
@@ -324,7 +365,8 @@ public sealed class LoopbackCareOperationsSource :
         HttpContent content,
         CancellationToken cancellationToken)
     {
-        if (content.Headers.ContentLength is > MaximumResponseBytes)
+        if (content.Headers.ContentLength is long contentLength &&
+            (contentLength < 0 || contentLength > MaximumResponseBytes))
         {
             throw new CareOperationsTransportException("care_operations_response_invalid");
         }
@@ -354,17 +396,18 @@ public sealed class LoopbackCareOperationsSource :
         }
     }
 
-    private static string ReadErrorCode(ReadOnlySpan<byte> body)
+    private static string ReadErrorCode(byte[] body)
     {
         try
         {
-            var error = JsonSerializer.Deserialize<ErrorResponse>(body, JsonOptions);
+            var error = Deserialize<ErrorResponse>(body);
             return error?.Code is { Length: > 0 and <= 128 } code &&
                    code.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-')
                 ? code
                 : "care_operations_rejected";
         }
-        catch (JsonException)
+        catch (Exception exception) when (
+            exception is JsonException or CareOperationsTransportException)
         {
             return "care_operations_rejected";
         }
