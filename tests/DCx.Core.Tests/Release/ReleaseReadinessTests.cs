@@ -60,6 +60,9 @@ public sealed class ReleaseReadinessTests
         Assert.Equal(7, result.CriticalAndMajorIssuesTriaged);
         Assert.Equal(7, result.BlockingCriticalAndMajorIssues);
         Assert.Contains(result.Issues, issue => issue.Id == "p10-ccb-sandbox");
+        var p12 = Assert.Single(result.Issues, issue => issue.Id == "p12-live-acceptance");
+        Assert.Contains("URL-to-fillable-or-flattened-PDF", p12.NextAction, StringComparison.Ordinal);
+        Assert.Contains("formula/table/date/currency", p12.NextAction, StringComparison.Ordinal);
         var paypal = Assert.Single(result.Issues, issue => issue.Id == "p11-paypal");
         Assert.Contains("blocked-event closure/requeue", paypal.NextAction, StringComparison.Ordinal);
         Assert.Contains("external notification and escalation", paypal.NextAction, StringComparison.Ordinal);
