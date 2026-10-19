@@ -540,6 +540,28 @@ try {
     $exportPdf = Require-ById $wizard "ExportPdfButton" "The tagged flattened PDF export action was not exposed."
     $pdfExport = Join-Path $exportRoot "scanned-source-accessible.pdf"
     [IO.File]::WriteAllText($pdfExport, "prior export placeholder")
+    $downloadRoot = Join-Path $dataRoot "temporary-pdf-downloads"
+    $downloadedSources = @(
+        Get-ChildItem -LiteralPath $downloadRoot -Recurse -File -Filter "*.pdf" -Force -ErrorAction Stop
+    )
+    if ($downloadedSources.Count -ne 1) {
+        throw "The URL fixture did not retain exactly one operation-private source for review."
+    }
+    $downloadedSource = $downloadedSources[0].FullName
+    [IO.File]::AppendAllText($downloadedSource, "changed-after-review")
+    $exportPdf.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $wizardStatus.Current.Name -eq "Flattened PDF export failed safely. An existing export was not replaced."
+    } "A changed source PDF was not denied after OCR review." 100
+    if ([IO.File]::ReadAllText($pdfExport) -ne "prior export placeholder") {
+        throw "Changed-source denial replaced the prior PDF destination."
+    }
+    [IO.File]::Copy($pdfFixture, $downloadedSource, $true)
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $downloadedSource).Hash -ne
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $pdfFixture).Hash) {
+        throw "The exact reviewed PDF fixture could not be restored after the mutation test."
+    }
+    $null = Wait-For { $exportPdf.Current.IsEnabled } "The PDF export action did not recover after changed-source denial."
     $exportPdf.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For {
         if (-not (Test-Path -LiteralPath $pdfExport -PathType Leaf) -or
@@ -603,7 +625,6 @@ try {
     $null = Wait-For {
         $null -eq (Find-WindowByProcessAndId $process.Id "ScannedPdfWizardWindow")
     } "The scanned-PDF wizard did not close after export validation."
-    $downloadRoot = Join-Path $dataRoot "temporary-pdf-downloads"
     if ((Test-Path -LiteralPath $downloadRoot -PathType Container) -and
         @(Get-ChildItem -LiteralPath $downloadRoot -Force).Count -ne 0) {
         throw "The private URL-downloaded PDF survived wizard closure."
@@ -641,6 +662,7 @@ try {
         flattened_pdf_extracted_words = [int]$pdfInspection.word_count
         flattened_pdf_coordinate_validation = $true
         flattened_pdf_source_raster_aspect_preserved = $true
+        flattened_pdf_changed_source_denied = $true
         scanned_pdf_url_private_temporary_cleanup = $true
         local_vlm_cold_milliseconds = $localDescriptionClock.ElapsedMilliseconds
         retained_model_web_video_milliseconds = $webDescriptionClock.ElapsedMilliseconds
