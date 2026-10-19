@@ -760,6 +760,7 @@ try {
         @($controlledUpdateEvidence.distinct_access_keys).Count -ne 8 -or
         @($controlledUpdateEvidence.distinct_access_keys | Select-Object -Unique).Count -ne 8 -or
         -not $controlledUpdateEvidence.approval_initially_unchecked -or
+        -not $controlledUpdateEvidence.denial_invocations_originated_with_keyboard_focus -or
         -not $controlledUpdateEvidence.unapproved_stage_denied_before_storage -or
         -not $controlledUpdateEvidence.approval_reset_and_replay_denied -or
         -not $controlledUpdateEvidence.activation_review_approval_initially_unchecked -or
@@ -860,6 +861,7 @@ try {
         controlled_update_exact_review_digests = [int]$controlledUpdateEvidence.exact_review_digest_count
         controlled_update_access_keys = @($controlledUpdateEvidence.distinct_access_keys)
         controlled_update_approval_default_unchecked = [bool]$controlledUpdateEvidence.approval_initially_unchecked
+        controlled_update_denial_invocations_originated_with_keyboard_focus = [bool]$controlledUpdateEvidence.denial_invocations_originated_with_keyboard_focus
         controlled_update_unapproved_stage_denied_before_storage = [bool]$controlledUpdateEvidence.unapproved_stage_denied_before_storage
         controlled_update_approval_reset = [bool]$controlledUpdateEvidence.approval_reset_and_replay_denied
         controlled_update_activation_review_default_unchecked = [bool]$controlledUpdateEvidence.activation_review_approval_initially_unchecked

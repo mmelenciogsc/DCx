@@ -81,6 +81,14 @@ function Find-ById($root, [string]$automationId) {
     return $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
+function Invoke-WithKeyboardFocus($element, [string]$controlName) {
+    $element.SetFocus()
+    $null = Wait-For {
+        $element.Current.HasKeyboardFocus
+    } "$controlName did not receive keyboard focus before invocation."
+    $element.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+}
+
 function Start-Dcx([string[]]$arguments) {
     $start = [Diagnostics.ProcessStartInfo]::new($executable)
     $start.UseShellExecute = $false
@@ -204,7 +212,7 @@ try {
         throw "The controlled-update actions do not have eight distinct keyboard access keys."
     }
 
-    $stage.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Invoke-WithKeyboardFocus $stage "The staging action"
     $null = Wait-For {
         $status.Current.Name -eq "Staging denied. Review the exact update and check the separate staging approval first."
     } "Unchecked controlled-update staging did not fail closed."
@@ -273,7 +281,7 @@ try {
             Sort-Object FullName |
             ForEach-Object { "$($_.Name):$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)" })
 
-    $activationReview.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Invoke-WithKeyboardFocus $activationReview "The final staged-set integrity action"
     $null = Wait-For {
         $status.Current.Name -eq "Final integrity review denied. Check the separate review request first."
     } "Unchecked final staged-set integrity review did not fail closed."
@@ -340,7 +348,7 @@ try {
         throw "Approved final staged-set integrity review started a child process."
     }
 
-    $activationValidation.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Invoke-WithKeyboardFocus $activationValidation "The activation-transaction validation action"
     $null = Wait-For {
         $status.Current.Name -eq "Activation transaction validation denied. Check the separate synthetic validation approval first."
     } "Unchecked synthetic activation-transaction validation did not fail closed."
@@ -454,6 +462,7 @@ try {
         exact_review_digest_count = 3
         distinct_access_keys = $accessKeys
         approval_initially_unchecked = $true
+        denial_invocations_originated_with_keyboard_focus = $true
         unapproved_stage_denied_before_storage = $true
         approval_reset_and_replay_denied = $true
         activation_review_approval_initially_unchecked = $true
