@@ -18,6 +18,27 @@ These shortcuts follow common desktop-browser conventions and apply while the DC
 
 DCx does not register system-wide hotkeys. These keystrokes are handled only while its window is focused. Human JAWS/NVDA/Narrator conflict testing remains required.
 
+## Global knowledge and registry enrollment access keys
+
+These keys are window-local. Global knowledge never synchronizes automatically. Enrollment approval and removal confirmation both start unchecked.
+
+| Window | Shortcut | Action |
+|---|---|---|
+| Global knowledge | `Alt+R` | Refresh verified local replica status without contacting the registry. |
+| Global knowledge | `Alt+Y` | Explicitly synchronize from the exact enrolled registry. |
+| Global knowledge | `Alt+C` | Cancel active status/search/synchronization work. |
+| Global knowledge | `Alt+E` | Open registry enrollment. |
+| Global knowledge | `Alt+O` | Search the verified local replica offline. |
+| Registry enrollment | `Alt+B` | Browse for one local public trust-root file. |
+| Registry enrollment | `Alt+V` | Review the exact root fingerprint and canonical address without network access. |
+| Registry enrollment | `Alt+H` | Change the candidate and revoke its current review/approval. |
+| Registry enrollment | `Alt+A` | Check or clear approval for the exact reviewed candidate. |
+| Registry enrollment | `Alt+S` | Save the separately approved enrollment. |
+| Registry enrollment | `Alt+C` | Check or clear the separate removal acknowledgment. |
+| Registry enrollment | `Alt+L` | Clear enrollment authority after acknowledgment. |
+
+The trust-root file and registry-address labels also expose standard label access keys. Verify a production fingerprint independently. Saving, clearing, opening, refreshing and offline searching make no registry request. Human JAWS/NVDA/Narrator conflict testing remains required.
+
 ## Local dependency transfer access keys
 
 These window-local access keys are available only in **Local models**. Approval starts unchecked.

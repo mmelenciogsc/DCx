@@ -3,6 +3,8 @@
 - Status: Accepted for local/native validation; production registry provisioning remains blocked
 - Date: 2026-10-19
 
+ADR 0093 later adds the separately protected, explicitly reviewed per-user enrollment workflow anticipated here. An actual production root/origin/key/TLS ceremony and server deployment remain blocked.
+
 ## Context
 
 P09 already provided a signed, checkpointed, separately stored global CKB/CCB replica with offline search. It was usable only through Core APIs and automated tests. The Windows product offered no direct way for a keyboard or screen-reader user to distinguish an unconfigured registry from an empty verified replica, inspect the active signed state, search cached resources, or explicitly request synchronization.
@@ -19,7 +21,7 @@ Synchronization is never triggered by window creation, refresh, or search. It re
 
 The window exposes a heading-first focus target, assertive status, unique access keys for refresh/synchronize/cancel/search, bounded query input, human-readable CKB/CCB list-item automation names and read-only signed-catalog details. A sealed startup fixture requires both a command-line flag and a data-root-contained environment gate. It generates only synthetic keys/resources, uses an in-memory transport and opens no socket.
 
-Production bootstrap remains intentionally absent. A future milestone must bind the exact trust root and HTTPS registry origin to signed product configuration or a separately protected, explicitly reviewed enrollment workflow before the normal product can construct a configured source.
+This milestone intentionally included no production bootstrap. ADR 0093 subsequently binds the exact trust root and HTTPS registry origin through a separately protected, explicitly reviewed enrollment workflow before normal product composition.
 
 ## Validation
 
@@ -32,7 +34,7 @@ The P09 aggregate passes 19/19 plus native UIA. The full Windows suite passes 58
 ## Consequences and residual risk
 
 - Users can inspect and search an already configured verified replica without network access or private-store crossover.
-- Configuration absence is truthful and fail closed, but the normal build cannot yet enroll or discover the production registry.
+- Configuration absence is truthful and fail closed. ADR 0093 adds explicit enrollment, but no actual production registry authority has been provisioned.
 - The synthetic fixture proves product/UI composition, not production trust bootstrap, TLS identity, server availability or content quality.
 - Automated UIA is not human JAWS, NVDA or Narrator acceptance.
 - Docker/Compose execution, production key custody, malicious same-user isolation and hardware-backed monotonicity remain P09 blockers.

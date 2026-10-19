@@ -1,7 +1,7 @@
 # P09 — Global registry and synchronization
 
 - Status: BLOCKED (native process/HTTP simulation passes; required Docker Compose execution unavailable)
-- Partial implementation commits: `1be3f9e`, `b1608cd`, `9123a81`, `4278601`, `7df8c0a`, `0a2dab8`, `6239834`; read-only environment audit `8b94159`
+- Partial implementation commits: `1be3f9e`, `b1608cd`, `9123a81`, `4278601`, `7df8c0a`, `0a2dab8`, `6239834`, `65d9718`; read-only environment audit `8b94159`
 - Documentation commit: recorded by the commit containing this file
 
 A bounded read-only SSH capability audit was added later; no deployment, remote write, container start, service change or privileged action was attempted.
@@ -28,7 +28,11 @@ A bounded read-only SSH capability audit was added later; no deployment, remote 
 - Every replica-open check and public status, policy, sync, rollback, search and lazy-artifact operation now takes one replica-root-scoped lease. A canonical-root process gate serializes client instances, while a persistent regular no-share lock file serializes cooperating processes without a delete/recreate release race. Contention is cancellable and bounded; unsafe linked lock files fail closed without modifying their target.
 - The native shell now exposes a modeless, keyboard/UIA-accessible Global knowledge window. It distinguishes unconfigured state from an empty verified generation, shows active release/trust-policy metadata, searches only the separate local replica and never synchronizes automatically.
 - Explicit access-keyed synchronization uses the existing signature/chain/atomic-activation path. Search is capped at 512 characters and 20 displayed records, rejects non-whitespace controls before storage work and exposes human-readable CKB/CCB item names plus read-only catalog metadata.
-- A dual-gated synthetic startup fixture composes the real window, replica client and an in-memory signed release without a socket. Normal startup remains unavailable until an approved production trust-root/origin provisioning design exists.
+- Normal startup now offers a separate accessible enrollment window for one exact bounded local P-256 SubjectPublicKeyInfo trust root and one canonical HTTPS registry origin. Literal-loopback HTTP remains validation-only. Review displays the base file name, byte count, exact SHA-256, canonical address and UTC time without contacting the registry.
+- Approval begins disabled and unchecked, expires after 30 minutes, and is invalidated by any candidate change. The strict versioned record is stored only in current-user Windows Credential Manager. Replacement repeats review/approval; removal has a separate initially unchecked acknowledgment and does not delete cached generations.
+- Normal source composition creates no storage or HTTP handler while unenrolled. An enrolled source opens the digest-namespaced replica offline; only explicit synchronization can use the exact origin through a no-redirect/no-cookie/no-proxy/no-decompression 30-second client. Enrollment changes disable the old open source until the user closes and reopens Global knowledge.
+- Malformed protected enrollment fails closed into the same review/clear workflow. No root, endpoint or authoritative state is inferred. Source and network lifetimes are disposed with the window, and concurrent open attempts are suppressed.
+- Separate dual-gated fixtures compose the real signed-replica window and the exact enrollment UI. The enrollment fixture uses an isolated in-process store, never touches the user's real credential and opens no socket.
 
 ## Reproduction
 
@@ -41,8 +45,8 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 ## Measured result
 
 - Locked restore and native Release build passed with 0 warnings/errors.
-- P09 exact filtered tests: passed 19, failed 0, skipped 0; about 1 second, with exact counters parsed from retained TRX.
-- Current full suite: passed 589, failed 0, skipped 0; about 19 seconds.
+- P09 exact filtered tests: passed 25, failed 0, skipped 0; about 1 second, with exact counters parsed from retained TRX.
+- Current full suite: passed 595, failed 0, skipped 0; about 19 seconds.
 - A real child Kestrel process served three chained trust-policy revisions and a signed SQLite-backed release over loopback HTTP; a fresh production client transport caught up all revisions, synchronized and searched it.
 - Two distinct client roots synchronized the same chain; the P08 private sentinel remained present and absent from global results.
 - Wrong-key release activation was rejected with no active pointer.
@@ -56,8 +60,11 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - Hostile filesystem fixtures rejected linked application/server ancestors, filesystem roots, swapped staging/artifact directories, linked active-pointer/database files and digest-path metadata substitution without writing through the links. A P-384 server key was rejected before repository use.
 - Two client objects sharing one replica serialized a deliberately blocked release transfer. The first applied sequence 1; the second then reported already current, cancellation while queued was prompt, no partial remained, and later access succeeded. A separately held no-share file handle proved cross-process-style contention/cancellation/recovery. A linked operation-lock fixture was rejected without changing its external target.
 - Native UIA started from release 0, invoked one explicit signed synchronization, exposed release 1 and two resources, returned one exact CCB from offline search, read its metadata, reported zero network requests/private collections and observed zero fixture sockets. The normal main-shell route kept search/sync disabled and announced that no remote or empty-catalog state was inferred.
+- Enrollment tests rejected remote HTTP, P-384, linked, malformed, digest-conflicting and noncanonical candidates. A unique-target real Windows Credential Manager round trip required approval, rejected a stale review, replaced one exact root/origin and cleared idempotently.
+- Source-composition tests proved unconfigured open creates neither storage nor a network handler. Configured open/status/search issued zero requests; explicit synchronization issued the first request to the exact enrolled origin, and close disposed its HTTP lifetime.
+- Enrollment UIA proved heading-first focus; seven unique access keys; initially disabled/unchecked approval; exact P-256 fingerprint/address review; full-path minimization; review revocation on candidate change; explicit save/remove interlocks; zero sockets; the production Credential Manager/HTTPS boundary; and focus return after close. The unconfigured shell used an isolated store, so the gate could not read or overwrite real enrollment.
 - The first UIA attempt exposed a CLR type name instead of the resource label. `GlobalResourceListItem.ToString()` now returns the human-readable display string; the unchanged exact assertion passed afterward.
-- Latest local evidence: `artifacts/test-results/p09-b1596081fb184e35a47e4502a0182fb5/` containing `p09-global-knowledge.trx`, `storage-forecast.json` and `global-knowledge-uia.json`, generated from implementation commit `6239834`; full-suite TRX: `artifacts/test-results/p00-tests.trx`; server capability evidence: `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` (generated and intentionally not committed).
+- Latest local evidence: `artifacts/test-results/p09-f1f931e9e77f4895a560a29904df8954/` containing `p09-global-knowledge.trx`, `storage-forecast.json` and `global-knowledge-uia.json`, generated from implementation commit `65d9718`; full-suite TRX: `artifacts/test-results/p00-tests.trx`; server capability evidence: `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` (generated and intentionally not committed).
 
 ## Measured storage/bandwidth fixture
 
@@ -75,17 +82,17 @@ Artifact storage and transfer must add exact signed artifact sizes. Artifacts ar
 
 ## Changed files in the latest milestone
 
-- Provider-neutral offline/status/sync view contract and bounded query admission: `src/DCx.Core/GlobalKnowledge/GlobalKnowledgeViewSource.cs`, `src/DCx.Core/GlobalKnowledge/GlobalReplicaClient.cs`.
-- Accessible product surface, main-shell entry and sealed composition fixture: `src/DCx.Desktop/GlobalKnowledgeWindow.xaml`, `src/DCx.Desktop/GlobalKnowledgeWindow.xaml.cs`, `src/DCx.Desktop/MainWindow.xaml`, `src/DCx.Desktop/MainWindow.xaml.cs`, `src/DCx.Desktop/App.xaml.cs`.
-- Source and hostile-input tests plus native UIA gate: `tests/DCx.Core.Tests/GlobalKnowledge/GlobalKnowledgeViewSourceTests.cs`, `scripts/validate-p09-global-ui.ps1`, `scripts/validate-p09.ps1`.
-- Decision, security/privacy boundary and human checklist: `docs/architecture/adr/0092-offline-first-accessible-global-replica.md`, `docs/security/THREAT_MODEL.md`, `docs/privacy/PRIVACY_MODEL.md`, `docs/accessibility/P09_GLOBAL_KNOWLEDGE_CHECKLIST.md`, `docs/DECISIONS.md`.
+- Protected enrollment record/reviewer/store, exact endpoint policy and offline-first source composition: `src/DCx.Core/GlobalKnowledge/GlobalRegistryEnrollment.cs`, `src/DCx.Core/GlobalKnowledge/GlobalKnowledgeSourceFactory.cs`, `src/DCx.Core/GlobalKnowledge/HttpGlobalRegistryTransport.cs`, `src/DCx.Core/GlobalKnowledge/GlobalKnowledgeViewSource.cs`.
+- Accessible review/approve/replace/clear UI, normal shell composition and isolated fixtures: `src/DCx.Desktop/GlobalRegistryEnrollmentWindow.xaml`, `src/DCx.Desktop/GlobalRegistryEnrollmentWindow.xaml.cs`, `src/DCx.Desktop/GlobalKnowledgeWindow.xaml`, `src/DCx.Desktop/GlobalKnowledgeWindow.xaml.cs`, `src/DCx.Desktop/MainWindow.xaml.cs`, `src/DCx.Desktop/App.xaml.cs`.
+- Exact-root/vault/source tests and expanded native UIA gate: `tests/DCx.Core.Tests/GlobalKnowledge/GlobalRegistryEnrollmentTests.cs`, `scripts/validate-p09-global-ui.ps1`.
+- Decision, security/privacy boundary and human checklist: `docs/architecture/adr/0093-protected-explicit-global-registry-enrollment.md`, `docs/security/THREAT_MODEL.md`, `docs/privacy/PRIVACY_MODEL.md`, `docs/accessibility/P09_GLOBAL_KNOWLEDGE_CHECKLIST.md`, `docs/DECISIONS.md`.
 
 ## Blocker and limits
 
 - Read-only evidence from `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` confirms the owner's server is Ubuntu 24.04 x64 with Docker 29.5.2, Compose 5.1.4 and an active daemon. The authenticated UID 1000 is not in the `docker` group, so daemon access is denied. No remote DCx deployment exists.
 - Consequently, `server/docker-compose.simulation.yml` remains unexecuted and P09 is not complete. Granting Docker/sudo access or deploying/building on the real server is privileged/external mutation and requires explicit owner approval. After approval, validate Compose configuration, record image digests, run the same two-client gate against the container, and update this phase.
 - Simulation signing keys and the offline root are ephemeral fixture material. The per-user Windows anchor mitigates replica-file rollback but is deletable by same-user code and is not TPM/hardware monotonic storage. Production offline-root custody/ceremony, anchor loss/recovery, TLS identity, backup/restore, monitoring and external security review are not implemented.
-- The normal window is deliberately unconfigured. Production must bind one exact trust root and HTTPS registry origin through signed product configuration or a separately protected explicit enrollment design; the synthetic fixture is not bootstrap or deployment evidence.
+- The product can now bind one exact user-reviewed root/origin, but no production root, origin, certificate, fingerprint-verification ceremony or server exists. Enrollment is not deployment evidence or permission to use a simulation key in production.
 - The replica operation lease closes cooperating client/process mutation races on one replica. Reparse and exact-path checks still cannot make every separate check/open operation race-free against malicious code already running as the same user. Production requires a dedicated least-privilege identity plus approved ACL, mount, secret-file and container policies.
 - The service exposes read-only catalog endpoints by default. P10 adds a separate default-off, loopback/container simulation contribution API; this is not authorization or infrastructure for production exposure.
 - Real Ubuntu deployment remains forbidden without explicit owner approval.
