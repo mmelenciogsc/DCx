@@ -38,6 +38,12 @@ Local aggregate recording defaults off. The privacy group states the exact notic
 
 These controls do not connect a product event source, export, transport, pilot enrollment or production activation. Do not add any of those paths without approved privacy/retention policy, explicit scope-specific consent, security review, human JAWS/NVDA/Narrator acceptance and a revised P14 gate.
 
+## Global knowledge development surface
+
+Open **Global knowledge** from the main window to inspect the separate signed global replica. Normal development startup currently reports that no trusted registry is configured; search and synchronization remain disabled, and that state must not be described as an empty authoritative catalog. No synchronization occurs on open, refresh or search.
+
+`scripts\validate-p09.ps1` runs a separately gated synthetic native fixture. It activates one ephemeral-key-signed in-memory release only after the UIA driver invokes **Synchronize**, searches the local replica, verifies human-readable CKB/CCB metadata and proves zero fixture sockets/private collections. The fixture is not registry enrollment or production trust. Do not wire an environment-selected root/origin into normal startup. Production needs a signed product configuration or separately protected explicit enrollment design, server deployment approval and the remaining P09 security gates.
+
 ## Already-installed local models
 
 The P06 compatibility/benchmark gate still observes an existing Windows-native Ollama service at `http://localhost:11434/`, but normal desktop vision never uses that shared origin. DCx never acquires, installs or retags a dependency automatically. In **Local models**, first choose the already-installed signed `ollama.exe`, direct local model folder and dependency profile; review the exact tree/signature/license evidence; check the separate default-off runtime approval; and save it. The manager then starts a temporary PID-proven owned process only to read inventory. Select a unique model name ending in its matching SHA-256 digest, read its complete license text, check the model approval and choose the eligible vision or embedding role. Runtime, vision and embedding authority can be cleared independently without deleting source files.

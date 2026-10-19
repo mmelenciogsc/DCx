@@ -1,7 +1,7 @@
 # P09 — Global registry and synchronization
 
 - Status: BLOCKED (native process/HTTP simulation passes; required Docker Compose execution unavailable)
-- Partial implementation commits: `1be3f9e`, `b1608cd`, `9123a81`, `4278601`, `7df8c0a`, `0a2dab8`; read-only environment audit `8b94159`
+- Partial implementation commits: `1be3f9e`, `b1608cd`, `9123a81`, `4278601`, `7df8c0a`, `0a2dab8`, `6239834`; read-only environment audit `8b94159`
 - Documentation commit: recorded by the commit containing this file
 
 A bounded read-only SSH capability audit was added later; no deployment, remote write, container start, service change or privileged action was attempted.
@@ -26,20 +26,23 @@ A bounded read-only SSH capability audit was added later; no deployment, remote 
 - The protected floor applies to policy revisions rather than release sequences, preserving explicit rollback to a retained release only when that release remains valid under the current anchored policy.
 - Shared storage admission now rejects filesystem roots, network paths, reparse ancestors, swapped replica/server subdirectories and linked pointer/database/checkpoint/artifact files. Client operations recheck their complete layout. Authoritative artifact metadata must resolve to the exact digest-derived path, SQLite/WAL/shared-memory paths are admitted before use, and the externally supplied signing key must be one exact regular P-256 PKCS#8 file.
 - Every replica-open check and public status, policy, sync, rollback, search and lazy-artifact operation now takes one replica-root-scoped lease. A canonical-root process gate serializes client instances, while a persistent regular no-share lock file serializes cooperating processes without a delete/recreate release race. Contention is cancellable and bounded; unsafe linked lock files fail closed without modifying their target.
+- The native shell now exposes a modeless, keyboard/UIA-accessible Global knowledge window. It distinguishes unconfigured state from an empty verified generation, shows active release/trust-policy metadata, searches only the separate local replica and never synchronizes automatically.
+- Explicit access-keyed synchronization uses the existing signature/chain/atomic-activation path. Search is capped at 512 characters and 20 displayed records, rejects non-whitespace controls before storage work and exposes human-readable CKB/CCB item names plus read-only catalog metadata.
+- A dual-gated synthetic startup fixture composes the real window, replica client and an in-memory signed release without a socket. Normal startup remains unavailable until an approved production trust-root/origin provisioning design exists.
 
 ## Reproduction
 
 ```bash
 cd /mnt/d/DCx
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p09.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p09.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 ```
 
 ## Measured result
 
 - Locked restore and native Release build passed with 0 warnings/errors.
-- P09 exact filtered tests: passed 16, failed 0, skipped 0; about 1 second, with exact counters parsed from retained TRX.
-- Current full suite: passed 504, failed 0, skipped 0; about 11 seconds.
+- P09 exact filtered tests: passed 19, failed 0, skipped 0; about 1 second, with exact counters parsed from retained TRX.
+- Current full suite: passed 589, failed 0, skipped 0; about 19 seconds.
 - A real child Kestrel process served three chained trust-policy revisions and a signed SQLite-backed release over loopback HTTP; a fresh production client transport caught up all revisions, synchronized and searched it.
 - Two distinct client roots synchronized the same chain; the P08 private sentinel remained present and absent from global results.
 - Wrong-key release activation was rejected with no active pointer.
@@ -52,7 +55,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 - Publication retry used reordered equivalent changes and a later timestamp after repository reopen, returned the byte-identical original descriptor and kept the chain at sequence 1; a changed request under the same operation ID was rejected.
 - Hostile filesystem fixtures rejected linked application/server ancestors, filesystem roots, swapped staging/artifact directories, linked active-pointer/database files and digest-path metadata substitution without writing through the links. A P-384 server key was rejected before repository use.
 - Two client objects sharing one replica serialized a deliberately blocked release transfer. The first applied sequence 1; the second then reported already current, cancellation while queued was prompt, no partial remained, and later access succeeded. A separately held no-share file handle proved cross-process-style contention/cancellation/recovery. A linked operation-lock fixture was rejected without changing its external target.
-- Latest local evidence: `artifacts/test-results/p09-43fdebaf4b41405faf901775b711c644/` containing `p09-global-knowledge.trx` and `storage-forecast.json`, generated from exact committed source `0a2dab8`; server capability evidence: `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` (generated and intentionally not committed).
+- Native UIA started from release 0, invoked one explicit signed synchronization, exposed release 1 and two resources, returned one exact CCB from offline search, read its metadata, reported zero network requests/private collections and observed zero fixture sockets. The normal main-shell route kept search/sync disabled and announced that no remote or empty-catalog state was inferred.
+- The first UIA attempt exposed a CLR type name instead of the resource label. `GlobalResourceListItem.ToString()` now returns the human-readable display string; the unchanged exact assertion passed afterward.
+- Latest local evidence: `artifacts/test-results/p09-b1596081fb184e35a47e4502a0182fb5/` containing `p09-global-knowledge.trx`, `storage-forecast.json` and `global-knowledge-uia.json`, generated from implementation commit `6239834`; full-suite TRX: `artifacts/test-results/p00-tests.trx`; server capability evidence: `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` (generated and intentionally not committed).
 
 ## Measured storage/bandwidth fixture
 
@@ -70,19 +75,18 @@ Artifact storage and transfer must add exact signed artifact sizes. Artifacts ar
 
 ## Changed files in the latest milestone
 
-- Shared-replica lease and complete client wiring: `src/DCx.Core/GlobalKnowledge/GlobalReplicaOperationLease.cs`, `src/DCx.Core/GlobalKnowledge/GlobalReplicaClient.cs`.
-- Same-replica serialization, queued cancellation, external-handle recovery and linked-lock denial: `tests/DCx.Core.Tests/GlobalKnowledge/GlobalReplicaTests.cs`.
-- Mandatory exact-counter gate and decision: `scripts/validate-p09.ps1`, `docs/architecture/adr/0073-serialize-shared-global-replica-operations.md`.
-- Protected store and default wiring: `src/DCx.Core/GlobalKnowledge/GlobalTrustPolicyAnchorStore.cs`, `src/DCx.Core/GlobalKnowledge/GlobalReplicaClient.cs`.
-- File rollback, crash-window, strict-state, real-vault and trust-root-isolation tests: `tests/DCx.Core.Tests/GlobalKnowledge/GlobalReplicaTests.cs`, `tests/DCx.Core.Tests/GlobalKnowledge/GlobalTrustPolicyAnchorStoreTests.cs`, `tests/DCx.Core.Tests/Testing/TestGlobalTrustPolicyAnchorStore.cs`.
-- Explicit test anchor injection and exact-counter gate: contribution/global E2E fixtures, `tests/DCx.Core.Tests/GlobalUsings.cs`, `scripts/validate-p09.ps1`.
-- Cross-platform storage confinement and hostile fixtures: `src/DCx.Core/GlobalKnowledge/GlobalStoragePathGuard.cs`, `src/DCx.Core/GlobalKnowledge/GlobalReplicaClient.cs`, `server/DCx.GlobalService/GlobalRegistryRepository.cs`, `server/DCx.GlobalService/Program.cs`, `tests/DCx.Core.Tests/GlobalKnowledge/GlobalReplicaTests.cs`, `docs/architecture/adr/0053-confined-global-storage-paths.md`.
+- Provider-neutral offline/status/sync view contract and bounded query admission: `src/DCx.Core/GlobalKnowledge/GlobalKnowledgeViewSource.cs`, `src/DCx.Core/GlobalKnowledge/GlobalReplicaClient.cs`.
+- Accessible product surface, main-shell entry and sealed composition fixture: `src/DCx.Desktop/GlobalKnowledgeWindow.xaml`, `src/DCx.Desktop/GlobalKnowledgeWindow.xaml.cs`, `src/DCx.Desktop/MainWindow.xaml`, `src/DCx.Desktop/MainWindow.xaml.cs`, `src/DCx.Desktop/App.xaml.cs`.
+- Source and hostile-input tests plus native UIA gate: `tests/DCx.Core.Tests/GlobalKnowledge/GlobalKnowledgeViewSourceTests.cs`, `scripts/validate-p09-global-ui.ps1`, `scripts/validate-p09.ps1`.
+- Decision, security/privacy boundary and human checklist: `docs/architecture/adr/0092-offline-first-accessible-global-replica.md`, `docs/security/THREAT_MODEL.md`, `docs/privacy/PRIVACY_MODEL.md`, `docs/accessibility/P09_GLOBAL_KNOWLEDGE_CHECKLIST.md`, `docs/DECISIONS.md`.
 
 ## Blocker and limits
 
 - Read-only evidence from `artifacts/test-results/ubuntu-audit-2e50bf228e12483585cea19ebf05462a/` confirms the owner's server is Ubuntu 24.04 x64 with Docker 29.5.2, Compose 5.1.4 and an active daemon. The authenticated UID 1000 is not in the `docker` group, so daemon access is denied. No remote DCx deployment exists.
 - Consequently, `server/docker-compose.simulation.yml` remains unexecuted and P09 is not complete. Granting Docker/sudo access or deploying/building on the real server is privileged/external mutation and requires explicit owner approval. After approval, validate Compose configuration, record image digests, run the same two-client gate against the container, and update this phase.
 - Simulation signing keys and the offline root are ephemeral fixture material. The per-user Windows anchor mitigates replica-file rollback but is deletable by same-user code and is not TPM/hardware monotonic storage. Production offline-root custody/ceremony, anchor loss/recovery, TLS identity, backup/restore, monitoring and external security review are not implemented.
+- The normal window is deliberately unconfigured. Production must bind one exact trust root and HTTPS registry origin through signed product configuration or a separately protected explicit enrollment design; the synthetic fixture is not bootstrap or deployment evidence.
 - The replica operation lease closes cooperating client/process mutation races on one replica. Reparse and exact-path checks still cannot make every separate check/open operation race-free against malicious code already running as the same user. Production requires a dedicated least-privilege identity plus approved ACL, mount, secret-file and container policies.
 - The service exposes read-only catalog endpoints by default. P10 adds a separate default-off, loopback/container simulation contribution API; this is not authorization or infrastructure for production exposure.
 - Real Ubuntu deployment remains forbidden without explicit owner approval.
+- Human JAWS/NVDA/Narrator acceptance for the new window remains unverified; automated UIA does not satisfy that gate.
