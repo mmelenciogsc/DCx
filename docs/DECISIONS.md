@@ -118,5 +118,6 @@
 | [0114](architecture/adr/0114-exercise-activation-transaction-with-zero-authority-ui.md) | Exercise the activation transaction through a zero-authority accessible workflow | Accepted for synthetic validation; package activation remains unavailable and blocked | 2026-10-19 |
 | [0115](architecture/adr/0115-validate-positive-windows-signature-probe-without-package-acceptance.md) | Validate the real Windows signature probe's positive path without accepting a package | Accepted for read-only adapter evidence; signed DCx package acceptance remains blocked | 2026-10-20 |
 | [0116](architecture/adr/0116-require-explicit-post-registration-lifecycle.md) | Require real registration results to declare DCx close and relaunch | Accepted for the lifecycle contract foundation; close/relaunch execution remains unavailable and blocked | 2026-10-20 |
+| [0117](architecture/adr/0117-constrain-uninstall-to-the-calling-package.md) | Constrain current-user uninstall to the calling package | Accepted for an internal uncomposed adapter; actual uninstall remains blocked | 2026-10-20 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
