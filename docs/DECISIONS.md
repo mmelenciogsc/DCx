@@ -112,5 +112,6 @@
 | [0108](architecture/adr/0108-subject-bound-local-failed-payout-notices.md) | Project failed-payout decisions as subject-bound local notices | Accepted for controlled local validation only; external delivery and production identity remain blocked | 2026-10-19 |
 | [0109](architecture/adr/0109-review-controlled-updates-before-inert-staging.md) | Review controlled updates before inert staging | Accepted for local inert staging; production update service and activation remain blocked | 2026-10-19 |
 | [0110](architecture/adr/0110-atomically-publish-controlled-update-sets.md) | Atomically publish complete controlled-update sets | Accepted for local inert staging; activation remains absent and blocked | 2026-10-19 |
+| [0111](architecture/adr/0111-revalidate-staged-update-without-activation-authority.md) | Revalidate the final staged update without activation authority | Accepted for a read-only local readiness review; installation and activation remain absent and blocked | 2026-10-19 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
