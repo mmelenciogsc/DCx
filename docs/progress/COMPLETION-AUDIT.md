@@ -34,14 +34,14 @@ Authoritative inputs: `DCx_Codex_Handoff_Kit/README.md`, `DCX_PRODUCT_ARCHITECTU
 
 ## Current exact-source checkpoint
 
-- Product implementation source: `4acac23`; downstream P13/P14 regeneration is pending at this documentation checkpoint.
+- Product implementation source: `4acac23`; current downstream exact validation source: `7962a6f`.
 - Full Windows suite: 616 passed, 0 failed, 0 skipped; zero build warnings/errors.
 - P09: `artifacts/test-results/p09-e01d78b05a3b4529adc2cfca32f531bc/`; 41/41 plus native UIA for strict bounded HTTP admission, exact P-256 root/origin review, protected-approval/remove interlocks, focus return, heading focus, exact access keys, explicit signed sync, offline CKB/CCB search, readable result metadata, zero fixture sockets/private collections and unconfigured default denial.
 - P10: `artifacts/test-results/p10-153fbaee50d2401b8e7a50f4a3cab757/`; 53/53 plus native UIA and hostile sandbox for strict transport admission, default-off item approvals, quarantine/review/withdrawal and receipt race controls.
 - P06: `artifacts/test-results/p06-49d6bc8f87874c83a051bd1b009b1897/`; 230/230, 17 owned-runtime contracts, eight hardware contracts, five mandatory sequencing contracts and eight runtime-resource/residency/unload contracts, with real installed-GPU vision and retained follow-up. The exact dependency plan remains untransferred; no dependency was downloaded or installed.
 - P11: `artifacts/test-results/p11-d511791678374e39932b500a77d4bbcd/`; 127/127 plus generated and authenticated-ledger native UIA for strict local CARE request/response admission, exact role/subject binding and zero provider/production actions.
 - P12: `artifacts/test-results/p12-1ac53524cc9644e294d7d660736b2025/`; nine composed fixtures and zero production actions. Focused Facebook/XLSX evidence: `p12-integrations-294bb5ae0fee4aafa9e23af092de14fb/`; 17/17 selected tests, including 15 Facebook policy cases, plus native UIA.
-- P13: `artifacts/test-results/p13-d15e33cf7e0042fdba2ea218d6a77b1b/` at exact validation source `d6a91d6`; 23/23 reliability, 21/21 trust, Defender clean, NuGet advisories 0, reproducible ZIP/MSIX and unsigned trust denied.
-- P14: `artifacts/test-results/p14-584d53fbbd704f0db14be71389e2a35c/` at exact validation source `d6a91d6`; 11/11 plus retained native local consent enable/withdrawal/focus/access-key UIA evidence, zero event sources/transfers, seven blockers, `NO_GO`, activation false.
+- P13: `artifacts/test-results/p13-bcf2b51900424e31b3e4bcb56b502989/` at exact validation source `7962a6f`; 23/23 reliability, 21/21 trust, Defender clean, NuGet advisories 0, reproducible ZIP/MSIX and unsigned trust denied.
+- P14: `artifacts/test-results/p14-39c3cef4a7e146da990921db161b3b10/` at exact validation source `7962a6f`; 11/11 plus retained native local consent enable/withdrawal/focus/access-key UIA evidence, zero event sources/transfers, seven blockers, `NO_GO`, activation false.
 
 Evidence directories are ignored build artifacts and are intentionally not committed. The phase records are the durable reproduction index.
