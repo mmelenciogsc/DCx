@@ -18,11 +18,12 @@ $scenarios = @(
 )
 $results = @()
 
-$sourceCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
+$safeRepoRoot = $repoRoot.Replace('\', '/')
+$sourceCommit = (& git -c "safe.directory=$safeRepoRoot" -C $repoRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') {
     throw "The P12 gate could not bind evidence to a source commit."
 }
-$initialTrackedState = @(& git -C $repoRoot status --porcelain --untracked-files=no)
+$initialTrackedState = @(& git -c "safe.directory=$safeRepoRoot" -C $repoRoot status --porcelain --untracked-files=no)
 if ($LASTEXITCODE -ne 0 -or $initialTrackedState.Count -ne 0) {
     throw "The P12 aggregate requires a clean tracked worktree."
 }
@@ -41,8 +42,8 @@ foreach ($scenario in $scenarios) {
     }
 }
 
-$finalSourceCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
-$finalTrackedState = @(& git -C $repoRoot status --porcelain --untracked-files=no)
+$finalSourceCommit = (& git -c "safe.directory=$safeRepoRoot" -C $repoRoot rev-parse HEAD).Trim()
+$finalTrackedState = @(& git -c "safe.directory=$safeRepoRoot" -C $repoRoot status --porcelain --untracked-files=no)
 if ($LASTEXITCODE -ne 0 -or $finalSourceCommit -ne $sourceCommit -or $finalTrackedState.Count -ne 0) {
     throw "The P12 source changed while aggregate validation was running."
 }

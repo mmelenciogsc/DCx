@@ -531,11 +531,12 @@ try {
     $docxText = $documentText.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
     if ($docxText -notmatch "(?i)DCX" -or $docxText -notmatch "42") { throw "The structured DOCX did not round-trip its OCR text." }
 
-    $sourceCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
+    $safeRepoRoot = $repoRoot.Replace('\', '/')
+    $sourceCommit = (& git -c "safe.directory=$safeRepoRoot" -C $repoRoot rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') {
         throw "The P07 gate could not bind evidence to a source commit."
     }
-    $worktreeState = @(& git -C $repoRoot status --porcelain --untracked-files=no)
+    $worktreeState = @(& git -c "safe.directory=$safeRepoRoot" -C $repoRoot status --porcelain --untracked-files=no)
     if ($LASTEXITCODE -ne 0) { throw "The P07 gate could not inspect source worktree state." }
     $evidence = [ordered]@{
         captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
