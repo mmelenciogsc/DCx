@@ -1,6 +1,6 @@
 # P13 controlled-update accessibility checklist
 
-Automated Windows UIA evidence: PASS at implementation `c506bb7`, in `artifacts/test-results/p13-a43cd4b336f14798b43d2c1cbe768af8/controlled-update-ui/validation.json`.
+Automated Windows UIA evidence: PASS at exact validation source `13183fd`, in `artifacts/test-results/p13-5e3fa594c3c34a1eaf909ee49e894c63/controlled-update-ui/validation.json`.
 
 | Scenario | Automated UIA | Human JAWS/NVDA/Narrator |
 |---|---|---|
@@ -12,6 +12,7 @@ Automated Windows UIA evidence: PASS at implementation `c506bb7`, in `artifacts/
 | Check requests no package and announces that nothing was staged or installed | Pass | Not run |
 | Unapproved staging is denied before storage and focus moves to approval | Pass | Not run |
 | Approved inert staging announces every zero-authority counter and moves focus to updated details | Pass | Not run |
+| Published staging contains one exact two-file directory and leaves no loose or incoming item | Pass | Not run |
 | Approval resets and stage replay remains disabled until a fresh check | Pass | Not run |
 | Normal product reports `not_configured`, makes zero requests and infers no update | Pass | Not run |
 
