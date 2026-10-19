@@ -18,6 +18,15 @@ $scenarios = @(
 )
 $results = @()
 
+$sourceCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') {
+    throw "The P12 gate could not bind evidence to a source commit."
+}
+$initialTrackedState = @(& git -C $repoRoot status --porcelain --untracked-files=no)
+if ($LASTEXITCODE -ne 0 -or $initialTrackedState.Count -ne 0) {
+    throw "The P12 aggregate requires a clean tracked worktree."
+}
+
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 foreach ($scenario in $scenarios) {
     $started = Get-Date
@@ -32,16 +41,26 @@ foreach ($scenario in $scenarios) {
     }
 }
 
+$finalSourceCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
+$finalTrackedState = @(& git -C $repoRoot status --porcelain --untracked-files=no)
+if ($LASTEXITCODE -ne 0 -or $finalSourceCommit -ne $sourceCommit -or $finalTrackedState.Count -ne 0) {
+    throw "The P12 source changed while aggregate validation was running."
+}
+
 $manifest = [ordered]@{
     captured_at_utc = (Get-Date).ToUniversalTime().ToString("O")
+    source_commit = $sourceCommit
+    source_tracked_worktree_clean = $true
     fixture_scenarios = $results
     blocked_scenarios = @(
         "live Facebook authenticated search and human acceptance",
-        "real QuickBooks sandbox OAuth and API retrieval",
+        "real QuickBooks sandbox OAuth/API retrieval and formula/table/date/currency conformance",
+        "URL download through the inaccessible-PDF wizard to a verified fillable or flattened saved PDF",
         "live YouTube provider playback/frame-Q&A and human acceptance",
         "real signed package installation and clean-VM acceptance",
         "Docker Compose global-service run",
-        "real PayPal sandbox subscription webhook and payout reconciliation"
+        "real PayPal sandbox subscription webhook and payout reconciliation",
+        "human JAWS, NVDA and Narrator acceptance"
     )
     production_actions = 0
 }
