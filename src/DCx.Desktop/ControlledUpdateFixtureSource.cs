@@ -104,6 +104,33 @@ internal sealed class ControlledUpdateFixtureSource : IControlledUpdateReviewSou
         return result;
     }
 
+    public async Task<ControlledUpdateActivationReadinessResult> PrepareActivationReadinessAsync(
+        ControlledUpdateReview review,
+        bool explicitlyApproved,
+        CancellationToken cancellationToken = default)
+    {
+        var readiness = await stager.PrepareActivationReadinessAsync(
+                review,
+                CurrentVersion,
+                stagingRoot,
+                Now.AddMinutes(1),
+                explicitlyApproved,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var result = new ControlledUpdateActivationReadinessResult(
+            readiness,
+            transport.ManifestRequests,
+            transport.PackageRequests,
+            NetworkRequests: 0,
+            InstallerProcessesStarted: 0,
+            ElevationRequests: 0,
+            ActivationAttempts: 0,
+            RestartAttempts: 0,
+            ProductionActions: 0);
+        ControlledUpdateReviewSourcePolicy.RequireActivationReadinessResult(review, result);
+        return result;
+    }
+
     private static string RequireEmptyStagingRoot(string path)
     {
         if (string.IsNullOrWhiteSpace(path))

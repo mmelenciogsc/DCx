@@ -17,6 +17,7 @@ public partial class ControlledUpdateWindow : Window
     private readonly ControlledUpdateSourceKind sourceKind;
     private readonly CancellationTokenSource lifetime = new();
     private ControlledUpdateReview? reviewedUpdate;
+    private ControlledUpdateReview? stagedUpdate;
     private bool closed;
 
     public ControlledUpdateWindow(
@@ -48,9 +49,13 @@ public partial class ControlledUpdateWindow : Window
     private async Task CheckAsync()
     {
         reviewedUpdate = null;
+        stagedUpdate = null;
         ApprovalBox.IsChecked = false;
         ApprovalBox.IsEnabled = false;
         StageButton.IsEnabled = false;
+        ActivationReviewApprovalBox.IsChecked = false;
+        ActivationReviewApprovalBox.IsEnabled = false;
+        ActivationReviewButton.IsEnabled = false;
         CheckButton.IsEnabled = false;
         SetStatus("Checking the configured controlled-update source. No package will be staged by this action.");
         try
@@ -124,6 +129,10 @@ public partial class ControlledUpdateWindow : Window
             if (closed) return;
             ApprovalBox.IsChecked = false;
             reviewedUpdate = null;
+            stagedUpdate = exactReview;
+            ActivationReviewApprovalBox.IsChecked = false;
+            ActivationReviewApprovalBox.IsEnabled = true;
+            ActivationReviewButton.IsEnabled = true;
             SetReview(
                 FormatReview(exactReview) + Environment.NewLine + Environment.NewLine +
                 $"Staged inertly after exact revalidation. Manifest requests {result.ManifestRequests}. " +
@@ -146,12 +155,84 @@ public partial class ControlledUpdateWindow : Window
         {
             ApprovalBox.IsChecked = false;
             reviewedUpdate = null;
+            stagedUpdate = null;
+            ActivationReviewApprovalBox.IsChecked = false;
+            ActivationReviewApprovalBox.IsEnabled = false;
+            ActivationReviewButton.IsEnabled = false;
             SetReview("Staging failed closed. Review the update again before retrying.");
             SetStatus("No package was admitted. No installation, elevation, activation, restart, or production action occurred.");
             ReviewDetails.Focus();
         }
         finally
         {
+            if (!closed) CheckButton.IsEnabled = true;
+        }
+    }
+
+    private async void OnActivationReviewClick(object sender, RoutedEventArgs e)
+    {
+        if (stagedUpdate is null)
+        {
+            SetStatus("Final integrity review denied. Stage and revalidate an exact update first.");
+            CheckButton.Focus();
+            return;
+        }
+
+        if (ActivationReviewApprovalBox.IsChecked != true)
+        {
+            SetStatus("Final integrity review denied. Check the separate review request first.");
+            ActivationReviewApprovalBox.Focus();
+            return;
+        }
+
+        var exactReview = stagedUpdate;
+        var stagedDetails = ReviewDetails.Text;
+        CheckButton.IsEnabled = false;
+        ActivationReviewApprovalBox.IsEnabled = false;
+        ActivationReviewButton.IsEnabled = false;
+        SetStatus("Reopening the exact staged set for a fresh, read-only integrity and trust review. No activation is permitted.");
+        try
+        {
+            var result = await source.PrepareActivationReadinessAsync(
+                exactReview,
+                explicitlyApproved: true,
+                lifetime.Token);
+            ControlledUpdateReviewSourcePolicy.RequireActivationReadinessResult(
+                exactReview,
+                result);
+            if (closed) return;
+            var readiness = result.Readiness;
+            SetReview(
+                stagedDetails + Environment.NewLine + Environment.NewLine +
+                $"Final staged-set integrity review complete at {readiness.RevalidatedUtc:O}.{Environment.NewLine}" +
+                $"Activation-readiness SHA-256: {readiness.ReadinessSha256}.{Environment.NewLine}" +
+                "Execution permitted no. " +
+                $"Manifest requests {result.ManifestRequests}. Package requests {result.PackageRequests}. " +
+                $"Network requests {result.NetworkRequests}. Installer processes {result.InstallerProcessesStarted}. " +
+                $"Elevation requests {result.ElevationRequests}. Activation attempts {result.ActivationAttempts}. " +
+                $"Restart attempts {result.RestartAttempts}. Production actions {result.ProductionActions}.");
+            SetStatus(
+                $"Version {readiness.Version} passed a fresh staged-set integrity review. Execution permitted no. " +
+                $"Network requests {result.NetworkRequests}. Installer processes {result.InstallerProcessesStarted}. " +
+                $"Elevation requests {result.ElevationRequests}. Activation attempts {result.ActivationAttempts}. " +
+                $"Restart attempts {result.RestartAttempts}. Production actions {result.ProductionActions}.");
+            ReviewDetails.Focus();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            SetReview("Final staged-set integrity review failed closed. Check and stage the update again before retrying.");
+            SetStatus("No activation readiness was admitted. No installation, elevation, activation, restart, or production action occurred.");
+            ReviewDetails.Focus();
+        }
+        finally
+        {
+            stagedUpdate = null;
+            ActivationReviewApprovalBox.IsChecked = false;
+            ActivationReviewApprovalBox.IsEnabled = false;
+            ActivationReviewButton.IsEnabled = false;
             if (!closed) CheckButton.IsEnabled = true;
         }
     }

@@ -24,12 +24,28 @@ public sealed record ControlledUpdateStageResult(
     int RestartAttempts,
     int ProductionActions);
 
+public sealed record ControlledUpdateActivationReadinessResult(
+    ControlledUpdateActivationReadiness Readiness,
+    int ManifestRequests,
+    int PackageRequests,
+    int NetworkRequests,
+    int InstallerProcessesStarted,
+    int ElevationRequests,
+    int ActivationAttempts,
+    int RestartAttempts,
+    int ProductionActions);
+
 public interface IControlledUpdateReviewSource
 {
     Task<ControlledUpdateSourceSnapshot> CheckAsync(
         CancellationToken cancellationToken = default);
 
     Task<ControlledUpdateStageResult> StageAsync(
+        ControlledUpdateReview review,
+        bool explicitlyApproved,
+        CancellationToken cancellationToken = default);
+
+    Task<ControlledUpdateActivationReadinessResult> PrepareActivationReadinessAsync(
         ControlledUpdateReview review,
         bool explicitlyApproved,
         CancellationToken cancellationToken = default);
@@ -102,6 +118,33 @@ public static class ControlledUpdateReviewSourcePolicy
             throw new ControlledUpdateException("update_stage_result_invalid");
         }
     }
+
+    public static void RequireActivationReadinessResult(
+        ControlledUpdateReview review,
+        ControlledUpdateActivationReadinessResult result)
+    {
+        ControlledUpdateReviewPolicy.Require(review);
+        ArgumentNullException.ThrowIfNull(result);
+        try
+        {
+            ControlledUpdateActivationReadinessPolicy.Require(review, result.Readiness);
+        }
+        catch (ControlledUpdateException)
+        {
+            throw new ControlledUpdateException("update_activation_readiness_result_invalid");
+        }
+
+        if (result.ManifestRequests is < 2 or > MaximumRequestCount ||
+            result.PackageRequests is < 1 or > MaximumRequestCount ||
+            result.NetworkRequests is < 0 or > MaximumRequestCount ||
+            result.NetworkRequests > result.ManifestRequests + result.PackageRequests ||
+            result.InstallerProcessesStarted != 0 || result.ElevationRequests != 0 ||
+            result.ActivationAttempts != 0 || result.RestartAttempts != 0 ||
+            result.ProductionActions != 0)
+        {
+            throw new ControlledUpdateException("update_activation_readiness_result_invalid");
+        }
+    }
 }
 
 public sealed class UnavailableControlledUpdateReviewSource(string currentVersion)
@@ -127,6 +170,15 @@ public sealed class UnavailableControlledUpdateReviewSource(string currentVersio
     }
 
     public Task<ControlledUpdateStageResult> StageAsync(
+        ControlledUpdateReview review,
+        bool explicitlyApproved,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        throw new ControlledUpdateException("update_source_unavailable");
+    }
+
+    public Task<ControlledUpdateActivationReadinessResult> PrepareActivationReadinessAsync(
         ControlledUpdateReview review,
         bool explicitlyApproved,
         CancellationToken cancellationToken = default)

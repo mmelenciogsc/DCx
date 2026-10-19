@@ -38,6 +38,16 @@ public sealed record ControlledUpdateReview(
     string PublisherId,
     string EnvelopeSha256);
 
+public sealed record ControlledUpdateActivationReadiness(
+    string ReadinessSha256,
+    string ReviewSha256,
+    DateTimeOffset RevalidatedUtc,
+    string Version,
+    string PackageSha256,
+    string EnvelopeSha256,
+    long PackageLength,
+    bool ExecutionPermitted);
+
 public static class ControlledUpdateReviewPolicy
 {
     private const string Domain = "dcx-controlled-update-review-v1";
@@ -119,6 +129,73 @@ public static class ControlledUpdateReviewPolicy
             character is >= '0' and <= '9' or >= 'a' and <= 'f');
 }
 
+public static class ControlledUpdateActivationReadinessPolicy
+{
+    private const string Domain = "dcx-controlled-update-activation-readiness-v1";
+
+    public static void Require(
+        ControlledUpdateReview review,
+        ControlledUpdateActivationReadiness readiness)
+    {
+        ControlledUpdateReviewPolicy.Require(review);
+        ArgumentNullException.ThrowIfNull(readiness);
+        if (readiness.RevalidatedUtc == default ||
+            readiness.RevalidatedUtc.Offset != TimeSpan.Zero ||
+            readiness.RevalidatedUtc < review.PublishedUtc.AddMinutes(-5) ||
+            readiness.RevalidatedUtc >= review.ExpiresUtc ||
+            !string.Equals(readiness.ReviewSha256, review.ReviewSha256, StringComparison.Ordinal) ||
+            !string.Equals(readiness.Version, review.CandidateVersion, StringComparison.Ordinal) ||
+            !string.Equals(readiness.PackageSha256, review.PackageSha256, StringComparison.Ordinal) ||
+            !string.Equals(readiness.EnvelopeSha256, review.EnvelopeSha256, StringComparison.Ordinal) ||
+            readiness.PackageLength != review.PackageLength ||
+            readiness.ExecutionPermitted ||
+            !IsLowerSha256(readiness.ReadinessSha256) ||
+            !string.Equals(
+                readiness.ReadinessSha256,
+                ComputeDigest(readiness),
+                StringComparison.Ordinal))
+        {
+            throw new ControlledUpdateException("update_activation_readiness_invalid");
+        }
+    }
+
+    internal static ControlledUpdateActivationReadiness Create(
+        ControlledUpdateReview review,
+        DateTimeOffset revalidatedUtc)
+    {
+        var provisional = new ControlledUpdateActivationReadiness(
+            string.Empty,
+            review.ReviewSha256,
+            revalidatedUtc,
+            review.CandidateVersion,
+            review.PackageSha256,
+            review.EnvelopeSha256,
+            review.PackageLength,
+            ExecutionPermitted: false);
+        var readiness = provisional with { ReadinessSha256 = ComputeDigest(provisional) };
+        Require(review, readiness);
+        return readiness;
+    }
+
+    private static string ComputeDigest(ControlledUpdateActivationReadiness readiness)
+    {
+        var canonical = string.Join('\n',
+            Domain,
+            readiness.ReviewSha256,
+            readiness.RevalidatedUtc.ToString("O", CultureInfo.InvariantCulture),
+            readiness.Version,
+            readiness.PackageSha256,
+            readiness.EnvelopeSha256,
+            readiness.PackageLength.ToString(CultureInfo.InvariantCulture),
+            readiness.ExecutionPermitted ? "true" : "false");
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+    }
+
+    private static bool IsLowerSha256(string? value) =>
+        value is { Length: 64 } && value.All(character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
+}
+
 public sealed class ControlledUpdateStager(
     IControlledUpdateTransport transport,
     IUpdatePackageTrustVerifier packageTrustVerifier,
@@ -176,6 +253,66 @@ public sealed class ControlledUpdateStager(
         return await StageAsync(downloaded, stagingRoot, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<ControlledUpdateActivationReadiness> PrepareActivationReadinessAsync(
+        ControlledUpdateReview review,
+        string currentVersion,
+        string stagingRoot,
+        DateTimeOffset now,
+        bool explicitlyApproved,
+        CancellationToken cancellationToken = default)
+    {
+        ControlledUpdateReviewPolicy.Require(review);
+        _ = ControlledUpdateManifestCodec.ParsePackageVersion(currentVersion);
+        if (!string.Equals(currentVersion, review.CurrentVersion, StringComparison.Ordinal))
+        {
+            throw new ControlledUpdateException("update_review_changed");
+        }
+
+        if (!explicitlyApproved)
+        {
+            throw new ControlledUpdateException("update_activation_review_approval_required");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(packageTrustVerifier);
+        var root = ValidateStagingRoot(stagingRoot, createIfMissing: false);
+        var packages = Path.Combine(root, "packages");
+        if (!Directory.Exists(packages))
+        {
+            throw new ControlledUpdateException("update_staged_set_invalid");
+        }
+
+        RejectReparsePoint(packages);
+        var publishedDirectory = Path.Combine(
+            packages,
+            $"{review.CandidateVersion}-{review.PackageSha256}");
+        if (!Directory.Exists(publishedDirectory) || File.Exists(publishedDirectory))
+        {
+            throw new ControlledUpdateException("update_staged_set_invalid");
+        }
+
+        var packagePath = Path.Combine(publishedDirectory, "package.msix");
+        var signedManifestPath = Path.Combine(publishedDirectory, "manifest.json");
+        RequireExactSetEntries(publishedDirectory, packagePath, signedManifestPath);
+        var envelopeBytes = await ReadEnvelopeAsync(signedManifestPath, cancellationToken)
+            .ConfigureAwait(false);
+        var downloaded = ReviewEnvelope(
+            ParseManifestUri(review.ManifestUri),
+            currentVersion,
+            now,
+            envelopeBytes);
+        if (downloaded.Review != review)
+        {
+            throw new ControlledUpdateException("update_review_changed");
+        }
+
+        _ = await VerifyPublishedSetAsync(downloaded, publishedDirectory, cancellationToken)
+            .ConfigureAwait(false);
+        var readiness = ControlledUpdateActivationReadinessPolicy.Create(review, now);
+        ControlledUpdateActivationReadinessPolicy.Require(review, readiness);
+        return readiness;
+    }
+
     private async Task<DownloadedReview> DownloadAndReviewAsync(
         Uri manifestUri,
         string currentVersion,
@@ -185,6 +322,22 @@ public sealed class ControlledUpdateStager(
         ArgumentNullException.ThrowIfNull(transport);
         ArgumentNullException.ThrowIfNull(packageTrustVerifier);
         ArgumentNullException.ThrowIfNull(manifestUri);
+        var envelopeBytes = await transport.DownloadManifestAsync(
+                manifestUri,
+                ControlledUpdateManifestCodec.MaximumEnvelopeBytes,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return ReviewEnvelope(manifestUri, currentVersion, now, envelopeBytes);
+    }
+
+    private DownloadedReview ReviewEnvelope(
+        Uri manifestUri,
+        string currentVersion,
+        DateTimeOffset now,
+        byte[] envelopeBytes)
+    {
+        ArgumentNullException.ThrowIfNull(manifestUri);
+        ArgumentNullException.ThrowIfNull(envelopeBytes);
         _ = ParseManifestUri(manifestUri.AbsoluteUri);
         var installedVersion = ControlledUpdateManifestCodec.ParsePackageVersion(currentVersion);
         if (now.Offset != TimeSpan.Zero)
@@ -192,11 +345,6 @@ public sealed class ControlledUpdateStager(
             throw new ControlledUpdateException("update_time_invalid");
         }
 
-        var envelopeBytes = await transport.DownloadManifestAsync(
-                manifestUri,
-                ControlledUpdateManifestCodec.MaximumEnvelopeBytes,
-                cancellationToken)
-            .ConfigureAwait(false);
         var update = ControlledUpdateManifestCodec.Decode(envelopeBytes);
         ControlledUpdateManifestCodec.Verify(update, manifestSigningPublicKey);
         var manifest = update.Manifest;
@@ -229,6 +377,28 @@ public sealed class ControlledUpdateStager(
             manifest,
             envelopeSha256);
         return new DownloadedReview(review, manifest, envelopeBytes);
+    }
+
+    private static async Task<byte[]> ReadEnvelopeAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        RejectReparsePoint(path);
+        await using var input = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            16 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        if (input.Length is <= 0 or > ControlledUpdateManifestCodec.MaximumEnvelopeBytes)
+        {
+            throw new ControlledUpdateException("update_envelope_invalid");
+        }
+
+        var bytes = new byte[checked((int)input.Length)];
+        await input.ReadExactlyAsync(bytes, cancellationToken).ConfigureAwait(false);
+        return bytes;
     }
 
     private async Task<ControlledUpdateAdmission> StageAsync(
@@ -505,7 +675,7 @@ public sealed class ControlledUpdateStager(
         }
     }
 
-    private static string ValidateStagingRoot(string path)
+    private static string ValidateStagingRoot(string path, bool createIfMissing = true)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -529,7 +699,16 @@ public sealed class ControlledUpdateStager(
             }
         }
 
-        Directory.CreateDirectory(full);
+        if (!Directory.Exists(full))
+        {
+            if (!createIfMissing)
+            {
+                throw new ControlledUpdateException("update_staged_set_invalid");
+            }
+
+            Directory.CreateDirectory(full);
+        }
+
         RejectReparsePoint(full);
         return full;
     }

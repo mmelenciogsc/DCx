@@ -148,8 +148,8 @@ public sealed class ControlledUpdateStagerTests : IDisposable
                 explicitlyApproved: true));
         File.Delete(extra);
 
-        var changedEnvelope = envelope.ToArray();
-        changedEnvelope[^1] ^= 1;
+        using var wrongKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var changedEnvelope = Envelope(wrongKey, package);
         await File.WriteAllBytesAsync(admission.SignedManifestPath, changedEnvelope);
         await AssertCodeAsync("update_staged_manifest_invalid", () =>
             stager.StageReviewedAsync(
@@ -195,6 +195,173 @@ public sealed class ControlledUpdateStagerTests : IDisposable
         Assert.DoesNotContain(
             Directory.EnumerateDirectories(packages),
             path => Path.GetFileName(path).StartsWith(".incoming-", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ActivationReadiness_RevalidatesExactSetLocallyAndBindsFreshDigest()
+    {
+        var package = "final activation-readiness fixture"u8.ToArray();
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var transport = new FixtureTransport(
+            ManifestUri,
+            Envelope(key, package),
+            PackageUri,
+            package);
+        var trust = new FixtureTrustVerifier(ValidTrust());
+        var stager = new ControlledUpdateStager(
+            transport,
+            trust,
+            key.ExportSubjectPublicKeyInfo());
+        var stagingRoot = Path.Combine(root, "activation-readiness");
+        var review = await stager.ReviewAsync(ManifestUri, "1.1.0.0", Now);
+        await stager.StageReviewedAsync(
+            review,
+            "1.1.0.0",
+            stagingRoot,
+            Now,
+            explicitlyApproved: true);
+        var manifestRequests = transport.ManifestDownloads;
+        var packageRequests = transport.PackageDownloads;
+        var trustChecks = trust.Verifications;
+
+        await AssertCodeAsync("update_activation_review_approval_required", () =>
+            stager.PrepareActivationReadinessAsync(
+                review,
+                "1.1.0.0",
+                stagingRoot,
+                Now.AddMinutes(1),
+                explicitlyApproved: false));
+        Assert.Equal(trustChecks, trust.Verifications);
+
+        var readiness = await stager.PrepareActivationReadinessAsync(
+            review,
+            "1.1.0.0",
+            stagingRoot,
+            Now.AddMinutes(1),
+            explicitlyApproved: true);
+
+        ControlledUpdateActivationReadinessPolicy.Require(review, readiness);
+        Assert.Equal(review.ReviewSha256, readiness.ReviewSha256);
+        Assert.Equal(review.CandidateVersion, readiness.Version);
+        Assert.Equal(review.PackageSha256, readiness.PackageSha256);
+        Assert.Equal(review.EnvelopeSha256, readiness.EnvelopeSha256);
+        Assert.Equal(review.PackageLength, readiness.PackageLength);
+        Assert.False(readiness.ExecutionPermitted);
+        Assert.Equal(manifestRequests, transport.ManifestDownloads);
+        Assert.Equal(packageRequests, transport.PackageDownloads);
+        Assert.Equal(trustChecks + 1, trust.Verifications);
+    }
+
+    [Fact]
+    public async Task ActivationReadiness_RejectsSubstitutionExpiryCancellationAndMissingSet()
+    {
+        var package = "activation policy fixture"u8.ToArray();
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var transport = new FixtureTransport(
+            ManifestUri,
+            Envelope(key, package),
+            PackageUri,
+            package);
+        var stager = new ControlledUpdateStager(
+            transport,
+            new FixtureTrustVerifier(ValidTrust()),
+            key.ExportSubjectPublicKeyInfo());
+        var stagingRoot = Path.Combine(root, "activation-policy");
+        var review = await stager.ReviewAsync(ManifestUri, "1.1.0.0", Now);
+        await stager.StageReviewedAsync(
+            review,
+            "1.1.0.0",
+            stagingRoot,
+            Now,
+            explicitlyApproved: true);
+
+        await AssertCodeAsync("update_review_changed", () =>
+            stager.PrepareActivationReadinessAsync(
+                review,
+                "1.0.0.0",
+                stagingRoot,
+                Now.AddMinutes(1),
+                explicitlyApproved: true));
+        await AssertCodeAsync("update_manifest_expired", () =>
+            stager.PrepareActivationReadinessAsync(
+                review,
+                "1.1.0.0",
+                stagingRoot,
+                Now.AddDays(2),
+                explicitlyApproved: true));
+        await AssertCodeAsync("update_staged_set_invalid", () =>
+            stager.PrepareActivationReadinessAsync(
+                review,
+                "1.1.0.0",
+                Path.Combine(root, "missing-activation-set"),
+                Now.AddMinutes(1),
+                explicitlyApproved: true));
+
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            stager.PrepareActivationReadinessAsync(
+                review,
+                "1.1.0.0",
+                stagingRoot,
+                Now.AddMinutes(1),
+                explicitlyApproved: true,
+                cancelled.Token));
+    }
+
+    [Fact]
+    public async Task ActivationReadiness_RejectsEveryChangedFinalSetMember()
+    {
+        var package = "activation final-set fixture"u8.ToArray();
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var envelope = Envelope(key, package);
+        var transport = new FixtureTransport(ManifestUri, envelope, PackageUri, package);
+        var stager = new ControlledUpdateStager(
+            transport,
+            new FixtureTrustVerifier(ValidTrust()),
+            key.ExportSubjectPublicKeyInfo());
+        var stagingRoot = Path.Combine(root, "activation-tamper");
+        var review = await stager.ReviewAsync(ManifestUri, "1.1.0.0", Now);
+        var admission = await stager.StageReviewedAsync(
+            review,
+            "1.1.0.0",
+            stagingRoot,
+            Now,
+            explicitlyApproved: true);
+
+        var changedPackage = package.ToArray();
+        changedPackage[0] ^= 1;
+        await File.WriteAllBytesAsync(admission.PackagePath, changedPackage);
+        await AssertCodeAsync("update_package_integrity_invalid", () =>
+            stager.PrepareActivationReadinessAsync(
+                review,
+                "1.1.0.0",
+                stagingRoot,
+                Now.AddMinutes(1),
+                explicitlyApproved: true));
+        await File.WriteAllBytesAsync(admission.PackagePath, package);
+
+        using var wrongKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var changedEnvelope = Envelope(wrongKey, package);
+        await File.WriteAllBytesAsync(admission.SignedManifestPath, changedEnvelope);
+        await AssertCodeAsync("update_signature_invalid", () =>
+            stager.PrepareActivationReadinessAsync(
+                review,
+                "1.1.0.0",
+                stagingRoot,
+                Now.AddMinutes(1),
+                explicitlyApproved: true));
+        await File.WriteAllBytesAsync(admission.SignedManifestPath, envelope);
+
+        var unexpected = Path.Combine(Path.GetDirectoryName(admission.PackagePath)!, "extra.txt");
+        await File.WriteAllTextAsync(unexpected, "not admitted");
+        await AssertCodeAsync("update_staged_set_invalid", () =>
+            stager.PrepareActivationReadinessAsync(
+                review,
+                "1.1.0.0",
+                stagingRoot,
+                Now.AddMinutes(1),
+                explicitlyApproved: true));
     }
 
     [Fact]

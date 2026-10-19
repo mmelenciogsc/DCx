@@ -99,6 +99,75 @@ public sealed class ControlledUpdateReviewSourceTests
             AssertCode("update_stage_result_invalid", () =>
                 ControlledUpdateReviewSourcePolicy.RequireResult(review, invalid));
         }
+
+        var readiness = ControlledUpdateActivationReadinessPolicy.Create(
+            review,
+            Now.AddMinutes(1));
+        var readinessResult = new ControlledUpdateActivationReadinessResult(
+            readiness,
+            ManifestRequests: 2,
+            PackageRequests: 1,
+            NetworkRequests: 0,
+            InstallerProcessesStarted: 0,
+            ElevationRequests: 0,
+            ActivationAttempts: 0,
+            RestartAttempts: 0,
+            ProductionActions: 0);
+        ControlledUpdateReviewSourcePolicy.RequireActivationReadinessResult(
+            review,
+            readinessResult);
+
+        var invalidReadinessResults = new[]
+        {
+            readinessResult with
+            {
+                Readiness = readiness with { ReadinessSha256 = new string('0', 64) },
+            },
+            readinessResult with
+            {
+                Readiness = readiness with { RevalidatedUtc = default },
+            },
+            readinessResult with
+            {
+                Readiness = readiness with { ReviewSha256 = new string('0', 64) },
+            },
+            readinessResult with
+            {
+                Readiness = readiness with { Version = "1.2.0.0" },
+            },
+            readinessResult with
+            {
+                Readiness = readiness with { PackageSha256 = new string('0', 64) },
+            },
+            readinessResult with
+            {
+                Readiness = readiness with { EnvelopeSha256 = new string('0', 64) },
+            },
+            readinessResult with
+            {
+                Readiness = readiness with { PackageLength = readiness.PackageLength + 1 },
+            },
+            readinessResult with
+            {
+                Readiness = readiness with { ExecutionPermitted = true },
+            },
+            readinessResult with { ManifestRequests = 1 },
+            readinessResult with { PackageRequests = 0 },
+            readinessResult with { NetworkRequests = -1 },
+            readinessResult with { NetworkRequests = 4 },
+            readinessResult with { InstallerProcessesStarted = 1 },
+            readinessResult with { ElevationRequests = 1 },
+            readinessResult with { ActivationAttempts = 1 },
+            readinessResult with { RestartAttempts = 1 },
+            readinessResult with { ProductionActions = 1 },
+        };
+        foreach (var invalid in invalidReadinessResults)
+        {
+            AssertCode("update_activation_readiness_result_invalid", () =>
+                ControlledUpdateReviewSourcePolicy.RequireActivationReadinessResult(
+                    review,
+                    invalid));
+        }
     }
 
     [Fact]
@@ -109,6 +178,8 @@ public sealed class ControlledUpdateReviewSourceTests
             typeof(IControlledUpdateReviewSource),
             typeof(ControlledUpdateSourceSnapshot),
             typeof(ControlledUpdateStageResult),
+            typeof(ControlledUpdateActivationReadinessResult),
+            typeof(ControlledUpdateActivationReadiness),
             typeof(ControlledUpdateReview),
         };
         var forbidden = new[]
@@ -127,7 +198,7 @@ public sealed class ControlledUpdateReviewSourceTests
         }
 
         Assert.Equal(
-            ["CheckAsync", "StageAsync"],
+            ["CheckAsync", "PrepareActivationReadinessAsync", "StageAsync"],
             typeof(IControlledUpdateReviewSource)
                 .GetMethods()
                 .Select(method => method.Name)

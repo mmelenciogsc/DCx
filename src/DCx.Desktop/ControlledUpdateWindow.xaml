@@ -103,6 +103,32 @@
                             AutomationProperties.Name="Close controlled updates"
                             Click="OnCloseClick" />
                 </WrapPanel>
+
+                <GroupBox Margin="0,18,0,0" Header="Final staged-set integrity review">
+                    <StackPanel Margin="12,8">
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="After inert staging, request one fresh read-only verification of the complete staged set. This creates no installation or activation authority." />
+                        <CheckBox x:Name="ActivationReviewApprovalBox"
+                                  Margin="0,12,0,0"
+                                  IsEnabled="False"
+                                  FontWeight="SemiBold"
+                                  Content="I _request a final integrity review of this exact inert staged set"
+                                  AutomationProperties.AutomationId="ApproveControlledUpdateActivationReviewBox"
+                                  AutomationProperties.Name="Request a final integrity review of this exact inert staged update"
+                                  AutomationProperties.HelpText="Unchecked by default. It authorizes only a read-only revalidation and never installation, elevation, activation, restart, or execution." />
+                        <Button x:Name="ActivationReviewButton"
+                                MinWidth="210"
+                                MinHeight="38"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                IsEnabled="False"
+                                Content="_Verify final staged set"
+                                AutomationProperties.AutomationId="PrepareControlledUpdateActivationReviewButton"
+                                AutomationProperties.Name="Verify the final staged update set without activation"
+                                AutomationProperties.HelpText="Reopens and revalidates the exact signed manifest and package. It cannot install or activate the package."
+                                Click="OnActivationReviewClick" />
+                    </StackPanel>
+                </GroupBox>
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

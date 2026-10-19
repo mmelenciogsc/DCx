@@ -743,11 +743,16 @@ try {
         -not $controlledUpdateEvidence.heading_keyboard_focus -or
         -not $controlledUpdateEvidence.exact_review_exposed -or
         $controlledUpdateEvidence.exact_review_digest_count -ne 3 -or
-        @($controlledUpdateEvidence.distinct_access_keys).Count -ne 4 -or
-        @($controlledUpdateEvidence.distinct_access_keys | Select-Object -Unique).Count -ne 4 -or
+        @($controlledUpdateEvidence.distinct_access_keys).Count -ne 6 -or
+        @($controlledUpdateEvidence.distinct_access_keys | Select-Object -Unique).Count -ne 6 -or
         -not $controlledUpdateEvidence.approval_initially_unchecked -or
         -not $controlledUpdateEvidence.unapproved_stage_denied_before_storage -or
         -not $controlledUpdateEvidence.approval_reset_and_replay_denied -or
+        -not $controlledUpdateEvidence.activation_review_approval_initially_unchecked -or
+        -not $controlledUpdateEvidence.activation_review_unapproved_denied -or
+        -not $controlledUpdateEvidence.activation_review_approval_reset -or
+        $controlledUpdateEvidence.activation_readiness_digest_count -ne 1 -or
+        $controlledUpdateEvidence.activation_readiness_execution_permitted -or
         $controlledUpdateEvidence.staged_file_count -ne 2 -or
         $controlledUpdateEvidence.staged_package_count -ne 1 -or
         $controlledUpdateEvidence.staged_signed_manifest_count -ne 1 -or
@@ -831,6 +836,11 @@ try {
         controlled_update_approval_default_unchecked = [bool]$controlledUpdateEvidence.approval_initially_unchecked
         controlled_update_unapproved_stage_denied_before_storage = [bool]$controlledUpdateEvidence.unapproved_stage_denied_before_storage
         controlled_update_approval_reset = [bool]$controlledUpdateEvidence.approval_reset_and_replay_denied
+        controlled_update_activation_review_default_unchecked = [bool]$controlledUpdateEvidence.activation_review_approval_initially_unchecked
+        controlled_update_unapproved_activation_review_denied = [bool]$controlledUpdateEvidence.activation_review_unapproved_denied
+        controlled_update_activation_review_reset = [bool]$controlledUpdateEvidence.activation_review_approval_reset
+        controlled_update_activation_readiness_digests = [int]$controlledUpdateEvidence.activation_readiness_digest_count
+        controlled_update_activation_readiness_execution_permitted = [bool]$controlledUpdateEvidence.activation_readiness_execution_permitted
         controlled_update_staged_files = [int]$controlledUpdateEvidence.staged_file_count
         controlled_update_atomic_published_set = [bool]$controlledUpdateEvidence.atomic_published_set
         controlled_update_residual_incoming_directories = [int]$controlledUpdateEvidence.residual_incoming_directories

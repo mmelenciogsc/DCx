@@ -129,6 +129,8 @@ try {
     $details = Wait-For { Find-ById $window "ControlledUpdateReviewDetails" } "The exact review was not exposed."
     $approval = Wait-For { Find-ById $window "ApproveControlledUpdateStagingBox" } "The staging approval was not exposed."
     $stage = Wait-For { Find-ById $window "StageControlledUpdateButton" } "The staging action was not exposed."
+    $activationReviewApproval = Wait-For { Find-ById $window "ApproveControlledUpdateActivationReviewBox" } "The final integrity-review request was not exposed."
+    $activationReview = Wait-For { Find-ById $window "PrepareControlledUpdateActivationReviewButton" } "The final staged-set integrity action was not exposed."
     $close = Wait-For { Find-ById $window "CloseControlledUpdateButton" } "The controlled-update close action was not exposed."
     $status = Wait-For { Find-ById $window "ControlledUpdateStatus" } "The controlled-update live status was not exposed."
 
@@ -137,7 +139,8 @@ try {
         $boundary.Current.Name -notlike "Deterministic local validation fixture*Network requests*installer processes*production actions are unavailable.*" -or
         $currentVersion.Current.Name -ne "Current version: unavailable." -or
         $details.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value -ne "No update has been reviewed." -or
-        $approval.Current.IsEnabled -or $stage.Current.IsEnabled) {
+        $approval.Current.IsEnabled -or $stage.Current.IsEnabled -or
+        $activationReviewApproval.Current.IsEnabled -or $activationReview.Current.IsEnabled) {
         throw "The initial controlled-update disclosure was not exact and fail closed."
     }
     $approvalToggle = [Windows.Automation.TogglePattern]$approval.GetCurrentPattern(
@@ -179,9 +182,15 @@ try {
     if ($approvalToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::Off) {
         throw "Checking for an update changed the default-off staging approval."
     }
-    $accessKeys = @($check.Current.AccessKey, $approval.Current.AccessKey, $stage.Current.AccessKey, $close.Current.AccessKey)
-    if ($accessKeys -contains "" -or @($accessKeys | Select-Object -Unique).Count -ne 4) {
-        throw "The controlled-update actions do not have four distinct keyboard access keys."
+    $accessKeys = @(
+        $check.Current.AccessKey,
+        $approval.Current.AccessKey,
+        $stage.Current.AccessKey,
+        $activationReviewApproval.Current.AccessKey,
+        $activationReview.Current.AccessKey,
+        $close.Current.AccessKey)
+    if ($accessKeys -contains "" -or @($accessKeys | Select-Object -Unique).Count -ne 6) {
+        throw "The controlled-update actions do not have six distinct keyboard access keys."
     }
 
     $stage.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -205,6 +214,13 @@ try {
     $approval = Find-ById $window "ApproveControlledUpdateStagingBox"
     $stage = Find-ById $window "StageControlledUpdateButton"
     $check = Find-ById $window "CheckControlledUpdateButton"
+    $activationReviewApproval = Find-ById $window "ApproveControlledUpdateActivationReviewBox"
+    $activationReview = Find-ById $window "PrepareControlledUpdateActivationReviewButton"
+    $null = Wait-For {
+        $check.Current.IsEnabled -and
+        $activationReviewApproval.Current.IsEnabled -and
+        $activationReview.Current.IsEnabled
+    } "The final staged-set review controls did not become ready after staging."
     $completedText = $details.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value
     foreach ($expected in @(
         "Manifest requests 2.", "Package requests 1.", "Network requests 0.",
@@ -214,8 +230,11 @@ try {
     }
     $approvalToggle = [Windows.Automation.TogglePattern]$approval.GetCurrentPattern(
         [Windows.Automation.TogglePattern]::Pattern)
+    $activationReviewToggle = [Windows.Automation.TogglePattern]$activationReviewApproval.GetCurrentPattern(
+        [Windows.Automation.TogglePattern]::Pattern)
     if ($approvalToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::Off -or
-        $approval.Current.IsEnabled -or $stage.Current.IsEnabled -or -not $check.Current.IsEnabled) {
+        $approval.Current.IsEnabled -or $stage.Current.IsEnabled -or
+        $activationReviewToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::Off) {
         throw "The exact staging approval remained reusable without a fresh review."
     }
     $stagedFiles = @(Get-ChildItem -LiteralPath $stagingRoot -File -Recurse)
@@ -233,6 +252,64 @@ try {
     }
     if (@(Get-ChildProcesses $fixtureProcess.Id).Count -ne 0) {
         throw "Approved inert controlled-update staging started a child process."
+    }
+
+    $activationReview.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $status.Current.Name -eq "Final integrity review denied. Check the separate review request first."
+    } "Unchecked final staged-set integrity review did not fail closed."
+    $null = Wait-For {
+        $activationReviewApproval.Current.HasKeyboardFocus
+    } "Denied final staged-set integrity review did not move focus to its request."
+    if (@(Get-ChildProcesses $fixtureProcess.Id).Count -ne 0) {
+        throw "Denied final staged-set integrity review started a child process."
+    }
+
+    $activationReviewToggle.Toggle()
+    $activationReview.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $expectedActivationReviewStatus = "Version 1.1.0.0 passed a fresh staged-set integrity review. Execution permitted no. Network requests 0. Installer processes 0. Elevation requests 0. Activation attempts 0. Restart attempts 0. Production actions 0."
+    $null = Wait-For {
+        $status.Current.Name -eq $expectedActivationReviewStatus
+    } "The final staged-set integrity review did not complete with an exact zero-authority status."
+    $details = Find-ById $window "ControlledUpdateReviewDetails"
+    $activationReviewApproval = Find-ById $window "ApproveControlledUpdateActivationReviewBox"
+    $activationReview = Find-ById $window "PrepareControlledUpdateActivationReviewButton"
+    $check = Find-ById $window "CheckControlledUpdateButton"
+    $null = Wait-For {
+        $check.Current.IsEnabled -and
+        -not $activationReviewApproval.Current.IsEnabled -and
+        -not $activationReview.Current.IsEnabled
+    } "The final staged-set integrity review controls did not settle after completion."
+    $activationReviewText = $details.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value
+    foreach ($expected in @(
+        "Final staged-set integrity review complete at 2026-10-19T04:01:00.0000000+00:00.",
+        "Activation-readiness SHA-256:",
+        "Execution permitted no.",
+        "Manifest requests 2.",
+        "Package requests 1.",
+        "Network requests 0.",
+        "Installer processes 0.",
+        "Elevation requests 0.",
+        "Activation attempts 0.",
+        "Restart attempts 0.",
+        "Production actions 0.")) {
+        if ($activationReviewText -notlike "*$expected*") {
+            throw "The final staged-set integrity receipt omitted: $expected"
+        }
+    }
+    $activationReadinessDigests = [regex]::Matches(
+        $activationReviewText,
+        '(?m)Activation-readiness SHA-256: ([0-9a-f]{64})\.')
+    $activationReviewToggle = [Windows.Automation.TogglePattern]$activationReviewApproval.GetCurrentPattern(
+        [Windows.Automation.TogglePattern]::Pattern)
+    if ($activationReadinessDigests.Count -ne 1 -or
+        $activationReviewToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::Off -or
+        $activationReviewApproval.Current.IsEnabled -or $activationReview.Current.IsEnabled -or
+        -not $check.Current.IsEnabled) {
+        throw "The final staged-set integrity review did not bind one digest and reset one-use controls."
+    }
+    if (@(Get-ChildProcesses $fixtureProcess.Id).Count -ne 0) {
+        throw "Approved final staged-set integrity review started a child process."
     }
 
     $close.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -266,9 +343,13 @@ try {
     $unavailableDetails = Find-ById $unavailableWindow "ControlledUpdateReviewDetails"
     $unavailableApproval = Find-ById $unavailableWindow "ApproveControlledUpdateStagingBox"
     $unavailableStage = Find-ById $unavailableWindow "StageControlledUpdateButton"
+    $unavailableActivationReviewApproval = Find-ById $unavailableWindow "ApproveControlledUpdateActivationReviewBox"
+    $unavailableActivationReview = Find-ById $unavailableWindow "PrepareControlledUpdateActivationReviewButton"
     if ($unavailableDetails.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value -ne
             "No controlled-update source is configured. No update state is inferred." -or
-        $unavailableApproval.Current.IsEnabled -or $unavailableStage.Current.IsEnabled) {
+        $unavailableApproval.Current.IsEnabled -or $unavailableStage.Current.IsEnabled -or
+        $unavailableActivationReviewApproval.Current.IsEnabled -or
+        $unavailableActivationReview.Current.IsEnabled) {
         throw "The normal unavailable source exposed an actionable or inferred update."
     }
 
@@ -282,6 +363,11 @@ try {
         approval_initially_unchecked = $true
         unapproved_stage_denied_before_storage = $true
         approval_reset_and_replay_denied = $true
+        activation_review_approval_initially_unchecked = $true
+        activation_review_unapproved_denied = $true
+        activation_review_approval_reset = $true
+        activation_readiness_digest_count = $activationReadinessDigests.Count
+        activation_readiness_execution_permitted = $false
         staged_file_count = $stagedFiles.Count
         staged_package_count = 1
         staged_signed_manifest_count = 1
@@ -306,6 +392,7 @@ try {
     Write-Host "P13 controlled-update fixture gate=PASS"
     Write-Host "P13 controlled-update keyboard and UIA review=PASS"
     Write-Host "P13 exact review, unchecked approval denial and one-use inert staging=PASS"
+    Write-Host "P13 fresh final staged-set integrity review and one-use request=PASS"
     Write-Host "P13 controlled-update network=0 installer=0 elevation=0 activation=0 restart=0 production=0"
     Write-Host "P13 normal controlled-update source=not_configured; inferred update state=false"
     Write-Host "P13 controlled-update evidence=$evidencePath"
