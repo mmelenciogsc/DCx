@@ -29,6 +29,8 @@ public sealed class ControlledUpdateReviewSourceTests
         Assert.Equal(0, snapshot.NetworkRequests);
         await AssertCodeAsync("update_source_unavailable", () =>
             source.StageAsync(null!, explicitlyApproved: true));
+        await AssertCodeAsync("update_source_unavailable", () =>
+            source.ValidateActivationTransactionAsync(null!, null!, explicitlyApproved: true));
     }
 
     [Fact]
@@ -168,6 +170,58 @@ public sealed class ControlledUpdateReviewSourceTests
                     review,
                     invalid));
         }
+
+        var activationValidation = new ControlledUpdateActivationValidationResult(
+            review.ReviewSha256,
+            readiness.ReadinessSha256,
+            review.CandidateVersion,
+            ControlledUpdateActivationExecutionStatus.ValidationNoOp,
+            PackageManagerInvocations: 0,
+            IsRegistered: false,
+            RestartRequired: false,
+            ManifestRequests: 2,
+            PackageRequests: 1,
+            NetworkRequests: 0,
+            InstallerProcessesStarted: 0,
+            ElevationRequests: 0,
+            ActivationAttempts: 0,
+            RestartAttempts: 0,
+            ProductionActions: 0);
+        ControlledUpdateReviewSourcePolicy.RequireActivationValidationResult(
+            review,
+            readiness,
+            activationValidation);
+
+        var invalidActivationValidations = new[]
+        {
+            activationValidation with { ReviewSha256 = new string('0', 64) },
+            activationValidation with { ReadinessSha256 = new string('0', 64) },
+            activationValidation with { Version = "1.2.0.0" },
+            activationValidation with
+            {
+                ExecutionStatus = ControlledUpdateActivationExecutionStatus.Registered,
+            },
+            activationValidation with { PackageManagerInvocations = 1 },
+            activationValidation with { IsRegistered = true },
+            activationValidation with { RestartRequired = true },
+            activationValidation with { ManifestRequests = 1 },
+            activationValidation with { PackageRequests = 0 },
+            activationValidation with { NetworkRequests = -1 },
+            activationValidation with { NetworkRequests = 4 },
+            activationValidation with { InstallerProcessesStarted = 1 },
+            activationValidation with { ElevationRequests = 1 },
+            activationValidation with { ActivationAttempts = 1 },
+            activationValidation with { RestartAttempts = 1 },
+            activationValidation with { ProductionActions = 1 },
+        };
+        foreach (var invalid in invalidActivationValidations)
+        {
+            AssertCode("update_activation_validation_result_invalid", () =>
+                ControlledUpdateReviewSourcePolicy.RequireActivationValidationResult(
+                    review,
+                    readiness,
+                    invalid));
+        }
     }
 
     [Fact]
@@ -179,6 +233,7 @@ public sealed class ControlledUpdateReviewSourceTests
             typeof(ControlledUpdateSourceSnapshot),
             typeof(ControlledUpdateStageResult),
             typeof(ControlledUpdateActivationReadinessResult),
+            typeof(ControlledUpdateActivationValidationResult),
             typeof(ControlledUpdateActivationReadiness),
             typeof(ControlledUpdateReview),
         };
@@ -198,7 +253,12 @@ public sealed class ControlledUpdateReviewSourceTests
         }
 
         Assert.Equal(
-            ["CheckAsync", "PrepareActivationReadinessAsync", "StageAsync"],
+            [
+                "CheckAsync",
+                "PrepareActivationReadinessAsync",
+                "StageAsync",
+                "ValidateActivationTransactionAsync",
+            ],
             typeof(IControlledUpdateReviewSource)
                 .GetMethods()
                 .Select(method => method.Name)

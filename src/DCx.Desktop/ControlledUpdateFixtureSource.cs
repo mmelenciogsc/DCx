@@ -21,6 +21,7 @@ internal sealed class ControlledUpdateFixtureSource : IControlledUpdateReviewSou
     private readonly string stagingRoot;
     private readonly FixtureTransport transport;
     private readonly ControlledUpdateStager stager;
+    private int activationValidationConsumed;
 
     public ControlledUpdateFixtureSource(string stagingRoot)
     {
@@ -131,6 +132,65 @@ internal sealed class ControlledUpdateFixtureSource : IControlledUpdateReviewSou
         return result;
     }
 
+    public async Task<ControlledUpdateActivationValidationResult> ValidateActivationTransactionAsync(
+        ControlledUpdateReview review,
+        ControlledUpdateActivationReadiness readiness,
+        bool explicitlyApproved,
+        CancellationToken cancellationToken = default)
+    {
+        if (!explicitlyApproved)
+        {
+            _ = await stager.ExecuteActivationTransactionAsync(
+                    review,
+                    readiness,
+                    CurrentVersion,
+                    stagingRoot,
+                    Now.AddMinutes(2),
+                    explicitlyApproved: false,
+                    new FixtureActivationValidationExecutor(),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            throw new ControlledUpdateException("update_activation_approval_required");
+        }
+
+        if (Interlocked.Exchange(ref activationValidationConsumed, 1) != 0)
+        {
+            throw new ControlledUpdateException("update_activation_validation_replayed");
+        }
+
+        var execution = await stager.ExecuteActivationTransactionAsync(
+                review,
+                readiness,
+                CurrentVersion,
+                stagingRoot,
+                Now.AddMinutes(2),
+                explicitlyApproved: true,
+                new FixtureActivationValidationExecutor(),
+                cancellationToken)
+            .ConfigureAwait(false);
+        var result = new ControlledUpdateActivationValidationResult(
+            review.ReviewSha256,
+            readiness.ReadinessSha256,
+            review.CandidateVersion,
+            execution.Status,
+            execution.PackageManagerInvocations,
+            execution.IsRegistered,
+            execution.RestartRequired,
+            transport.ManifestRequests,
+            transport.PackageRequests,
+            NetworkRequests: 0,
+            execution.InstallerProcessesStarted,
+            ElevationRequests: 0,
+            ActivationAttempts: 0,
+            RestartAttempts: 0,
+            ProductionActions: 0);
+        ControlledUpdateReviewSourcePolicy.RequireActivationValidationResult(
+            review,
+            readiness,
+            result);
+        return result;
+    }
+
     private static string RequireEmptyStagingRoot(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -216,6 +276,25 @@ internal sealed class ControlledUpdateFixtureSource : IControlledUpdateReviewSou
                 Identity,
                 Publisher,
                 CandidateVersion));
+        }
+    }
+
+    private sealed class FixtureActivationValidationExecutor
+        : IControlledUpdateActivationExecutor
+    {
+        public Task<ControlledUpdateActivationExecutionResult> ExecuteAsync(
+            ControlledUpdateActivationContext context,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new ControlledUpdateActivationExecutionResult(
+                ControlledUpdateActivationExecutionStatus.ValidationNoOp,
+                PackageManagerInvocations: 0,
+                IsRegistered: false,
+                RestartRequired: false,
+                RequestsElevation: false,
+                InstallerProcessesStarted: 0));
         }
     }
 }

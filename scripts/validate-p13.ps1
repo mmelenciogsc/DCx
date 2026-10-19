@@ -743,8 +743,8 @@ try {
         -not $controlledUpdateEvidence.heading_keyboard_focus -or
         -not $controlledUpdateEvidence.exact_review_exposed -or
         $controlledUpdateEvidence.exact_review_digest_count -ne 3 -or
-        @($controlledUpdateEvidence.distinct_access_keys).Count -ne 6 -or
-        @($controlledUpdateEvidence.distinct_access_keys | Select-Object -Unique).Count -ne 6 -or
+        @($controlledUpdateEvidence.distinct_access_keys).Count -ne 8 -or
+        @($controlledUpdateEvidence.distinct_access_keys | Select-Object -Unique).Count -ne 8 -or
         -not $controlledUpdateEvidence.approval_initially_unchecked -or
         -not $controlledUpdateEvidence.unapproved_stage_denied_before_storage -or
         -not $controlledUpdateEvidence.approval_reset_and_replay_denied -or
@@ -753,6 +753,14 @@ try {
         -not $controlledUpdateEvidence.activation_review_approval_reset -or
         $controlledUpdateEvidence.activation_readiness_digest_count -ne 1 -or
         $controlledUpdateEvidence.activation_readiness_execution_permitted -or
+        -not $controlledUpdateEvidence.activation_validation_approval_initially_unchecked -or
+        -not $controlledUpdateEvidence.activation_validation_unapproved_denied -or
+        -not $controlledUpdateEvidence.activation_validation_approval_reset -or
+        $controlledUpdateEvidence.activation_validation_execution_status -ne "validation_no_op" -or
+        $controlledUpdateEvidence.activation_validation_package_manager_invocations -ne 0 -or
+        $controlledUpdateEvidence.activation_validation_registered -or
+        $controlledUpdateEvidence.activation_validation_restart_required -or
+        -not $controlledUpdateEvidence.activation_validation_staged_set_unchanged -or
         $controlledUpdateEvidence.staged_file_count -ne 2 -or
         $controlledUpdateEvidence.staged_package_count -ne 1 -or
         $controlledUpdateEvidence.staged_signed_manifest_count -ne 1 -or
@@ -841,6 +849,14 @@ try {
         controlled_update_activation_review_reset = [bool]$controlledUpdateEvidence.activation_review_approval_reset
         controlled_update_activation_readiness_digests = [int]$controlledUpdateEvidence.activation_readiness_digest_count
         controlled_update_activation_readiness_execution_permitted = [bool]$controlledUpdateEvidence.activation_readiness_execution_permitted
+        controlled_update_activation_validation_approval_default_unchecked = [bool]$controlledUpdateEvidence.activation_validation_approval_initially_unchecked
+        controlled_update_unapproved_activation_validation_denied = [bool]$controlledUpdateEvidence.activation_validation_unapproved_denied
+        controlled_update_activation_validation_approval_reset = [bool]$controlledUpdateEvidence.activation_validation_approval_reset
+        controlled_update_activation_validation_status = [string]$controlledUpdateEvidence.activation_validation_execution_status
+        controlled_update_activation_validation_package_manager_invocations = [int]$controlledUpdateEvidence.activation_validation_package_manager_invocations
+        controlled_update_activation_validation_registered = [bool]$controlledUpdateEvidence.activation_validation_registered
+        controlled_update_activation_validation_restart_required = [bool]$controlledUpdateEvidence.activation_validation_restart_required
+        controlled_update_activation_validation_staged_set_unchanged = [bool]$controlledUpdateEvidence.activation_validation_staged_set_unchanged
         controlled_update_staged_files = [int]$controlledUpdateEvidence.staged_file_count
         controlled_update_atomic_published_set = [bool]$controlledUpdateEvidence.atomic_published_set
         controlled_update_residual_incoming_directories = [int]$controlledUpdateEvidence.residual_incoming_directories
@@ -895,6 +911,7 @@ try {
     "Accessible WebView2 missing-runtime detection and fail-closed recheck=PASS"
     "Separately approved exact Microsoft default-browser prerequisite handoff=PASS"
     "Accessible exact controlled-update review and one-use inert staging=PASS"
+    "Accessible lease-held activation transaction validation no-op=PASS"
     "Normal controlled-update source=not_configured; inferred state=false"
     "Controlled-update network=0 installer=0 elevation=0 activation=0 restart=0 production=0"
     "CycloneDX components=$($components.Count)"

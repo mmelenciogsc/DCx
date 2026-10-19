@@ -35,6 +35,23 @@ public sealed record ControlledUpdateActivationReadinessResult(
     int RestartAttempts,
     int ProductionActions);
 
+public sealed record ControlledUpdateActivationValidationResult(
+    string ReviewSha256,
+    string ReadinessSha256,
+    string Version,
+    ControlledUpdateActivationExecutionStatus ExecutionStatus,
+    int PackageManagerInvocations,
+    bool IsRegistered,
+    bool RestartRequired,
+    int ManifestRequests,
+    int PackageRequests,
+    int NetworkRequests,
+    int InstallerProcessesStarted,
+    int ElevationRequests,
+    int ActivationAttempts,
+    int RestartAttempts,
+    int ProductionActions);
+
 public interface IControlledUpdateReviewSource
 {
     Task<ControlledUpdateSourceSnapshot> CheckAsync(
@@ -47,6 +64,12 @@ public interface IControlledUpdateReviewSource
 
     Task<ControlledUpdateActivationReadinessResult> PrepareActivationReadinessAsync(
         ControlledUpdateReview review,
+        bool explicitlyApproved,
+        CancellationToken cancellationToken = default);
+
+    Task<ControlledUpdateActivationValidationResult> ValidateActivationTransactionAsync(
+        ControlledUpdateReview review,
+        ControlledUpdateActivationReadiness readiness,
         bool explicitlyApproved,
         CancellationToken cancellationToken = default);
 }
@@ -145,6 +168,43 @@ public static class ControlledUpdateReviewSourcePolicy
             throw new ControlledUpdateException("update_activation_readiness_result_invalid");
         }
     }
+
+    public static void RequireActivationValidationResult(
+        ControlledUpdateReview review,
+        ControlledUpdateActivationReadiness readiness,
+        ControlledUpdateActivationValidationResult result)
+    {
+        ControlledUpdateReviewPolicy.Require(review);
+        try
+        {
+            ControlledUpdateActivationReadinessPolicy.Require(review, readiness);
+        }
+        catch (ControlledUpdateException)
+        {
+            throw new ControlledUpdateException("update_activation_validation_result_invalid");
+        }
+
+        ArgumentNullException.ThrowIfNull(result);
+        if (!string.Equals(result.ReviewSha256, review.ReviewSha256, StringComparison.Ordinal) ||
+            !string.Equals(
+                result.ReadinessSha256,
+                readiness.ReadinessSha256,
+                StringComparison.Ordinal) ||
+            !string.Equals(result.Version, review.CandidateVersion, StringComparison.Ordinal) ||
+            result.ExecutionStatus != ControlledUpdateActivationExecutionStatus.ValidationNoOp ||
+            result.PackageManagerInvocations != 0 || result.IsRegistered ||
+            result.RestartRequired ||
+            result.ManifestRequests is < 2 or > MaximumRequestCount ||
+            result.PackageRequests is < 1 or > MaximumRequestCount ||
+            result.NetworkRequests is < 0 or > MaximumRequestCount ||
+            result.NetworkRequests > result.ManifestRequests + result.PackageRequests ||
+            result.InstallerProcessesStarted != 0 || result.ElevationRequests != 0 ||
+            result.ActivationAttempts != 0 || result.RestartAttempts != 0 ||
+            result.ProductionActions != 0)
+        {
+            throw new ControlledUpdateException("update_activation_validation_result_invalid");
+        }
+    }
 }
 
 public sealed class UnavailableControlledUpdateReviewSource(string currentVersion)
@@ -180,6 +240,16 @@ public sealed class UnavailableControlledUpdateReviewSource(string currentVersio
 
     public Task<ControlledUpdateActivationReadinessResult> PrepareActivationReadinessAsync(
         ControlledUpdateReview review,
+        bool explicitlyApproved,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        throw new ControlledUpdateException("update_source_unavailable");
+    }
+
+    public Task<ControlledUpdateActivationValidationResult> ValidateActivationTransactionAsync(
+        ControlledUpdateReview review,
+        ControlledUpdateActivationReadiness readiness,
         bool explicitlyApproved,
         CancellationToken cancellationToken = default)
     {

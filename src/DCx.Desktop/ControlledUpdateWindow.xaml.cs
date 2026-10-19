@@ -18,6 +18,8 @@ public partial class ControlledUpdateWindow : Window
     private readonly CancellationTokenSource lifetime = new();
     private ControlledUpdateReview? reviewedUpdate;
     private ControlledUpdateReview? stagedUpdate;
+    private ControlledUpdateReview? activationReadyReview;
+    private ControlledUpdateActivationReadiness? activationReadiness;
     private bool closed;
 
     public ControlledUpdateWindow(
@@ -56,6 +58,7 @@ public partial class ControlledUpdateWindow : Window
         ActivationReviewApprovalBox.IsChecked = false;
         ActivationReviewApprovalBox.IsEnabled = false;
         ActivationReviewButton.IsEnabled = false;
+        ResetActivationValidation();
         CheckButton.IsEnabled = false;
         SetStatus("Checking the configured controlled-update source. No package will be staged by this action.");
         try
@@ -133,6 +136,7 @@ public partial class ControlledUpdateWindow : Window
             ActivationReviewApprovalBox.IsChecked = false;
             ActivationReviewApprovalBox.IsEnabled = true;
             ActivationReviewButton.IsEnabled = true;
+            ResetActivationValidation();
             SetReview(
                 FormatReview(exactReview) + Environment.NewLine + Environment.NewLine +
                 $"Staged inertly after exact revalidation. Manifest requests {result.ManifestRequests}. " +
@@ -159,6 +163,7 @@ public partial class ControlledUpdateWindow : Window
             ActivationReviewApprovalBox.IsChecked = false;
             ActivationReviewApprovalBox.IsEnabled = false;
             ActivationReviewButton.IsEnabled = false;
+            ResetActivationValidation();
             SetReview("Staging failed closed. Review the update again before retrying.");
             SetStatus("No package was admitted. No installation, elevation, activation, restart, or production action occurred.");
             ReviewDetails.Focus();
@@ -202,6 +207,11 @@ public partial class ControlledUpdateWindow : Window
                 result);
             if (closed) return;
             var readiness = result.Readiness;
+            activationReadyReview = exactReview;
+            activationReadiness = readiness;
+            ActivationValidationApprovalBox.IsChecked = false;
+            ActivationValidationApprovalBox.IsEnabled = true;
+            ActivationValidationButton.IsEnabled = true;
             SetReview(
                 stagedDetails + Environment.NewLine + Environment.NewLine +
                 $"Final staged-set integrity review complete at {readiness.RevalidatedUtc:O}.{Environment.NewLine}" +
@@ -223,6 +233,7 @@ public partial class ControlledUpdateWindow : Window
         }
         catch
         {
+            ResetActivationValidation();
             SetReview("Final staged-set integrity review failed closed. Check and stage the update again before retrying.");
             SetStatus("No activation readiness was admitted. No installation, elevation, activation, restart, or production action occurred.");
             ReviewDetails.Focus();
@@ -235,6 +246,86 @@ public partial class ControlledUpdateWindow : Window
             ActivationReviewButton.IsEnabled = false;
             if (!closed) CheckButton.IsEnabled = true;
         }
+    }
+
+    private async void OnActivationValidationClick(object sender, RoutedEventArgs e)
+    {
+        if (activationReadyReview is null || activationReadiness is null)
+        {
+            SetStatus("Activation transaction validation denied. Complete the exact staged-set integrity review first.");
+            CheckButton.Focus();
+            return;
+        }
+
+        if (ActivationValidationApprovalBox.IsChecked != true)
+        {
+            SetStatus("Activation transaction validation denied. Check the separate synthetic validation approval first.");
+            ActivationValidationApprovalBox.Focus();
+            return;
+        }
+
+        var exactReview = activationReadyReview;
+        var exactReadiness = activationReadiness;
+        var reviewedDetails = ReviewDetails.Text;
+        CheckButton.IsEnabled = false;
+        ActivationValidationApprovalBox.IsEnabled = false;
+        ActivationValidationButton.IsEnabled = false;
+        SetStatus("Holding and revalidating the exact staged files around one synthetic validation no-op. PackageManager will not be invoked.");
+        try
+        {
+            var result = await source.ValidateActivationTransactionAsync(
+                exactReview,
+                exactReadiness,
+                explicitlyApproved: true,
+                lifetime.Token);
+            ControlledUpdateReviewSourcePolicy.RequireActivationValidationResult(
+                exactReview,
+                exactReadiness,
+                result);
+            if (closed) return;
+            SetReview(
+                reviewedDetails + Environment.NewLine + Environment.NewLine +
+                "Lease-held activation transaction validation complete." + Environment.NewLine +
+                $"Exact review SHA-256: {result.ReviewSha256}.{Environment.NewLine}" +
+                $"Activation-readiness SHA-256: {result.ReadinessSha256}.{Environment.NewLine}" +
+                $"Execution status: {result.ExecutionStatus}. " +
+                $"PackageManager invocations {result.PackageManagerInvocations}. " +
+                $"Registered {(result.IsRegistered ? "yes" : "no")}. " +
+                $"Restart required {(result.RestartRequired ? "yes" : "no")}. " +
+                $"Network requests {result.NetworkRequests}. Installer processes {result.InstallerProcessesStarted}. " +
+                $"Elevation requests {result.ElevationRequests}. Activation attempts {result.ActivationAttempts}. " +
+                $"Restart attempts {result.RestartAttempts}. Production actions {result.ProductionActions}.");
+            SetStatus(
+                $"Version {result.Version} completed lease-held activation transaction validation. " +
+                $"PackageManager invocations {result.PackageManagerInvocations}. Registered no. Restart required no. " +
+                $"Installer processes {result.InstallerProcessesStarted}. Elevation requests {result.ElevationRequests}. " +
+                $"Activation attempts {result.ActivationAttempts}. Restart attempts {result.RestartAttempts}. " +
+                $"Production actions {result.ProductionActions}.");
+            ReviewDetails.Focus();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            SetReview("Activation transaction validation failed closed. This one-use synthetic source cannot be retried; close and reopen the validation fixture.");
+            SetStatus("No package manager call, registration, installation, elevation, activation, restart, or production action was admitted.");
+            ReviewDetails.Focus();
+        }
+        finally
+        {
+            ResetActivationValidation();
+            if (!closed) CheckButton.IsEnabled = true;
+        }
+    }
+
+    private void ResetActivationValidation()
+    {
+        activationReadyReview = null;
+        activationReadiness = null;
+        ActivationValidationApprovalBox.IsChecked = false;
+        ActivationValidationApprovalBox.IsEnabled = false;
+        ActivationValidationButton.IsEnabled = false;
     }
 
     private static string FormatReview(ControlledUpdateReview review) =>

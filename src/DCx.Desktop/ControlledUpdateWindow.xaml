@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Controlled updates — DCx"
         Width="760"
-        Height="660"
+        Height="760"
         MinWidth="620"
         MinHeight="520"
         AutomationProperties.AutomationId="ControlledUpdateWindow"
@@ -120,6 +120,32 @@
                                 AutomationProperties.Name="Verify the final staged update set without activation"
                                 AutomationProperties.HelpText="Reopens and revalidates the exact signed manifest and package. It cannot install or activate the package."
                                 Click="OnActivationReviewClick" />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Margin="0,18,0,0" Header="Lease-held activation transaction validation">
+                    <StackPanel Margin="12,8">
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="Validation fixtures can exercise the lease-held transaction with a no-op executor. This never invokes PackageManager, registers a package, installs, elevates, activates, or restarts DCx. Production activation remains unavailable." />
+                        <CheckBox x:Name="ActivationValidationApprovalBox"
+                                  Margin="0,12,0,0"
+                                  IsEnabled="False"
+                                  FontWeight="SemiBold"
+                                  Content="I approve this one synthetic activation _transaction validation"
+                                  AutomationProperties.AutomationId="ApproveControlledUpdateActivationValidationBox"
+                                  AutomationProperties.Name="Approve one synthetic lease-held activation transaction validation"
+                                  AutomationProperties.HelpText="Unchecked by default. It authorizes one validation no-op only. It cannot invoke PackageManager, register, install, activate, elevate, or restart." />
+                        <Button x:Name="ActivationValidationButton"
+                                MinWidth="240"
+                                MinHeight="38"
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Left"
+                                IsEnabled="False"
+                                Content="Run _no-install transaction validation"
+                                AutomationProperties.AutomationId="ValidateControlledUpdateActivationTransactionButton"
+                                AutomationProperties.Name="Validate the lease-held activation transaction without installation"
+                                AutomationProperties.HelpText="Runs only the synthetic validation no-op executor. The Windows PackageManager adapter is not composed or invoked."
+                                Click="OnActivationValidationClick" />
                     </StackPanel>
                 </GroupBox>
 
