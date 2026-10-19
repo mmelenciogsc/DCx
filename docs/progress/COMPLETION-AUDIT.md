@@ -40,7 +40,7 @@ Authoritative inputs: `DCx_Codex_Handoff_Kit/README.md`, `DCX_PRODUCT_ARCHITECTU
 - P06: `artifacts/test-results/p06-1669f91b6c4149e7b28aab99e73dc4e2/`; 220/220, ten owned-runtime contracts, eight hardware contracts, five mandatory sequencing contracts, five runtime-resource/quiescence/unload contracts, one inventory-only Intel DXGI budget, real installed-GPU vision and verified complete-runtime cleanup. The owned empty-server check performed no inference/transfer; no dependency was downloaded or installed.
 - P11: `artifacts/test-results/p11-0d4a701ca5614522af687bd42a8064a5/`; 122/122 plus generated and authenticated-ledger native UIA.
 - P12: `artifacts/test-results/p12-1ac53524cc9644e294d7d660736b2025/`; nine composed fixtures and zero production actions. Focused Facebook/XLSX evidence: `p12-integrations-294bb5ae0fee4aafa9e23af092de14fb/`; 17/17 selected tests, including 15 Facebook policy cases, plus native UIA.
-- P13: `artifacts/test-results/p13-48d6a2018b0d427e9f30aa5b2f6ea366/`; 23/23 reliability, 21/21 trust, Defender clean, NuGet advisories 0 and unsigned trust denied.
-- P14: `artifacts/test-results/p14-e21a1c9afd8b4fb7b4dc6ce59836358e/`; 11/11 plus retained native local consent enable/withdrawal/focus/access-key UIA evidence, zero event sources/transfers, seven blockers, `NO_GO`, activation false.
+- P13: `artifacts/test-results/p13-da86abaabc48472bbf9538c7b1eb97ed/` at exact validation source `3f359f7`; 23/23 reliability, 21/21 trust, Defender clean, NuGet advisories 0, reproducible ZIP/MSIX and unsigned trust denied.
+- P14: `artifacts/test-results/p14-5f62674745e34732a83b430b81ec7f45/` at exact validation source `3f359f7`; 11/11 plus retained native local consent enable/withdrawal/focus/access-key UIA evidence, zero event sources/transfers, seven blockers, `NO_GO`, activation false.
 
 Evidence directories are ignored build artifacts and are intentionally not committed. The phase records are the durable reproduction index.

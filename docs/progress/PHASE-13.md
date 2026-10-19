@@ -1,7 +1,7 @@
 # P13 — Packaging, security and reliability
 
 - Status: BLOCKED (substantial local reliability, self-contained unsigned-MSIX staging, Defender and dependency-advisory checks pass; signed installer, clean-VM, independent security and human-AT gates remain absent)
-- Implementation commits through current exact validation source: `db448a9`
+- Implementation commits through current exact validation source: `3f359f7` (product change `6239834`)
 - Documentation commit: recorded by the commit containing this file
 
 The generated ZIP and synthetic-identity MSIX are unsigned self-contained x64 local-validation artifacts. Neither is an installer or production release.
@@ -48,22 +48,22 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
 
 ## Measured result
 
-Recorded evidence directory: `artifacts/test-results/p13-f818ffa745804cc18c0a4215424a902a/` (generated from exact validation source `db448a9`; evidence is intentionally not committed).
+Recorded evidence directory: `artifacts/test-results/p13-da86abaabc48472bbf9538c7b1eb97ed/` (generated from exact validation source `3f359f7`; evidence is intentionally not committed).
 
 - Locked Release build: 0 warnings, 0 errors.
 - Reliability tests: passed 23, failed 0, skipped 0; exact counters parsed from the retained TRX.
 - Package trust tests: passed 21, failed 0, skipped 0; exact counters parsed from the retained TRX. The native Windows probe denied the complete unsigned local-validation package; positive `Valid` composition used an injected fixture only.
-- Current exact-source full suite: passed 576, failed 0, skipped 0; native Windows with zero build warnings/errors.
-- Publish trees: 419 files, 178,383,168 bytes each; no path/length/SHA-256 differences. They embed .NET Core and Windows Desktop 10.0.12 plus the default-off accessible dependency-transfer workflow, exact-plan-bound product route reviewer, approval/receipt-bound deny-all redirect policy, total admitted-transfer rollback, non-authoritative post-commit progress handling, notification- and response-bound exact-turn cancellation, per-user cooperative Ollama inference sequencing, non-destructive shared-runtime quiescence, the inert owned-runtime foundation, live local-resource admission and verified complete-runtime cleanup, local-only metric privacy enable/withdrawal controls, replica-scoped shared-global-operation serialization, transactional authoritative usage-receipt admission, gated synthetic fixture code, authenticated item transfer and protected atomic set coordination/verification, the native Windows hardware/resource selector, hash-pinned P06 catalog/preflight, accessible exact-review/staging, ZIP inspector, runtime stager, protected receipt/approval anchors and staged-tree verifier. They contain no usage-receipt key/context, persisted lock ownership, route session, provider redirect rule, completed transfer set/receipt anchor, transfer state, hardware identifier/profile, model/runtime payload, runtime review/binding, approval state or per-user credential. The protected recipient workflow, read-only contributor dashboard, validation-only loopback contributor client and its explicit isolated startup route, benchmark review, global storage confinement, default-unavailable CARE operations window and assisted Facebook current-post UI are present. GlobalService simulation APIs/monitor and contributor token/pseudonym configuration are not in the desktop publish. External Ollama/FFmpeg, `nvml.dll`, `dxgi.dll`, per-user model/benchmark/recipient state, protected credentials, Facebook query/result/content, recipient metadata and local metric consent/database state are not bundled; DXGI and NVIDIA telemetry use only installed System32 components when present.
-- Reproducible staging ZIP SHA-256: `f4f33fb12537327805a3c0bdb4c0af3c22f56847955045884cca7f78717f2cac` (74,480,528 bytes).
-- Reproducible unsigned MSIX: 73,340,080 bytes; SHA-256 `22de50904d788c21b7023fd2ff01492add1f5428a91c63b69f9b853d27125eaf`; synthetic identity `DCx.AgenticBrowser.LocalValidation`, publisher `CN=DCx Local Validation`, version `1.0.0.0`, x64. MakeAppx semantic pack and exact post-canonicalization unpack passed; real Windows trust returned `NotSigned` and denied it. Signing/install attempts and production actions: 0.
+- Current exact-source full suite: passed 589, failed 0, skipped 0; native Windows with zero build warnings/errors.
+- Publish trees: 419 files, 178,489,152 bytes each; no path/length/SHA-256 differences. They embed .NET Core and Windows Desktop 10.0.12 plus the prior reviewed features and the P09 accessible offline-first Global knowledge window/view contract. Normal startup includes only its fail-closed unconfigured source; the synthetic P09 startup route remains dual-gated. No production trust root, registry origin, private knowledge, query, synchronized catalog, signing key, server configuration or per-user global replica is bundled.
+- Reproducible staging ZIP SHA-256: `72a45578068b61a4fc2a86effa3f20c2a9d6738eb8e268300addb89fe7d5f3f3` (74,495,125 bytes).
+- Reproducible unsigned MSIX: 73,356,816 bytes; SHA-256 `5e2a83cc6c24b6a47deab162b7f6307f12436f5a16aa27be929a6a60fad9b18c`; synthetic identity `DCx.AgenticBrowser.LocalValidation`, publisher `CN=DCx Local Validation`, version `1.0.0.0`, x64. MakeAppx semantic pack and exact post-canonicalization unpack passed; real Windows trust returned `NotSigned` and denied it. Signing/install attempts and production actions: 0.
 - Trusted MakeAppx version `10.0.19041.5609 (WinBuild.160101.0800)`; executable SHA-256 `f6901ebd5818a623b08a2306499f09334c7dab14bf9c9381814506aa80475f78`; signer-certificate SHA-256 `da209e0fe8bf6363318b5a41e5b65f3391d17bcb8b99b91c320ad2d22ef3469f`.
 - CycloneDX components: 9; third-party license records: 9. Three embedded-runtime notice files were copied and hashed.
 - Unexpected secret matches: 0 across repository source and 12 selected DCx-owned/published-text files; exact synthetic scanner-fixture matches: 2.
 - Microsoft Defender antivirus and real-time protection: enabled; signatures current at version `1.461.89.0`, updated `2026-10-18T08:08:29Z`; publish-tree, ZIP and unsigned-MSIX no-remediation scans returned clean. Trusted scanner SHA-256: `a4291c5b4325895d13d32e232bf50c1b41356306803ac5dc75bba9aecb021141`; signer-certificate SHA-256: `06d10a20570d92f56d784ecf2e50b1277b855e55d19841633b107c27dd5ca778`.
 - Official NuGet direct/transitive vulnerability audit: 0 advisories; sole source `https://api.nuget.org/v3/index.json`.
 - Authenticode: `NotSigned`.
-- Offline UIA heading: `DCx is ready offline`; startup 2,384 ms; working set 464.6 MiB under the provisional 1 GiB ceiling.
+- Offline UIA heading: `DCx is ready offline`; startup 4,736 ms; working set 468.1 MiB under the provisional 1 GiB ceiling.
 - Installed Stable/Evergreen normal browsing passed the P01 native UIA gate. The separately environment-gated missing-runtime fixture was denied when launched without its gate; with the gate, UIA exposed `WebView2 Runtime required`, moved keyboard focus to the heading, disabled browser commands, kept the file/media viewer enabled, exposed only the reviewed official address/copy action and local recheck, created no WebView2 profile, and attempted 0 downloads, 0 installs and 0 production actions.
 - Crash-diagnostics UIA heading: `Privacy and crash diagnostics`; consent defaulted unchecked, explicit opt-in persisted notice version 1, purge preserved enabled consent, opt-out disabled and purged, and network transfers remained zero.
 - Recovery UIA heading: `DCx backup and recovery`; main-app launcher, path input, create, default-unchecked approval, restore and assertive status are exposed.
@@ -73,6 +73,7 @@ Recorded evidence directory: `artifacts/test-results/p13-f818ffa745804cc18c0a421
 
 ## Changed files in the latest milestone
 
+- The packaged desktop now includes the P09 Global knowledge entry/window and bounded provider-neutral view source from `6239834`. Normal startup has no root/origin, performs no automatic sync and keeps search/sync disabled; the synthetic signed fixture is not production trust. ADR 0092 records the boundary.
 - The packaged desktop includes protected accessible approval and production composition for the externally installed app-owned Ollama runtime from `db448a9`. It bundles no Ollama binary, model, profile, approval state or runtime binding. Nothing starts until the user separately reviews and approves an already-installed exact signed tree/model root; ADR 0091 records bounded exact-model residency and the remaining malicious same-user boundary.
 - The packaged desktop now includes the bounded System32 DXGI inventory source and explicit per-adapter GPU-admission eligibility from `3435450`. DXGI-only budgets remain inventory-only, and neither `dxgi.dll` nor hardware observations are bundled. ADR 0088 records the boundary.
 - The packaged desktop includes the local-only, separate-approval metric enable and stop/purge surface from `9745e33`; it has no event producer, transport, enrollment or activation path, and per-user consent/database state is excluded. ADR 0087 records the boundary.
