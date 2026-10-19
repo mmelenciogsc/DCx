@@ -285,14 +285,14 @@ try {
     [xml]$packageTrustReport = Get-Content -LiteralPath $packageTrustTrx -Raw
     $packageTrustCounters = $packageTrustReport.TestRun.ResultSummary.Counters
     $packageTrustTestsPassed = [int]$packageTrustCounters.passed
-    if ($packageTrustTestsPassed -ne 21 -or
+    if ($packageTrustTestsPassed -ne 22 -or
         [int]$packageTrustCounters.total -ne $packageTrustTestsPassed -or
         [int]$packageTrustCounters.executed -ne $packageTrustTestsPassed -or
         [int]$packageTrustCounters.failed -ne 0 -or
         [int]$packageTrustCounters.error -ne 0 -or
         [int]$packageTrustCounters.timeout -ne 0 -or
         [int]$packageTrustCounters.aborted -ne 0) {
-        throw "P13 package-trust TRX counters were not exactly 21 passed and zero failed or unexecuted."
+        throw "P13 package-trust TRX counters were not exactly 22 passed and zero failed or unexecuted."
     }
 
     dotnet test $tests --configuration Release --no-build --no-restore `
@@ -547,6 +547,20 @@ try {
     }
     $actualSignatureProbe = $authenticodeConstructors[0].Invoke(
         [object[]]@($null, $null))
+    $windowsPowerShellPath = Join-Path `
+        ([Environment]::GetFolderPath([Environment+SpecialFolder]::System)) `
+        "WindowsPowerShell\v1.0\powershell.exe"
+    $positiveSignatureEvidence = $actualSignatureProbe.InspectAsync(
+        $windowsPowerShellPath,
+        [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    if ($positiveSignatureEvidence.Status -cne "Valid" -or
+        [string]::IsNullOrWhiteSpace($positiveSignatureEvidence.SignerSubject) -or
+        $positiveSignatureEvidence.SignerSubject.Length -gt 512 -or
+        $positiveSignatureEvidence.SignerSubject -cne $positiveSignatureEvidence.SignerSubject.Trim() -or
+        $positiveSignatureEvidence.SignerSubject.IndexOfAny([char[]](0..31)) -ge 0 -or
+        $positiveSignatureEvidence.SignerCertificateSha256 -cnotmatch '^[0-9a-f]{64}$') {
+        throw "The production Windows Authenticode probe did not return bounded valid evidence for a signed Windows binary."
+    }
     $actualMsixSignature = $actualSignatureProbe.InspectAsync(
         $msixOne,
         [Threading.CancellationToken]::None).GetAwaiter().GetResult()
@@ -821,6 +835,10 @@ try {
         msix_makeappx_semantic_and_unpack_validation = $true
         msix_authenticode_status = [string]$actualMsixSignature.Status
         msix_real_trust_denial = (-not [bool]$actualMsixTrust.SignatureValid)
+        windows_authenticode_positive_probe_status = [string]$positiveSignatureEvidence.Status
+        windows_authenticode_positive_probe_signer_subject = [string]$positiveSignatureEvidence.SignerSubject
+        windows_authenticode_positive_probe_certificate_sha256 = [string]$positiveSignatureEvidence.SignerCertificateSha256
+        signed_msix_positive_acceptance = $false
         msix_signing_attempted = $false
         msix_install_attempted = $false
         webview2_runtime_bundled = $false
@@ -907,6 +925,7 @@ try {
     "Reproducible semantic unsigned MSIX SHA-256=$($msixEvidenceOne.package_sha256)"
     "Unsigned MSIX MakeAppx semantic/unpack validation=PASS"
     "Unsigned MSIX real Windows trust denial=PASS ($($actualMsixSignature.Status))"
+    "Windows Authenticode probe real positive evidence=PASS ($($positiveSignatureEvidence.Status))"
     "WebView2 Evergreen Runtime required and not bundled=PASS"
     "Accessible WebView2 missing-runtime detection and fail-closed recheck=PASS"
     "Separately approved exact Microsoft default-browser prerequisite handoff=PASS"

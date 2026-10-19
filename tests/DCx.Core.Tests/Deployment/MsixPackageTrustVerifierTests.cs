@@ -162,6 +162,25 @@ public sealed class MsixPackageTrustVerifierTests : IDisposable
     }
 
     [Fact]
+    public async Task WindowsProbe_ReportsValidEvidenceForSignedWindowsBinary()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var probe = new WindowsPowerShellAuthenticodeProbe();
+
+        var evidence = await probe.InspectAsync(WindowsPowerShellPath());
+
+        Assert.Equal("Valid", evidence.Status);
+        Assert.NotNull(evidence.SignerSubject);
+        Assert.InRange(evidence.SignerSubject.Length, 1, 512);
+        Assert.Equal(evidence.SignerSubject.Trim(), evidence.SignerSubject);
+        Assert.DoesNotContain(evidence.SignerSubject, char.IsControl);
+        Assert.NotNull(evidence.SignerCertificateSha256);
+        Assert.Equal(64, evidence.SignerCertificateSha256.Length);
+        Assert.All(evidence.SignerCertificateSha256, character =>
+            Assert.True(character is >= '0' and <= '9' or >= 'a' and <= 'f'));
+    }
+
+    [Fact]
     public async Task WindowsProbe_KillsTimedOutProbeWithStableFailure()
     {
         if (!OperatingSystem.IsWindows()) return;
