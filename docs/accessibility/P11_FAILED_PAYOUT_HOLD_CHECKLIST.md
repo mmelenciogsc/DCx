@@ -1,6 +1,6 @@
 # P11 failed-payout hold accessibility checklist
 
-Automated evidence source: `a49ff3c`. Human assistive-technology rows remain release-blocking until performed by a person.
+Automated UI evidence source: `a49ff3c`. Schema-v15 durability is validated separately at `1e3596a`; the durable source has no desktop binding. Human assistive-technology rows remain release-blocking until performed by a person.
 
 | Check | Automated result | Human result |
 |---|---|---|

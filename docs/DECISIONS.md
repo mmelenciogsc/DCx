@@ -107,5 +107,6 @@
 | [0103](architecture/adr/0103-explicit-webview2-prerequisite-handoff.md) | Hand off the WebView2 prerequisite without installer authority | Accepted for accessible prerequisite recovery; installation acceptance remains blocked | 2026-10-19 |
 | [0104](architecture/adr/0104-independent-golden-pdf-pixel-gate.md) | Independently compare flattened-PDF pixels with a golden scan | Accepted for a deterministic three-page mixed-layout fixture; representative real-world documents and human visual acceptance remain blocked | 2026-10-19 |
 | [0105](architecture/adr/0105-zero-authority-failed-payout-hold-review.md) | Review failed-payout holds without creating payout authority | Accepted for generated local validation; authenticated remediation, provider execution and external notification remain blocked | 2026-10-19 |
+| [0106](architecture/adr/0106-durable-opaque-failed-payout-holds.md) | Persist opaque failed-payout holds and zero-authority decisions | Accepted for the local authoritative sandbox; authenticated transport/UI composition and external notification remain blocked | 2026-10-19 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

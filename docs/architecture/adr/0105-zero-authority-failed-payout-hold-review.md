@@ -24,5 +24,5 @@ Implementation commit `a49ff3c` passes five focused policy tests, the native rec
 
 - A keyboard or screen-reader user can now inspect a generated hold, record one bounded non-financial intent and understand local contributor statuses without exposing destinations or granting execution authority.
 - `request_recipient_update` is only a closed intent code. No recipient identity, contact channel, durable outbox, delivery receipt, acknowledgment or escalation exists.
-- The generated source is not wired to the schema-v14 remediation repository. Production operator identity/MFA/TLS, authorization, immutable centralized audit, approved accounting policy, recipient notice/subject rights, external delivery and credentialed PayPal sandbox acceptance remain blocked.
+- The generated source remains separate from authoritative state. ADR 0106 adds a durable in-process schema-v15 projection and chained decision audit, but neither source is wired to authenticated transport or the normal desktop. Production operator identity/MFA/TLS, authorization, immutable centralized audit, approved accounting policy, recipient notice/subject rights, external delivery and credentialed PayPal sandbox acceptance remain blocked.
 - Automated UIA is not human JAWS, NVDA or Narrator acceptance.
