@@ -673,11 +673,16 @@ try {
     $recoveryProcess = Start-Process $publishedExe -ArgumentList "--recovery" -PassThru
     $recoveryWindow = Wait-For { Get-MainWindow $recoveryProcess.Id } "The recovery window did not start."
     $recoveryHeading = Wait-For { Find-ById $recoveryWindow "RecoveryHeading" } "The recovery heading was not exposed through UIA."
+    $recoveryHeadingName = $recoveryHeading.Current.Name
     $recoveryPath = Wait-For { Find-ById $recoveryWindow "RecoveryBackupPath" } "The recovery backup path was not exposed through UIA."
     $recoveryCreate = Wait-For { Find-ById $recoveryWindow "RecoveryCreateBackup" } "The create-backup action was not exposed through UIA."
     $recoveryApproval = Wait-For { Find-ById $recoveryWindow "RecoveryRestoreApproval" } "The restore approval was not exposed through UIA."
     $recoveryRestore = Wait-For { Find-ById $recoveryWindow "RecoveryRestoreBackup" } "The restore action was not exposed through UIA."
     $recoveryStatus = Wait-For { Find-ById $recoveryWindow "RecoveryStatus" } "The recovery live status was not exposed through UIA."
+    $recoveryReturn = Wait-For { Find-ById $recoveryWindow "RecoveryReturnToDcx" } "The post-recovery return action was not exposed through UIA."
+    if ($recoveryReturn.Current.IsEnabled -or $recoveryReturn.Current.AccessKey -ne "T") {
+        throw "Return to DCx was not initially disabled with the exact access key."
+    }
     $backupPath = Join-Path $runRoot "recovery-ui.dcxbackup"
     $pathValue = $recoveryPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
     $pathValue.SetValue($backupPath)
@@ -686,7 +691,9 @@ try {
     $null = Wait-For {
         $recoveryStatus.Current.Name.StartsWith("Backup was not created. DCx data is in use.", [StringComparison]::Ordinal)
     } "Recovery did not deny backup while the main DCx process held the data lease."
-    if (Test-Path -LiteralPath $backupPath) { throw "A backup was created while DCx data was in use." }
+    if ((Test-Path -LiteralPath $backupPath) -or $recoveryReturn.Current.IsEnabled) {
+        throw "A backup or return authority was created while DCx data was in use."
+    }
 
     $null = $process.CloseMainWindow()
     if (-not $process.WaitForExit(5000)) { throw "The main DCx process did not close for recovery validation." }
@@ -694,7 +701,8 @@ try {
     $createInvoke.Invoke()
     $null = Wait-For {
         (Test-Path -LiteralPath $backupPath) -and
-        $recoveryStatus.Current.Name.StartsWith("Backup complete.", [StringComparison]::Ordinal)
+        $recoveryStatus.Current.Name.StartsWith("Backup complete.", [StringComparison]::Ordinal) -and
+        $recoveryReturn.Current.IsEnabled -and $recoveryReturn.Current.HasKeyboardFocus
     } "Recovery did not create a backup after DCx released the data lease."
 
     Set-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "Browser\recovery-fixture.txt") -Value "changed browser metadata" -NoNewline
@@ -726,6 +734,44 @@ try {
     if ((Get-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "WebView2\Profiles\Default\Cookies") -Raw) -ne "current cookie remains") {
         throw "Recovery changed excluded WebView2 cookie data."
     }
+    $null = Wait-For {
+        $recoveryReturn.Current.IsEnabled -and $recoveryReturn.Current.HasKeyboardFocus
+    } "A successful restore did not expose and focus Return to DCx."
+
+    $recoveryChildIdsBefore = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($recoveryProcess.Id)" |
+        ForEach-Object { [int]$_.ProcessId })
+    $recoveryReturn.SetFocus()
+    $null = Wait-For { $recoveryReturn.Current.HasKeyboardFocus } "Return to DCx did not receive keyboard focus."
+    $recoveryReturn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $returnedChild = Wait-For {
+        @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($recoveryProcess.Id)" | Where-Object {
+            $recoveryChildIdsBefore -notcontains [int]$_.ProcessId -and
+            $_.Name.Equals([IO.Path]::GetFileName($publishedExe), [StringComparison]::OrdinalIgnoreCase)
+        }) | Select-Object -First 1
+    } "Return to DCx did not start the exact child process."
+    $expectedReturnedQuoted = '"' + $publishedExe + '"'
+    if (-not [string]::Equals(
+            [IO.Path]::GetFullPath([string]$returnedChild.ExecutablePath),
+            [IO.Path]::GetFullPath($publishedExe),
+            [StringComparison]::OrdinalIgnoreCase) -or
+        ([string]$returnedChild.CommandLine -ne $expectedReturnedQuoted -and
+         [string]$returnedChild.CommandLine -ne $publishedExe)) {
+        throw "Return to DCx did not use the exact current executable with no arguments."
+    }
+    $process = [Diagnostics.Process]::GetProcessById([int]$returnedChild.ProcessId)
+    if (-not $recoveryProcess.WaitForExit(5000)) {
+        throw "The recovery window did not close after the explicit return action."
+    }
+    $recoveryProcess = $null
+    $returnedWindow = Wait-For { Get-MainWindow $process.Id } "Returned normal DCx did not open."
+    $returnedStatus = Wait-For { Find-ById $returnedWindow "StatusText" } "Returned normal DCx did not expose status."
+    $null = Wait-For {
+        $returnedStatus.Current.Name -eq "DCx is ready offline. No website was contacted during startup."
+    } "Returned normal DCx did not reach its exact offline-ready state."
+    $null = Wait-For {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $null -ne $focused -and $focused.Current.ProcessId -eq $process.Id
+    } "Returned normal DCx did not receive keyboard focus."
 
     $webView2MissingEvidence = & $webView2Validator `
         -ExecutablePath $publishedExe `
@@ -986,13 +1032,27 @@ try {
         crash_diagnostics_default_unchecked = $true
         crash_diagnostics_consent_and_purge = $true
         crash_diagnostics_network_transfers = 0
-        recovery_uia_heading = $recoveryHeading.Current.Name
+        recovery_uia_heading = $recoveryHeadingName
         recovery_launcher_uia_name = $recoveryLauncherName
         recovery_denied_while_running = $true
         recovery_backup_and_restore = $true
         recovery_restore_approval_default_unchecked = $true
         recovery_unapproved_restore_denied = $true
         recovery_excluded_cookie_unchanged = $true
+        recovery_return_initially_disabled = $true
+        recovery_return_enabled_after_backup = $true
+        recovery_return_enabled_after_restore = $true
+        recovery_return_access_key = "T"
+        recovery_return_process_starts = 1
+        recovery_return_targets_current_executable = $true
+        recovery_return_uses_no_arguments = $true
+        recovery_return_shell_execution = $false
+        recovery_return_elevation_requests = 0
+        recovery_return_package_manager_invocations = 0
+        recovery_return_installer_processes = 0
+        recovery_return_window_closed = $true
+        recovery_return_main_window_focused = $true
+        recovery_return_production_actions = 0
         production_actions = 0
         installer_claimed = $false
     }
@@ -1034,11 +1094,12 @@ try {
     "Offline startup milliseconds=$startupMilliseconds"
     "Offline working set MiB=$workingSetMiB"
     "Accessible default-off local crash diagnostics and purge=PASS"
-    "Accessible recovery UIA=$($recoveryHeading.Current.Name)"
+    "Accessible recovery UIA=$recoveryHeadingName"
     "Closed-app backup and approved restore=PASS"
     "Backup while DCx running denied=PASS"
     "Restore without explicit approval denied=PASS"
     "Excluded WebView2 cookie unchanged=PASS"
+    "Post-recovery exact Return to DCx=PASS (process=1; args=0 shell=0 elevation=0 PackageManager=0 installer=0 production=0)"
     "P13 evidence=$runRoot"
     "P13 installer signing vulnerability scan clean-VM and human-AT gate=BLOCKED"
 }

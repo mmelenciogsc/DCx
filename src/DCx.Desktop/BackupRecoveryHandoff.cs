@@ -8,13 +8,7 @@ internal sealed class WindowsBackupRecoveryHandoff : IBackupRecoveryHandoff
 {
     public BackupRecoveryHandoffResult Open()
     {
-        var executable = Environment.ProcessPath;
-        if (!IsExactCurrentExecutable(executable))
-        {
-            throw new InvalidOperationException("backup_recovery_executable_unavailable");
-        }
-
-        var startInfo = new ProcessStartInfo(executable!)
+        var startInfo = new ProcessStartInfo(CurrentExecutableProcessPolicy.Require())
         {
             CreateNoWindow = false,
             UseShellExecute = false,
@@ -38,23 +32,30 @@ internal sealed class WindowsBackupRecoveryHandoff : IBackupRecoveryHandoff
         BackupRecoveryHandoffResultPolicy.Require(result);
         return result;
     }
+}
 
-    private static bool IsExactCurrentExecutable(string? value)
+internal static class CurrentExecutableProcessPolicy
+{
+    public static string Require()
     {
+        var value = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(value) || value.Length > 32_767 ||
             value.Any(char.IsControl) || !Path.IsPathFullyQualified(value) ||
             !string.Equals(Path.GetExtension(value), ".exe", StringComparison.OrdinalIgnoreCase))
         {
-            return false;
+            throw new InvalidOperationException("current_executable_unavailable");
         }
 
         try
         {
-            return File.Exists(Path.GetFullPath(value));
+            var exact = Path.GetFullPath(value);
+            return File.Exists(exact)
+                ? exact
+                : throw new InvalidOperationException("current_executable_unavailable");
         }
         catch
         {
-            return false;
+            throw new InvalidOperationException("current_executable_unavailable");
         }
     }
 }

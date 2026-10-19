@@ -12,6 +12,8 @@ public partial class RecoveryWindow : Window
     private readonly UserDataBackupService backupService = new();
     private readonly string dataRoot = ApplicationDataRoot.Resolve();
     private readonly CancellationTokenSource lifetime = new();
+    private bool operationCompleted;
+    private bool returnConsumed;
 
     public RecoveryWindow()
     {
@@ -51,11 +53,14 @@ public partial class RecoveryWindow : Window
     private async void OnCreateBackupClick(object sender, RoutedEventArgs e)
     {
         if (!TryGetBackupPath(out var path)) return;
+        var succeeded = false;
         SetBusy(true, "Checking that DCx data is not in use.");
         try
         {
             using var lease = ApplicationDataOperationLease.Acquire(dataRoot, "creating a backup");
             var manifest = await backupService.CreateAsync(dataRoot, path, lifetime.Token);
+            operationCompleted = true;
+            succeeded = true;
             SetStatus($"Backup complete. {manifest.Entries.Count} files were written and verified.");
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
@@ -68,6 +73,7 @@ public partial class RecoveryWindow : Window
         finally
         {
             SetBusy(false);
+            if (succeeded) ReturnToDcxButton.Focus();
         }
     }
 
@@ -81,12 +87,15 @@ public partial class RecoveryWindow : Window
         }
 
         if (!TryGetBackupPath(out var path)) return;
+        var succeeded = false;
         SetBusy(true, "Checking the backup and confirming DCx data is not in use.");
         try
         {
             using var lease = ApplicationDataOperationLease.Acquire(dataRoot, "restoring a backup");
             var result = await backupService.RestoreAsync(path, dataRoot, lifetime.Token);
             RestoreApprovalBox.IsChecked = false;
+            operationCompleted = true;
+            succeeded = true;
             SetStatus($"Restore complete. {result.FileCount} files and {result.TotalBytes} bytes were verified.");
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
@@ -99,6 +108,34 @@ public partial class RecoveryWindow : Window
         finally
         {
             SetBusy(false);
+            if (succeeded) ReturnToDcxButton.Focus();
+        }
+    }
+
+    private void OnReturnToDcxClick(object sender, RoutedEventArgs e)
+    {
+        if (!operationCompleted || returnConsumed)
+        {
+            SetStatus("Return to DCx is unavailable until a backup or restore succeeds.");
+            CreateBackupButton.Focus();
+            return;
+        }
+
+        returnConsumed = true;
+        SetBusy(true, "Returning to normal DCx. No package action will run.");
+        try
+        {
+            var result = new WindowsRecoveryReturnHandoff().Open();
+            RecoveryReturnHandoffResultPolicy.Require(result);
+            Close();
+        }
+        catch
+        {
+            returnConsumed = false;
+            SetBusy(false);
+            SetStatus(
+                "Normal DCx could not open safely. Recovery remains open and no package action occurred.");
+            ReturnToDcxButton.Focus();
         }
     }
 
@@ -118,6 +155,7 @@ public partial class RecoveryWindow : Window
         ChooseDestinationButton.IsEnabled = !busy;
         ChooseExistingButton.IsEnabled = !busy;
         BackupPathBox.IsEnabled = !busy;
+        ReturnToDcxButton.IsEnabled = !busy && operationCompleted && !returnConsumed;
         if (status is not null) SetStatus(status);
     }
 

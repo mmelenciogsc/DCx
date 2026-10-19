@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="DCx backup and recovery"
         Width="760"
-        Height="560"
+        Height="620"
         MinWidth="640"
         MinHeight="480"
         AutomationProperties.AutomationId="RecoveryWindow"
@@ -102,6 +102,18 @@
                            AutomationProperties.Name="Ready. Close the main DCx window before starting an operation."
                            AutomationProperties.LiveSetting="Assertive" />
             </Border>
+
+            <Button x:Name="ReturnToDcxButton"
+                    Width="180"
+                    MinHeight="36"
+                    Margin="0,16,0,0"
+                    HorizontalAlignment="Left"
+                    IsEnabled="False"
+                    Content="Return _to DCx"
+                    AutomationProperties.AutomationId="RecoveryReturnToDcx"
+                    AutomationProperties.Name="Return to normal DCx"
+                    AutomationProperties.HelpText="Available only after a backup or restore succeeds. Starts the same DCx executable with no arguments, closes this recovery window, and performs no package action."
+                    Click="OnReturnToDcxClick" />
         </StackPanel>
     </ScrollViewer>
 </Window>
