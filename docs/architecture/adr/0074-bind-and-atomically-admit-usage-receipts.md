@@ -1,6 +1,6 @@
 # ADR 0074: Bind and atomically admit qualified usage receipts
 
-- Status: Accepted for local contribution simulation; production identity and untrusted-client verification remain blocked
+- Status: Accepted for local contribution simulation; anomaly signals extended by ADR 0101
 - Date: 2026-10-18
 
 ## Context
