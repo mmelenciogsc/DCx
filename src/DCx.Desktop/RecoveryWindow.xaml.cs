@@ -112,6 +112,31 @@ public partial class RecoveryWindow : Window
         }
     }
 
+    private async void OnVerifyBackupClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetBackupPath(out var path)) return;
+        SetBusy(true, "Verifying the selected backup without changing any data.");
+        try
+        {
+            var result = await backupService.VerifyAsync(path, lifetime.Token);
+            SetStatus(
+                $"Backup verified. {result.FileCount} files and {result.TotalBytes} bytes passed manifest, path, length, and SHA-256 checks. No data was changed.");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            SetStatus(
+                "Backup verification failed. The selected archive did not pass DCx manifest, path, length, or SHA-256 checks. No data was changed.");
+        }
+        finally
+        {
+            SetBusy(false);
+            VerifyBackupButton.Focus();
+        }
+    }
+
     private void OnReturnToDcxClick(object sender, RoutedEventArgs e)
     {
         if (!operationCompleted || returnConsumed)
@@ -151,7 +176,9 @@ public partial class RecoveryWindow : Window
     private void SetBusy(bool busy, string? status = null)
     {
         CreateBackupButton.IsEnabled = !busy;
+        VerifyBackupButton.IsEnabled = !busy;
         RestoreBackupButton.IsEnabled = !busy;
+        RestoreApprovalBox.IsEnabled = !busy;
         ChooseDestinationButton.IsEnabled = !busy;
         ChooseExistingButton.IsEnabled = !busy;
         BackupPathBox.IsEnabled = !busy;

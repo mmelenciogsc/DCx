@@ -1,12 +1,15 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace DCx.Core.Reliability;
 
 public sealed record UserDataBackupEntry(string RelativePath, long Length, string Sha256);
 
 public sealed record UserDataBackupManifest(int Schema, IReadOnlyList<UserDataBackupEntry> Entries);
+
+public sealed record UserDataBackupVerificationResult(int FileCount, long TotalBytes);
 
 public sealed record UserDataRestoreResult(int FileCount, long TotalBytes);
 
@@ -23,6 +26,7 @@ public sealed class UserDataBackupService
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         WriteIndented = true,
     };
 
@@ -109,14 +113,20 @@ public sealed class UserDataBackupService
         }
     }
 
+    public Task<UserDataBackupVerificationResult> VerifyAsync(
+        string backupPath,
+        CancellationToken cancellationToken = default)
+    {
+        var backup = ValidateBackupPath(backupPath);
+        return ReadAndVerifyArchiveAsync(backup, stagingRoot: null, cancellationToken);
+    }
+
     public async Task<UserDataRestoreResult> RestoreAsync(
         string backupPath,
         string applicationDataRoot,
         CancellationToken cancellationToken = default)
     {
-        var backup = Path.GetFullPath(backupPath);
-        if (!File.Exists(backup)) throw new FileNotFoundException("The DCx backup does not exist.", backup);
-        RejectReparsePoint(backup, "The backup file cannot be a reparse point.");
+        var backup = ValidateBackupPath(backupPath);
 
         var targetRoot = ValidateRoot(applicationDataRoot, mustExist: false);
         if (IsWithin(backup, targetRoot))
@@ -135,89 +145,13 @@ public sealed class UserDataBackupService
         var committed = false;
         try
         {
-            UserDataBackupManifest manifest;
-            await using (var input = new FileStream(
-                             backup,
-                             FileMode.Open,
-                             FileAccess.Read,
-                             FileShare.Read,
-                             64 * 1024,
-                             FileOptions.Asynchronous | FileOptions.SequentialScan))
-            using (var archive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: false))
-            {
-                var manifestEntries = archive.Entries
-                    .Where(entry => string.Equals(entry.FullName, ManifestEntryName, StringComparison.Ordinal))
-                    .ToArray();
-                if (manifestEntries.Length != 1 || manifestEntries[0].Length is <= 0 or > MaximumManifestBytes)
-                {
-                    throw new InvalidOperationException("The backup has no single bounded manifest.");
-                }
-
-                await using (var manifestStream = manifestEntries[0].Open())
-                {
-                    manifest = await JsonSerializer.DeserializeAsync<UserDataBackupManifest>(
-                                   manifestStream,
-                                   JsonOptions,
-                                   cancellationToken)
-                               .ConfigureAwait(false)
-                           ?? throw new InvalidOperationException("The backup manifest is invalid.");
-                }
-
-                ValidateManifest(manifest);
-                var payloadEntries = archive.Entries
-                    .Where(entry => !string.Equals(entry.FullName, ManifestEntryName, StringComparison.Ordinal))
-                    .ToDictionary(entry => NormalizeAndValidateRelativePath(entry.FullName), StringComparer.Ordinal);
-                if (payloadEntries.Count != manifest.Entries.Count ||
-                    payloadEntries.Keys.Except(manifest.Entries.Select(entry => entry.RelativePath), StringComparer.Ordinal).Any())
-                {
-                    throw new InvalidOperationException("The backup payload does not match its manifest.");
-                }
-
-                long totalBytes = 0;
-                foreach (var expected in manifest.Entries)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var archiveEntry = payloadEntries[expected.RelativePath];
-                    if (archiveEntry.Length != expected.Length)
-                    {
-                        throw new InvalidOperationException("A backup entry length does not match its manifest.");
-                    }
-
-                    var destination = ResolveContainedPath(staging, expected.RelativePath);
-                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                    await using var entryInput = archiveEntry.Open();
-                    await using var output = new FileStream(
-                        destination,
-                        FileMode.CreateNew,
-                        FileAccess.Write,
-                        FileShare.None,
-                        64 * 1024,
-                        FileOptions.Asynchronous | FileOptions.WriteThrough);
-                    using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                    var copied = await CopyBoundedAsync(
-                            entryInput,
-                            output,
-                            hash,
-                            MaximumTotalBytes - totalBytes,
-                            cancellationToken)
-                        .ConfigureAwait(false);
-                    totalBytes = checked(totalBytes + copied);
-                    if (copied != expected.Length ||
-                        !string.Equals(
-                            Convert.ToHexStringLower(hash.GetHashAndReset()),
-                            expected.Sha256,
-                            StringComparison.Ordinal))
-                    {
-                        throw new InvalidOperationException("A backup entry failed its SHA-256 integrity check.");
-                    }
-                }
-
-                Directory.CreateDirectory(targetRoot);
-                Directory.CreateDirectory(rollback);
-                ReplaceIncludedRoots(targetRoot, staging, rollback);
-                committed = true;
-                return new UserDataRestoreResult(manifest.Entries.Count, totalBytes);
-            }
+            var verification = await ReadAndVerifyArchiveAsync(backup, staging, cancellationToken)
+                .ConfigureAwait(false);
+            Directory.CreateDirectory(targetRoot);
+            Directory.CreateDirectory(rollback);
+            ReplaceIncludedRoots(targetRoot, staging, rollback);
+            committed = true;
+            return new UserDataRestoreResult(verification.FileCount, verification.TotalBytes);
         }
         finally
         {
@@ -228,6 +162,158 @@ public sealed class UserDataBackupService
                 Directory.Delete(rollback, recursive: true);
             }
         }
+    }
+
+    private static async Task<UserDataBackupVerificationResult> ReadAndVerifyArchiveAsync(
+        string backup,
+        string? stagingRoot,
+        CancellationToken cancellationToken)
+    {
+        await using var input = new FileStream(
+            backup,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using var archive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: false);
+        if (archive.Entries.Count is < 2 or > MaximumFiles + 1)
+        {
+            throw new InvalidOperationException("The backup archive entry count is invalid.");
+        }
+
+        var manifestEntries = archive.Entries
+            .Where(entry => string.Equals(entry.FullName, ManifestEntryName, StringComparison.Ordinal))
+            .ToArray();
+        if (manifestEntries.Length != 1 || manifestEntries[0].Length is <= 0 or > MaximumManifestBytes)
+        {
+            throw new InvalidOperationException("The backup has no single bounded manifest.");
+        }
+
+        var manifestBytes = new byte[checked((int)manifestEntries[0].Length)];
+        await using (var manifestStream = manifestEntries[0].Open())
+        {
+            await manifestStream.ReadExactlyAsync(manifestBytes, cancellationToken).ConfigureAwait(false);
+            if (await manifestStream.ReadAsync(new byte[1], cancellationToken).ConfigureAwait(false) != 0)
+            {
+                throw new InvalidOperationException("The backup manifest length is invalid.");
+            }
+        }
+
+        UserDataBackupManifest manifest;
+        try
+        {
+            using var document = JsonDocument.Parse(
+                manifestBytes,
+                new JsonDocumentOptions { AllowTrailingCommas = false, CommentHandling = JsonCommentHandling.Disallow, MaxDepth = 16 });
+            RejectDuplicateJsonProperties(document.RootElement);
+            manifest = JsonSerializer.Deserialize<UserDataBackupManifest>(manifestBytes, JsonOptions)
+                ?? throw new InvalidOperationException("The backup manifest is invalid.");
+        }
+        catch (JsonException)
+        {
+            throw new InvalidOperationException("The backup manifest is invalid.");
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(manifestBytes);
+        }
+
+        ValidateManifest(manifest);
+        var payloadEntries = new Dictionary<string, ZipArchiveEntry>(StringComparer.Ordinal);
+        foreach (var entry in archive.Entries)
+        {
+            if (string.Equals(entry.FullName, ManifestEntryName, StringComparison.Ordinal)) continue;
+            var relativePath = NormalizeAndValidateRelativePath(entry.FullName);
+            if (!payloadEntries.TryAdd(relativePath, entry))
+            {
+                throw new InvalidOperationException("The backup payload contains a duplicate path.");
+            }
+        }
+
+        if (payloadEntries.Count != manifest.Entries.Count ||
+            payloadEntries.Keys.Except(manifest.Entries.Select(entry => entry.RelativePath), StringComparer.Ordinal).Any())
+        {
+            throw new InvalidOperationException("The backup payload does not match its manifest.");
+        }
+
+        long totalBytes = 0;
+        foreach (var expected in manifest.Entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var archiveEntry = payloadEntries[expected.RelativePath];
+            if (archiveEntry.Length != expected.Length)
+            {
+                throw new InvalidOperationException("A backup entry length does not match its manifest.");
+            }
+
+            await using var entryInput = archiveEntry.Open();
+            await using var fileOutput = stagingRoot is null
+                ? null
+                : CreateStagedFile(stagingRoot, expected.RelativePath);
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var copied = await CopyBoundedAsync(
+                    entryInput,
+                    fileOutput ?? Stream.Null,
+                    hash,
+                    MaximumTotalBytes - totalBytes,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            totalBytes = checked(totalBytes + copied);
+            if (copied != expected.Length ||
+                !string.Equals(
+                    Convert.ToHexStringLower(hash.GetHashAndReset()),
+                    expected.Sha256,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("A backup entry failed its SHA-256 integrity check.");
+            }
+        }
+
+        return new UserDataBackupVerificationResult(manifest.Entries.Count, totalBytes);
+    }
+
+    private static FileStream CreateStagedFile(string stagingRoot, string relativePath)
+    {
+        var destination = ResolveContainedPath(stagingRoot, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        return new FileStream(
+            destination,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            64 * 1024,
+            FileOptions.Asynchronous | FileOptions.WriteThrough);
+    }
+
+    private static void RejectDuplicateJsonProperties(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var property in element.EnumerateObject())
+            {
+                if (!names.Add(property.Name))
+                {
+                    throw new InvalidOperationException("The backup manifest contains a duplicate JSON property.");
+                }
+
+                RejectDuplicateJsonProperties(property.Value);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray()) RejectDuplicateJsonProperties(item);
+        }
+    }
+
+    private static string ValidateBackupPath(string backupPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(backupPath);
+        var backup = Path.GetFullPath(backupPath);
+        if (!File.Exists(backup)) throw new FileNotFoundException("The DCx backup does not exist.", backup);
+        RejectReparsePoint(backup, "The backup file cannot be a reparse point.");
+        return backup;
     }
 
     private static void ReplaceIncludedRoots(string targetRoot, string staging, string rollback)
@@ -310,9 +396,10 @@ public sealed class UserDataBackupService
         return files.OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToList();
     }
 
-    private static void ValidateManifest(UserDataBackupManifest manifest)
+    private static void ValidateManifest(UserDataBackupManifest? manifest)
     {
-        if (manifest.Schema != 1 || manifest.Entries.Count is 0 or > MaximumFiles)
+        if (manifest is null || manifest.Schema != 1 || manifest.Entries is null ||
+            manifest.Entries.Count is 0 or > MaximumFiles)
         {
             throw new InvalidOperationException("The backup manifest schema or file count is invalid.");
         }
@@ -323,14 +410,18 @@ public sealed class UserDataBackupService
         {
             var normalized = NormalizeAndValidateRelativePath(entry.RelativePath);
             if (!string.Equals(normalized, entry.RelativePath, StringComparison.Ordinal) || !paths.Add(normalized) ||
-                entry.Length < 0 || entry.Sha256.Length != 64 ||
-                !entry.Sha256.All(character => Uri.IsHexDigit(character)))
+                entry.Length < 0 || entry.Sha256 is not { Length: 64 } ||
+                !entry.Sha256.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f'))
             {
                 throw new InvalidOperationException("A backup manifest entry is invalid or duplicated.");
             }
 
-            total = checked(total + entry.Length);
-            if (total > MaximumTotalBytes) throw new InvalidOperationException("The backup exceeds its total size limit.");
+            if (entry.Length > MaximumTotalBytes - total)
+            {
+                throw new InvalidOperationException("The backup exceeds its total size limit.");
+            }
+
+            total += entry.Length;
         }
     }
 

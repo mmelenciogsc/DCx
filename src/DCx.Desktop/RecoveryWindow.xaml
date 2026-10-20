@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="DCx backup and recovery"
         Width="760"
-        Height="620"
+        Height="680"
         MinWidth="640"
         MinHeight="480"
         AutomationProperties.AutomationId="RecoveryWindow"
@@ -21,7 +21,7 @@
             <TextBlock Margin="0,8,0,0"
                        FontWeight="SemiBold"
                        TextWrapping="Wrap"
-                       Text="Close the main DCx window before creating or restoring a backup. Recovery refuses to run while the data is in use." />
+                       Text="Close the main DCx window before creating or restoring a backup. Verification is read-only and may run while normal DCx is open." />
 
             <GroupBox Margin="0,20,0,0" Header="Backup file">
                 <Grid Margin="12">
@@ -68,6 +68,17 @@
                     AutomationProperties.HelpText="Creates a verified backup after confirming DCx data is not in use."
                     Click="OnCreateBackupClick" />
 
+            <Button x:Name="VerifyBackupButton"
+                    Width="210"
+                    MinHeight="36"
+                    Margin="0,12,0,0"
+                    HorizontalAlignment="Left"
+                    Content="_Verify selected backup"
+                    AutomationProperties.AutomationId="RecoveryVerifyBackup"
+                    AutomationProperties.Name="Verify selected backup"
+                    AutomationProperties.HelpText="Reads and verifies the selected archive without changing it or DCx data. Verification does not enable Return to DCx."
+                    Click="OnVerifyBackupClick" />
+
             <Separator Margin="0,20,0,16" />
 
             <TextBlock FontSize="20" FontWeight="SemiBold" Text="Restore" />
@@ -96,10 +107,10 @@
                     BorderBrush="#808080"
                     BorderThickness="1">
                 <TextBlock x:Name="RecoveryStatusText"
-                           Text="Ready. Close the main DCx window before starting an operation."
+                           Text="Ready. Close normal DCx before creating or restoring. Verification can run now."
                            TextWrapping="Wrap"
                            AutomationProperties.AutomationId="RecoveryStatus"
-                           AutomationProperties.Name="Ready. Close the main DCx window before starting an operation."
+                           AutomationProperties.Name="Ready. Close normal DCx before creating or restoring. Verification can run now."
                            AutomationProperties.LiveSetting="Assertive" />
             </Border>
 

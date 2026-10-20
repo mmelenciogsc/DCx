@@ -530,6 +530,8 @@ try {
     $publishedExe = Join-Path $publishOne "DCx.exe"
     $signature = Get-AuthenticodeSignature -FilePath $publishedExe
     $coreAssembly = [Reflection.Assembly]::LoadFrom((Join-Path $publishOne "DCx.Core.dll"))
+    $backupServiceType = $coreAssembly.GetType(
+        "DCx.Core.Reliability.UserDataBackupService", $true)
     $manifestInspectorType = $coreAssembly.GetType(
         "DCx.Core.Deployment.MsixManifestInspector", $true)
     $authenticodeProbeType = $coreAssembly.GetType(
@@ -596,6 +598,18 @@ try {
     Set-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "Browser\recovery-fixture.txt") -Value "original browser metadata" -NoNewline
     Set-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "private\owner\knowledge.db") -Value "original private knowledge" -NoNewline
     Set-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "WebView2\Profiles\Default\Cookies") -Value "original cookie" -NoNewline
+    $verificationFixturePath = Join-Path $runRoot "recovery-verification-fixture.dcxbackup"
+    $backupService = [Activator]::CreateInstance($backupServiceType)
+    $verificationManifest = $backupService.CreateAsync(
+        $env:DCX_DATA_ROOT,
+        $verificationFixturePath,
+        [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    if ($verificationManifest.Entries.Count -ne 2) {
+        throw "The read-only verification fixture did not contain the exact approved roots."
+    }
+    $verificationHashBefore = (Get-FileHash -LiteralPath $verificationFixturePath -Algorithm SHA256).Hash
+    $verificationLengthBefore = (Get-Item -LiteralPath $verificationFixturePath).Length
+    $verificationWriteBefore = (Get-Item -LiteralPath $verificationFixturePath).LastWriteTimeUtc
     $started = Get-Date
     $process = Start-Process $publishedExe -PassThru
     $window = Wait-For { Get-MainWindow $process.Id } "The published DCx window did not start offline."
@@ -676,15 +690,36 @@ try {
     $recoveryHeadingName = $recoveryHeading.Current.Name
     $recoveryPath = Wait-For { Find-ById $recoveryWindow "RecoveryBackupPath" } "The recovery backup path was not exposed through UIA."
     $recoveryCreate = Wait-For { Find-ById $recoveryWindow "RecoveryCreateBackup" } "The create-backup action was not exposed through UIA."
+    $recoveryVerify = Wait-For { Find-ById $recoveryWindow "RecoveryVerifyBackup" } "The read-only backup-verification action was not exposed through UIA."
     $recoveryApproval = Wait-For { Find-ById $recoveryWindow "RecoveryRestoreApproval" } "The restore approval was not exposed through UIA."
     $recoveryRestore = Wait-For { Find-ById $recoveryWindow "RecoveryRestoreBackup" } "The restore action was not exposed through UIA."
     $recoveryStatus = Wait-For { Find-ById $recoveryWindow "RecoveryStatus" } "The recovery live status was not exposed through UIA."
     $recoveryReturn = Wait-For { Find-ById $recoveryWindow "RecoveryReturnToDcx" } "The post-recovery return action was not exposed through UIA."
-    if ($recoveryReturn.Current.IsEnabled -or $recoveryReturn.Current.AccessKey -ne "T") {
-        throw "Return to DCx was not initially disabled with the exact access key."
+    if ($recoveryReturn.Current.IsEnabled -or $recoveryReturn.Current.AccessKey -ne "T" -or
+        $recoveryVerify.Current.AccessKey -ne "V") {
+        throw "Recovery return or verification did not expose the exact initial state and access keys."
     }
-    $backupPath = Join-Path $runRoot "recovery-ui.dcxbackup"
     $pathValue = $recoveryPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+    $pathValue.SetValue($verificationFixturePath)
+    $recoveryVerify.SetFocus()
+    $null = Wait-For { $recoveryVerify.Current.HasKeyboardFocus } "Read-only verification did not receive keyboard focus."
+    $recoveryVerify.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Wait-For {
+        $recoveryStatus.Current.Name.StartsWith("Backup verified. 2 files and ", [StringComparison]::Ordinal) -and
+        $recoveryStatus.Current.Name.EndsWith("No data was changed.", [StringComparison]::Ordinal) -and
+        $recoveryVerify.Current.IsEnabled -and $recoveryVerify.Current.HasKeyboardFocus -and
+        -not $recoveryReturn.Current.IsEnabled
+    } "Read-only backup verification did not complete without creating return authority."
+    if ($process.HasExited -or
+        (Get-FileHash -LiteralPath $verificationFixturePath -Algorithm SHA256).Hash -ne $verificationHashBefore -or
+        (Get-Item -LiteralPath $verificationFixturePath).Length -ne $verificationLengthBefore -or
+        (Get-Item -LiteralPath $verificationFixturePath).LastWriteTimeUtc -ne $verificationWriteBefore -or
+        (Get-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "Browser\recovery-fixture.txt") -Raw) -ne "original browser metadata" -or
+        (Get-Content -LiteralPath (Join-Path $env:DCX_DATA_ROOT "private\owner\knowledge.db") -Raw) -ne "original private knowledge") {
+        throw "Read-only backup verification changed the archive, DCx data, or running application state."
+    }
+
+    $backupPath = Join-Path $runRoot "recovery-ui.dcxbackup"
     $pathValue.SetValue($backupPath)
     $createInvoke = $recoveryCreate.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
     $createInvoke.Invoke()
@@ -1036,6 +1071,12 @@ try {
         recovery_launcher_uia_name = $recoveryLauncherName
         recovery_denied_while_running = $true
         recovery_backup_and_restore = $true
+        recovery_read_only_verification_while_running = $true
+        recovery_read_only_verification_access_key = "V"
+        recovery_read_only_verification_archive_unchanged = $true
+        recovery_read_only_verification_data_unchanged = $true
+        recovery_read_only_verification_return_authority = $false
+        recovery_read_only_verification_production_actions = 0
         recovery_restore_approval_default_unchecked = $true
         recovery_unapproved_restore_denied = $true
         recovery_excluded_cookie_unchanged = $true
@@ -1095,6 +1136,7 @@ try {
     "Offline working set MiB=$workingSetMiB"
     "Accessible default-off local crash diagnostics and purge=PASS"
     "Accessible recovery UIA=$recoveryHeadingName"
+    "Read-only backup verification while normal DCx owns the data lease=PASS (archive/data unchanged; return authority=false; production=0)"
     "Closed-app backup and approved restore=PASS"
     "Backup while DCx running denied=PASS"
     "Restore without explicit approval denied=PASS"
