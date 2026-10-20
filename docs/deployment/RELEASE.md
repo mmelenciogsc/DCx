@@ -45,6 +45,8 @@ The environment/root-gated native fixture now composes the lease-held transactio
 
 The tested recovery service includes browser history/bookmarks and private CKB/CCB. It deliberately excludes WebView2 profiles, cookies, browser sessions, global replicas and Windows Credential Manager records, including the P09 trust-policy revision anchor. Archives are deterministic and integrity checked, but current backup/restore is for quiescent application data only. DCx must be closed; live SQLite/WAL snapshotting is not implemented. Production recovery must define how a fresh replica is securely synchronized after OS/credential loss without weakening the protected revision floor.
 
+Recovery also provides **Verify selected backup** (`Alt+V`). Verification performs the strict manifest/path/length/SHA-256 admission checks without acquiring the application-data lease or writing staging files, so it can run while normal DCx is open. It does not enable Return, restore data or grant lifecycle authority. This is local integrity evidence only; it is not a production retention, encryption or clean-machine recovery acceptance.
+
 ## Required path to a distributable build
 
 1. Obtain explicit approval for a production package identity, code-signing operation and any separately selected security-assessment tools. The installed SignTool must not be used before that approval.

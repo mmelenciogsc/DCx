@@ -29,6 +29,8 @@ The native controlled-update window begins at a focusable heading and exposes Ch
 
 Recovery exposes `Return to normal DCx` with `Alt+T`. It begins disabled, becomes enabled only after successful backup or restore, and receives focus at that point. Activation closes Recovery only after the same no-argument executable starts; normal DCx must reach its offline-ready state and receive keyboard focus. Failure keeps Recovery open, announces stable text and restores focus to Return. Automated and outstanding human rows are recorded in `P13_RECOVERY_RETURN_CHECKLIST.md`.
 
+Recovery also exposes `Verify selected backup` with `Alt+V`. It runs while normal DCx owns the data lease, announces bounded integrity results, returns focus to Verify and never enables Return or changes data. Automated and outstanding human rows are recorded in `P13_BACKUP_VERIFICATION_CHECKLIST.md`.
+
 ## P11 failed-payout hold review
 
 The generated-data CARE operations fixture exposes a privacy-minimized failed-payout hold through stable UIA names and distinct access keys. Approval begins unchecked. Denial returns focus to approval; an accepted non-financial intent returns focus to updated details, disables replay and announces provider calls, financial mutations, payout attempts and notification transports as zero. The read-only contributor period list adds fixed local status notices, and a separate labeled list exposes subject-bound failed-payout notice records. Each notice says that it is local, no external message was sent and no automatic retry occurs. Automated details and the outstanding human JAWS/NVDA/Narrator rows are recorded in `P11_FAILED_PAYOUT_HOLD_CHECKLIST.md`.

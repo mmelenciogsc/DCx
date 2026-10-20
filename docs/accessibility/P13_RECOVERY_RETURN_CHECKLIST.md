@@ -5,6 +5,8 @@ Automated native Windows UIA evidence: PASS at `2b8df20`. Human assistive-techno
 | Check | Automated UIA | Human JAWS/NVDA/Narrator |
 |---|---|---|
 | `Return to normal DCx` exposes a stable button name and help text | Pass | Not run |
+| `Verify selected backup` exposes a stable name/help text and UIA access key `V` (`Alt+V`) | Pass | Not run |
+| Verify can run while normal DCx owns the lease and returns focus without changing data | Pass | Not run |
 | Return begins disabled and is not keyboard-focusable before a successful operation | Pass | Not run |
 | Failed lease-held backup creates no archive or return authority | Pass | Not run |
 | Successful backup enables and focuses Return | Pass | Not run |

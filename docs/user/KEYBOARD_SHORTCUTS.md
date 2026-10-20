@@ -61,6 +61,7 @@ These window-local keys are available in **DCx backup and recovery**.
 | Shortcut | Action |
 |---|---|
 | `Alt+C` | Create a verified backup after DCx releases the data lease. |
+| `Alt+V` | Verify the selected backup read-only while normal DCx may remain open. No data or recovery authority is changed. |
 | `Alt+R` | Restore the selected backup after separate replacement approval. |
 | `Alt+T` | Return to normal DCx after a backup or restore succeeds. This starts the same executable with no arguments and closes Recovery. |
 

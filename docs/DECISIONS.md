@@ -122,5 +122,6 @@
 | [0118](architecture/adr/0118-accessible-exact-current-package-uninstall-review.md) | Expose an accessible exact current-package uninstall review without granting removal authority | Accepted for local validation; production uninstall remains blocked | 2026-10-20 |
 | [0119](architecture/adr/0119-open-recovery-without-creating-backup-or-uninstall-authority.md) | Open exact recovery mode without creating backup or uninstall authority | Accepted for local user-mode handoff; backup completion and production uninstall remain blocked | 2026-10-20 |
 | [0120](architecture/adr/0120-return-to-normal-dcx-only-after-successful-recovery.md) | Return to normal DCx only after successful recovery | Accepted for local post-operation handoff; production lifecycle and human AT acceptance remain blocked | 2026-10-20 |
+| [0121](architecture/adr/0121-read-only-backup-verification.md) | Verify selected backups through strict read-only admission without lease or return authority | Accepted for local recovery hardening; production retention/recovery policy and human AT remain blocked | 2026-10-20 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

@@ -1,8 +1,8 @@
 # P14 — Pilot and release readiness
 
 - Status: BLOCKED / NO_GO (local readiness controls pass; pilot and production activation are off)
-- Product implementation commits: local consent `9745e33`; local pilot administration preview `4ff1a38`; staged cohort preview `98f2306`; accessible zero-authority transaction validation `63100d1`; positive Windows signature-probe evidence `eb6b769`; keyboard-focused denial validation `69a069b`; explicit application close/relaunch requirements `7569673`; calling-package removal boundary `d34e930`; accessible exact uninstall review `51475bc`; exact recovery handoff `211c204`; post-recovery return `2b8df20`
-- Evidence-retention commit: `7f6e707`; current exact validation source: `2b8df20`
+- Product implementation commits: read-only backup verification `7ff6387`; local consent `9745e33`; local pilot administration preview `4ff1a38`; staged cohort preview `98f2306`; accessible zero-authority transaction validation `63100d1`; positive Windows signature-probe evidence `eb6b769`; keyboard-focused denial validation `69a069b`; explicit application close/relaunch requirements `7569673`; calling-package removal boundary `d34e930`; accessible exact uninstall review `51475bc`; exact recovery handoff `211c204`; post-recovery return `2b8df20`
+- Evidence-retention commit: documentation update follows `7ff6387`; current exact validation source: `7ff6387`
 - Documentation commit: recorded by the commit containing this file
 
 No pilot was started, no telemetry was collected, no user was enrolled, and no production service or payment was activated.
@@ -40,7 +40,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14
 
 - Locked Release build: 0 warnings, 0 errors.
 - P14 exact-namespace release/readiness tests: passed 17, failed 0, skipped 0. TRX counters replace the former broad substring selector that accidentally admitted unrelated test names.
-- Current product expanded full suite at `2b8df20`: passed 699, failed 0, skipped 0; native Windows with zero build warnings/errors.
+- Current product expanded full suite at `7ff6387`: passed 701, failed 0, skipped 0; native Windows with zero build warnings/errors.
 - Critical/major issues triaged: 7/7 (100%).
 - Blocking critical/major issues: 7.
 - Privacy-minimized pilot metrics: 12.
@@ -49,11 +49,11 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14
 - Aggregate-store tests use only synthetic local values; no pilot event was collected and no network transport exists.
 - Native UIA exposed the `NO GO` decision, 7-blocker/12-metric summary, default-disabled/zero-bucket consent state, blocker/metric/recent-aggregate lists and refresh action. It proved separate initially unchecked opt-in and stop/purge approvals, successful local enable, focused completion, approval reset, successful stop/purge back to zero buckets, focused purge completion, six distinct access keys, the zero-authority administration boundary, four read-only future cohort list items and a focused seven-scenario incident dry-run. The validator confirmed that no control named `Enroll pilot`, `Send metrics` or `Activate production` exists.
 - The P11 readiness gate was rerun after composing the default-off contributor process transport with the native dashboard under a separate validation-only startup gate. It proves a read-only digest-authenticated token-to-subject mapping, operator/contributor role separation, hardened literal-loopback transport, real ledger projection and native focus/keyboard behavior. P11 remains blocking because this is not production contributor identity, MFA/TLS/credential rotation/multi-subject authorization/deployment, and production close/adjustment/hold/dispute/tax authority, exact plan/product configuration, credentials, merchant/Payouts and recipient eligibility, approved provider plus closure/requeue policy, centralized audit, deployed distributed fencing, external alert delivery/human acknowledgment/escalation and authorized provider acceptance remain absent.
-- Evidence: `artifacts/test-results/p14-dbcccc480c9b421781ea65224f4a9acc/`, generated from exact source `2b8df20` and intentionally not committed. It contains `go-no-go.json`, `p14-readiness.trx` and schema-v3 `native-readiness-uia.json` consent/focus/access-key/privacy/administration/cohort/incident-boundary evidence. The current product expanded full suite passes 699/699 at the same source with zero build warnings/errors. P13's real positive evidence covers only the read-only Windows signature probe; `signed_msix_positive_acceptance` remains false. Post-recovery return starts one exact no-argument local child only after successful backup or restore and creates no package/lifecycle authority. Activation and uninstall fixtures remain zero-authority `ValidationNoOp` paths, and both Windows package adapters remain internal/uncomposed; none altered the seven blockers, `NO_GO` or production-activation false result. No registration or removal package API was invoked.
+- Evidence: `artifacts/test-results/p14-8fa850b6077b4109b66f2a0ff29222b9/`, generated from exact source `7ff6387` and intentionally not committed. It contains `go-no-go.json`, `p14-readiness.trx` and native readiness UIA evidence. The current product expanded full suite passes 701/701 at the same source with zero build warnings/errors. P13's real positive evidence covers only the read-only Windows signature probe; `signed_msix_positive_acceptance` remains false. Read-only backup verification adds no authority and none of the seven blockers, `NO_GO` or production-activation false result changed. No registration or removal package API was invoked.
 
 ## Changed files in the latest milestone
 
-- P13's post-recovery return and zero-authority UIA gate changed no readiness rule; `scripts/validate-p14.ps1` reran unchanged and retained all seven blockers, `NO_GO` and activation false at `2b8df20`.
+- P13's read-only backup verification changed no readiness rule; `scripts/validate-p14.ps1` reran at `7ff6387` and retained all seven blockers, `NO_GO` and activation false.
 - Closed staged-cohort catalog and zero-authority blocked preview: `src/DCx.Core/Release/LocalPilotAdministrationPolicy.cs` and `tests/DCx.Core.Tests/Release/LocalPilotAdministrationPolicyTests.cs`.
 - Read-only accessible stage/status surface: `src/DCx.Desktop/ReadinessWindow.xaml` and `src/DCx.Desktop/ReadinessWindow.xaml.cs`.
 - Native four-item UIA and absent-authority evidence: `scripts/validate-p14.ps1`.
