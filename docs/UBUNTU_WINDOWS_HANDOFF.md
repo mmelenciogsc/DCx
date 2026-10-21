@@ -29,8 +29,9 @@ The Windows repository is on a filesystem Git treats as ownership-ambiguous for 
 |---|---|---|
 | OS-side toolchain | Git 2.43.0, Python 3.12.3, Node 22.22.3, Docker 29.5.2 / Compose 5.1.4 | Available for audit and later bounded service tests. |
 | DCx SDK requirement | `global.json` pins .NET SDK 10.0.401 | Required for DCx build/test. |
-| Installed `dotnet` | 8.0.132 | U16 Ubuntu .NET build/test is blocked until an owner-approved, reproducibly documented SDK-10 provision is available. Do not alter the server global toolchain from this handoff. |
-| SDK-gate probe first-run notice | The first `dotnet test --no-restore` invocation exited with `NETSDK1045` as expected and printed .NET's generic development-certificate notice. A subsequent read-only certificate check found two existing localhost development certificates dated before this probe. | No certificate trust, service, container, repository, or production-workload action occurred. Do not infer an approved DCx certificate/install path from this SDK behavior. |
+| System `dotnet` | 8.0.132 remains installed system-wide. | It was not altered. DCx does not use it in the Ubuntu validation path. |
+| DCx SDK 10.0.401 | Provisioned user-locally at `/home/marx/.local/share/dotnet-10.0.401`; `dotnet --version` returned `10.0.401`. | The verified archive was Microsoft’s Linux x64 SDK URL below, SHA-512 verified before extraction. No apt source, system SDK, Docker setting, service, or global PATH was changed. |
+| First-run certificate side effect | An initial SDK invocation created an untrusted `CN=localhost` development certificate. The exact newly-created certificate (`2491CDB98403907916384B46E051F2ADAD80DC24`) was then removed; the pre-existing certificate was preserved. | No certificate was trusted, exported, used by DCx, or deployed. The repository wrappers set `DOTNET_GENERATE_ASPNET_CERTIFICATE=false` for subsequent commands. |
 | Storage | Root filesystem had 38 GiB free; `/home/marx/driveB` had about 2.2 GiB free | The isolated clone resides outside the nearly full DriveB filesystem. Do not place model caches, Docker volumes, or generated artifacts in DriveB. |
 | Local agent lanes | BOSS health check reported both Senior and Junior lanes healthy and GPU-pinned | Available for bounded local review/coding packets, not as a substitute for Windows validation. |
 | Source license | Proprietary/all rights reserved; third-party notices are incomplete until P13 SBOM review | Do not add, download, or redistribute a dependency without license/version/SBOM review. |
@@ -43,6 +44,26 @@ The Windows repository is on a filesystem Git treats as ownership-ambiguous for 
 3. Exchange source through reviewed Git commits or explicitly approved checksum-bound artifacts. Do not SCP browser profiles, credentials, private indexes, user data, or model weights.
 4. Ubuntu may validate portable policy, source, unit/API/container simulation, security, and documentation gates after its SDK gap is resolved. Windows must validate .NET/WPF/WebView2/installer/host-bridge code.
 5. Privileged host actions, driver changes, WSL/Docker configuration, model downloads, device forwarding, account login, MFA, payments, external messages, publication, merge to a protected branch, and production deployment require separate explicit approval.
+
+## Reproducible user-local SDK 10 provision
+
+The pinned SDK version is from [`global.json`](../global.json). The provisioner’s pinned URL and digest were verified against Microsoft’s [official .NET 10 release metadata](https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json) and it downloads only this archive:
+
+```text
+https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.401/dotnet-sdk-10.0.401-linux-x64.tar.gz
+SHA-512 51c8b999af9e8dd9998c9edc5944e19a90788862068acd38694e098889054ce8c23d4f0c5cccfa16bf187d044562359e5ee69a9f8ad0bbe913ba90311fbce25b
+```
+
+`scripts/dev/provision-dotnet-10.sh` downloads over HTTPS, verifies that digest before extraction, validates `dotnet --version`, and refuses to overwrite a nonmatching destination. It installs to `/home/marx/.local/share/dotnet-10.0.401` by default; use `DCX_DOTNET_ROOT` only to select another user-owned destination. It never invokes root, apt, a service manager, Docker, or a global PATH edit.
+
+```bash
+cd /home/marx/dcx-ubuntu-ui-20261022
+scripts/dev/provision-dotnet-10.sh
+scripts/dev/provision-dotnet-10.sh --verify-only
+scripts/dev/validate-ubuntu-portable.sh
+```
+
+The portable script runs locked restore, Release build, and three source-pure OpenAI access/redaction tests. It intentionally does **not** substitute for the native Windows suite: Windows backslash traversal semantics, `.exe` fake-process fixtures, Windows Credential Manager, installer/WebView2, foreground desktop, hardware, and screen-reader requirements retain Windows/manual gates.
 
 ## Safe reproducible checks
 
@@ -65,7 +86,6 @@ When U16 has an approved Windows validation packet, use an existing repository v
 
 ## Current blockers
 
-- Ubuntu .NET SDK 10.0.401 is absent.
 - No Docker-managed Debian UI/backend/agentic continuation architecture or typed Windows–Debian bridge has been implemented or proven.
 - No common live WebView2 page/session is yet demonstrated to both user and agent under the new Docker-backed design.
-- No U16–U18 automated evidence exists; no JAWS/NVDA/Narrator, installer, device, GPU passthrough, login/MFA, camera/microphone, Bluetooth, or removable-storage manual acceptance was performed.
+- Full U16 cross-host evidence has not been rerun: no checksum-bound Windows build/test result has been captured for this branch, and no JAWS/NVDA/Narrator, installer, device, GPU passthrough, login/MFA, camera/microphone, Bluetooth, or removable-storage manual acceptance was performed.
