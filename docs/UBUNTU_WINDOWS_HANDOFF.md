@@ -23,6 +23,10 @@ The Windows laptop is the only target for Windows-native build, WebView2, instal
 
 The Windows repository is on a filesystem Git treats as ownership-ambiguous for the SSH account. Read-only checks used a command-scoped `-c safe.directory=D:/DCx`; no global Git setting was changed.
 
+## U16 remote Windows CI result
+
+With explicit owner approval, `codex/ubuntu-ui-continuation-u00` was pushed to GitHub and checked out cleanly at `f59eb4fe825e132048dc15823a12a623d09f5cf2` on Windows. The native `scripts/ci.ps1` run selected SDK `10.0.402` under `global.json`'s permitted `latestPatch` policy and produced 691 passing / 10 failing tests. Every failure was a Windows Credential Manager deletion path under the restricted noninteractive SSH context; no unrelated test failed and no source/test policy was changed to mask it. The bounded result, command, TRX hash, initial wrapper-harness correction, and remaining interactive-session gate are recorded in [`U16_WINDOWS_CI_f59eb4f.md`](evidence/U16_WINDOWS_CI_f59eb4f.md).
+
 ## Ubuntu preflight
 
 | Item | Observed result | Consequence |
