@@ -124,5 +124,6 @@
 | [0120](architecture/adr/0120-return-to-normal-dcx-only-after-successful-recovery.md) | Return to normal DCx only after successful recovery | Accepted for local post-operation handoff; production lifecycle and human AT acceptance remain blocked | 2026-10-20 |
 | [0121](architecture/adr/0121-read-only-backup-verification.md) | Verify selected backups through strict read-only admission without lease or return authority | Accepted for local recovery hardening; production retention/recovery policy and human AT remain blocked | 2026-10-20 |
 | [0122](architecture/adr/0122-ubuntu-windows-continuation-handoff.md) | Separate Ubuntu continuation development from Windows product validation | Accepted for continuation planning and U00/U16 handoff | 2026-10-22 |
+| [0123](architecture/adr/0123-u03-origin-bound-shared-browser-proof.md) | Prove one origin-bound shared WebView2 session before continuation UI expansion | Accepted for U03 design and bounded implementation | 2026-10-22 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.
