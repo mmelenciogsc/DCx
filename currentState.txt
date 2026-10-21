@@ -1,0 +1,104 @@
+# DCx continuation state
+
+Updated: 2026-10-22
+Repository checkpoint: `main` at `69936dc639fb574acc41108e69a586de7aee441d`
+Implementation/evidence checkpoint: `7ff6387` (`feat(p13): add read-only backup verification`)
+
+## Read this first
+
+DCx is an in-progress native Windows 11, accessibility-first agentic browser and local agent environment. It is not a release, installer, deployed server, approved financial system, or active pilot.
+
+This file is a concise entry point. The authoritative requirements are the complete files in `DCx_Codex_Handoff_Kit/`:
+
+1. `README.md`
+2. `DCX_PRODUCT_ARCHITECTURE.md`
+3. `DCX_PHASED_BUILD_AND_VALIDATION.md`
+4. `DCX_REFERENCES.md`
+
+Then read `AGENTS.md`, `docs/progress/STATUS.md`, `docs/progress/COMPLETION-AUDIT.md`, the active phase records, `docs/DECISIONS.md`, and applicable ADRs before changing behavior. `RESUME.md` preserves detailed lineage; its 2026-10-20 checkpoint is current, and older snapshots below it are explicitly historical.
+
+## Exact current state
+
+- The documentation commit `69936dc` records the implementation validated at `7ff6387`; this is intentional, not a discrepancy.
+- At `7ff6387`, the native Windows full suite passed **701 passed / 0 failed / 0 skipped**, with **0 build warnings/errors**.
+- Exact P13 evidence (ignored, local artifact): `artifacts/test-results/p13-664837487e3b4a6790da2031a3cf0f0f/` — 60/60 reliability, 22/22 package-trust, 3/3 WebView2-policy tests.
+- Exact P14 evidence (ignored, local artifact): `artifacts/test-results/p14-8fa850b6077b4109b66f2a0ff29222b9/` — 17/17 readiness tests, seven blockers, `NO_GO`, production activation `false`.
+- The worktree was clean before this state file was added. Evidence directories are intentionally ignored and must not be mistaken for committed evidence.
+- No Git remote is configured in this checkout. The original P00 remote workflow was therefore not run. A future push requires the exact DCx GitHub repository URL; do not guess or persist a personal access token in Git configuration, source, docs, or remotes.
+
+## Phase ledger
+
+| Phase | Current assessment | Important boundary |
+|---|---|---|
+| P00 | Complete local gate | Native Windows build/bootstrap evidence; remote workflow unrun because no remote is configured. |
+| P01 | Complete automated native gate | WebView2 shell/UIA passes; human JAWS/NVDA/Narrator acceptance remains unverified. |
+| P02 | Complete automated native gate | Shared browser control/takeover is fixture-tested; live third-party acceptance is separate. |
+| P03 | Complete automated native gate | Restricted broker/native handoff is tested; no elevation/install authority. |
+| P04 | Complete offline/native mock gate | Codex protocol, exact-turn cancellation and redaction pass; no real provider call or commercial ChatGPT distribution approval. |
+| P05 | Complete deterministic benchmark gate | BOSS roles/routing/checkpoints pass; no production cost-saving claim. |
+| P06 | **BLOCKED**, hardened partial | Live hardware/owned Ollama boundary and vision validation pass; approved transfer/install plus real Whisper/embedding acceptance remain blocked. |
+| P07 | Complete automated native gate | Document/media and local visual flows pass; not representative PDF/UA, live provider, speech, or human-AT acceptance. |
+| P08 | Complete automated local/native gate | Isolated SQLite/FTS/vector/artifact store and hostile-artifact tests pass. |
+| P09 | **BLOCKED**, hardened partial | Signed loopback registry/sync and native UI pass; production root/origin/TLS/key custody/deployment are absent. |
+| P10 | **BLOCKED**, authenticated local simulation | Strict local contribution/governance controls pass; production deployment, identity and publication authority are absent. |
+| P11 | **BLOCKED**, protected local sandbox | CARE ledger/holds/minimized subject notice pass; no credentials, provider calls, financial action, or production identity/TLS. |
+| P12 | **BLOCKED**, nine local fixtures | Composed safe flows pass; live Facebook/YouTube/QuickBooks, PDF/UA, signed install and human acceptance are absent. |
+| P13 | **BLOCKED**, hardened partial | Unsigned package/recovery/update-review hardening passes; signed lifecycle and clean-VM/security/human-AT gates are absent. |
+| P14 | **BLOCKED / NO_GO** | Local readiness/consent/admin preview pass; no enrollment, transport, activation, or approved pilot. |
+
+## Latest P13 work
+
+The latest implementation is read-only backup verification (`7ff6387`, documented by `69936dc` and ADR 0121). Recovery can verify a selected backup with `Alt+V` while the live app owns its lease. The strict verification writes nothing, leaves archive and data unchanged, and grants no return authority. The earlier one-use recovery return path (`Alt+T`) still requires a successful backup or restore. This is recovery hardening only; it is not approval for package, installer, uninstall, update, signing, or production backup policy work.
+
+P13 still requires all of the following before it can be called complete:
+
+- owner-approved production identity/certificate and signing custody;
+- genuinely signed DCx MSIX and revalidation immediately before lifecycle actions;
+- approved lifecycle coordinator plus accessible install/relaunch/upgrade/rollback/uninstall on a clean Windows 11 VM;
+- independent security assessment; and
+- human JAWS, NVDA, and Narrator acceptance.
+
+Do not sign, install, activate, uninstall, restart, publish, deploy, enroll users, or alter external services without explicit owner approval.
+
+## Earliest meaningful continuation
+
+The earliest blocked phase is P06. Its exact plan is already inspected and its authority is deliberately false. Do not download, install, pull, execute, or stage a new dependency merely because its catalog/preflight is present. The next material P06 action needs explicit owner authorization for the separately documented, non-elevated local transfer/staging and benchmark scope; see `docs/progress/PHASE-06.md` and ADRs 0055–0072. A safe continuation without that approval is limited to a genuinely useful, unprivileged hardening/documentation/test change that does not broaden authority.
+
+If the project is expanded, first map each new requirement to the appropriate phase and trust boundary, update the architecture/phase plan and threat/privacy/accessibility records, add an ADR when the decision changes a boundary, and only then implement it with an executable gate. Never use a new product requirement as implicit authorization for live providers, credentials, financial actions, server deployment, model acquisition, package signing, installation, or publication.
+
+## Required operating constraints
+
+- DCx must remain a native Windows 11 customer product. WSL is development-only.
+- Keep private CKB/CCB local; global contributions are opt-in unchecked and item-by-item approved.
+- Treat websites, documents, media, models, CCBs, and community content as untrusted input.
+- Do not copy browser cookies or credentials. Use isolated WebView2 profiles and supported user-controlled sign-in/OAuth paths.
+- Never log secrets, prompts containing private data, tokens, or credential values.
+- Distinguish automated UIA/accessibility evidence from manual JAWS/NVDA/Narrator evidence.
+- Preserve user work. Use `apply_patch` for authored edits. Do not weaken tests to obtain a passing result.
+
+## Reproduction baseline
+
+From `/mnt/d/DCx`, native Windows validation is run through WSL interop. At minimum, inspect the working tree first and reproduce the relevant phase gate. The current full sequence is listed in `RESUME.md`; core commands are:
+
+```bash
+./scripts/verify-p00.sh
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\ci.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p13.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File D:\\DCx\\scripts\\validate-p14.ps1
+```
+
+Run all phase validators when making cross-cutting changes. A Linux-only result never proves the Windows GUI gate.
+
+## High-value reference map
+
+- Requirements/phase gates: `DCx_Codex_Handoff_Kit/`.
+- Current status and requirement audit: `docs/progress/STATUS.md`, `docs/progress/COMPLETION-AUDIT.md`.
+- Active endpoint: `docs/progress/PHASE-13.md`, `docs/progress/PHASE-14.md`, ADRs 0115–0121.
+- Earliest blocked work: `docs/progress/PHASE-06.md`, ADRs 0055–0072.
+- Local-model/provider restrictions: `docs/security/THREAT_MODEL.md`, `docs/security/P06_PROVIDER_ROUTE_REVIEW.md`.
+- Release/pilot requirements: `docs/deployment/RELEASE.md`, `docs/pilot/GO_NO_GO.md`, `docs/pilot/PILOT_PLAN.md`.
+- Detailed chronological handoff: `RESUME.md`.
+
+## Before any external push
+
+Confirm the intended GitHub owner/repository URL and the remote branch state. Use an ephemeral authentication mechanism only; never add the supplied PAT to a remote URL or commit it. Fetch/reconcile remote `main`, push only the reviewed local commit, then verify `git status --short --branch` and the remote SHA. The repo currently has no remote, so this confirmation is necessary rather than optional.
