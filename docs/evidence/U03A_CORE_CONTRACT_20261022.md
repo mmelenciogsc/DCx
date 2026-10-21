@@ -38,6 +38,16 @@ Observed result: 35 passed, 0 failed, in 0.9720 seconds.
 
 `git diff --check` passed for the working change set.
 
+## Windows Core confirmation
+
+The approved Windows checkout was cleanly fast-forwarded over restricted SSH to source SHA `8138265da7696705a4015c9acb67059085b415a0`. On that host, SDK 10.0.402 built `tests/DCx.Core.Tests/DCx.Core.Tests.csproj` in Release with 0 warnings and 0 errors. The following focused command then passed 35/35 in 0.6800 seconds:
+
+```powershell
+dotnet test tests\DCx.Core.Tests\DCx.Core.Tests.csproj --configuration Release --no-build --no-restore --filter 'FullyQualifiedName~BrowserBridgeMessageValidatorTests' --logger 'console;verbosity=normal'
+```
+
+The first SSH attempt occurred before rebuilding the test project and used an incorrectly escaped PowerShell exit-status variable; it reported no matching tests and is not treated as a validation result. Rebuild followed by the command above is the recorded result. Restricted SSH still cannot prove a logged-in desktop, foreground UI, browser source event, user consent, or screen-reader behavior.
+
 ## Independent review
 
 The first independent review found arbitrary per-type payloads and no expiry binding. Those P1 findings were repaired and re-audited: P0=0, P1=0. The re-audit also requested isolated string and boundary tests; those were added before the focused 35/35 rerun.
