@@ -17,6 +17,16 @@ Status: design accepted; implementation and native foreground proof pending.
 
 Add a core-owned, versioned, strict codec for an origin-bound WebView2 message envelope. Required fields are: protocol version, opaque session identifier, message type, tab identifier, navigation generation, and bounded payload. The host must reject missing/duplicate/unknown fields, strings with controls or over-limit length, wrong origin, stale navigation, wrong tab, expired session, and unexpected type. The page-facing behavior is intentionally limited to fixture readiness, user-input/takeover notification, and proof status; it cannot request host actions.
 
+Version 1 permits only the following inert payloads. They deliberately cannot contain typed text, credentials, DOM content, URLs, selectors, or host-action arguments:
+
+| Type | Exact payload |
+|---|---|
+| `fixture-ready` | `{ "ready": true }` |
+| `user-input` | `{ "event": "take-control-requested" }` or `{ "event": "hand-control-back" }` |
+| `proof-status` | `{ "state": "ready" }`, `{ "state": "manual-step-complete" }`, or `{ "state": "complete" }` |
+
+The v1 validator binds a UTC expiry to the session and rejects at or after expiry. Its limits are 4 KiB for the full UTF-8 envelope, 1 KiB for the raw payload, 128 UTF-8 bytes for the opaque session identifier, 16 payload members per container, and payload depth four. It is a parser/validator only: U03-B must still compose an accepted message with the existing lease revocation and DOM controls.
+
 Tests must cover successful exact-origin delivery plus each rejection case. The existing broad string equality in `OnBrowserWebMessageReceived` must not remain an authority path once this packet is composed.
 
 ### Packet U03-B — isolated proof fixture
