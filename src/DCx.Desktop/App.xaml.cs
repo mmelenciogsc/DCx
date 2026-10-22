@@ -44,6 +44,13 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 1 &&
+            string.Equals(e.Args[0], "--prerequisite-review-fixture", StringComparison.Ordinal))
+        {
+            StartPrerequisiteReviewFixture();
+            return;
+        }
+
         if (e.Args.Length == 2 &&
             string.Equals(e.Args[0], "--whisper-staging-fixture", StringComparison.Ordinal))
         {
@@ -351,6 +358,32 @@ public partial class App : Application
 
             MainWindow = new PackageRemovalWindow(
                 Deployment.PackageRemovalWorkflowFactory.CreateValidationFixture());
+            MainWindow.Show();
+        }
+        catch
+        {
+            Shutdown(2);
+        }
+    }
+
+    private void StartPrerequisiteReviewFixture()
+    {
+        try
+        {
+            if (!string.Equals(
+                    Environment.GetEnvironmentVariable("DCX_PREREQUISITE_REVIEW_FIXTURE"),
+                    "1",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The prerequisite review fixture is disabled.");
+            }
+
+            var items = PrerequisiteBootstrapPolicy.RequiredPrerequisites
+                .Select(prerequisite => new PrerequisiteBootstrapItem(
+                    prerequisite,
+                    PrerequisiteDetectionStatus.Missing))
+                .ToArray();
+            MainWindow = new PrerequisiteReviewWindow(items);
             MainWindow.Show();
         }
         catch

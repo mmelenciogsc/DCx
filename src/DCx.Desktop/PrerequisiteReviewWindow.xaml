@@ -1,0 +1,181 @@
+<Window x:Class="DCx.Desktop.PrerequisiteReviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Windows prerequisite review"
+        Width="800"
+        Height="780"
+        MinWidth="660"
+        MinHeight="600"
+        AutomationProperties.AutomationId="PrerequisiteReviewWindow"
+        AutomationProperties.Name="Windows prerequisite review">
+    <Window.Resources>
+        <Style x:Key="VisibleFocusStyle" TargetType="{x:Type Control}">
+            <Setter Property="FocusVisualStyle">
+                <Setter.Value>
+                    <Style TargetType="{x:Type Control}">
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate>
+                                    <Border Margin="-3"
+                                            BorderBrush="#005A9C"
+                                            BorderThickness="3"
+                                            CornerRadius="2" />
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel Margin="24">
+        <Border DockPanel.Dock="Bottom"
+                Margin="0,16,0,0"
+                Padding="12"
+                Background="#F3F3F3"
+                BorderBrush="#606060"
+                BorderThickness="1">
+            <TextBlock x:Name="StatusText"
+                       Focusable="True"
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="PrerequisiteReviewStatus"
+                       AutomationProperties.Name="Prerequisite review status"
+                       AutomationProperties.LiveSetting="Assertive" />
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock x:Name="HeadingText"
+                           FontSize="28"
+                           FontWeight="SemiBold"
+                           Focusable="True"
+                           Text="Review Windows prerequisite"
+                           AutomationProperties.AutomationId="PrerequisiteReviewHeading"
+                           AutomationProperties.Name="Review Windows prerequisite" />
+
+                <TextBlock x:Name="PositionText"
+                           Margin="0,6,0,0"
+                           FontWeight="SemiBold"
+                           AutomationProperties.AutomationId="PrerequisiteReviewPosition"
+                           AutomationProperties.Name="Prerequisite position" />
+
+                <Border Margin="0,16,0,0"
+                        Padding="12"
+                        BorderBrush="#606060"
+                        BorderThickness="1">
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="Review-only security boundary" />
+                        <TextBlock x:Name="BoundaryText"
+                                   Margin="0,6,0,0"
+                                   TextWrapping="Wrap"
+                                   Text="This review can record a decision for one prerequisite at a time. It cannot download source files, install software, start an installer or package manager, request elevation, or invoke PowerShell."
+                                   AutomationProperties.AutomationId="PrerequisiteReviewBoundary"
+                                   AutomationProperties.Name="Review-only security boundary" />
+                    </StackPanel>
+                </Border>
+
+                <GroupBox Margin="0,16,0,0"
+                          Header="Exact prerequisite details"
+                          AutomationProperties.AutomationId="PrerequisiteDetailsGroup"
+                          AutomationProperties.Name="Exact prerequisite details">
+                    <Grid Margin="12,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="190" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Label Grid.Row="0" Padding="0,5" Target="{Binding ElementName=PrerequisiteNameText}" Content="Prerequisite name" />
+                        <TextBox x:Name="PrerequisiteNameText" Grid.Row="0" Grid.Column="1" Margin="0,0,0,8" Padding="6" IsReadOnly="True" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="PrerequisiteName" AutomationProperties.Name="Prerequisite name" />
+                        <Label Grid.Row="1" Padding="0,5" Target="{Binding ElementName=PublisherText}" Content="Publisher" />
+                        <TextBox x:Name="PublisherText" Grid.Row="1" Grid.Column="1" Margin="0,0,0,8" Padding="6" IsReadOnly="True" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="PrerequisitePublisher" AutomationProperties.Name="Prerequisite publisher" />
+                        <Label Grid.Row="2" Padding="0,5" Target="{Binding ElementName=OfficialUriText}" Content="Official website URI" />
+                        <TextBox x:Name="OfficialUriText" Grid.Row="2" Grid.Column="1" Margin="0,0,0,8" Padding="6" IsReadOnly="True" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="PrerequisiteOfficialUri" AutomationProperties.Name="Official prerequisite website URI" AutomationProperties.HelpText="Read-only reviewed official HTTPS URI. This window cannot open, download from, or navigate to it." />
+                        <Label Grid.Row="3" Padding="0,5" Target="{Binding ElementName=TermsUriText}" Content="Terms URI" />
+                        <TextBox x:Name="TermsUriText" Grid.Row="3" Grid.Column="1" Margin="0,0,0,8" Padding="6" IsReadOnly="True" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="PrerequisiteTermsUri" AutomationProperties.Name="Prerequisite terms URI" AutomationProperties.HelpText="Read-only reviewed terms HTTPS URI. This window cannot open, download from, or navigate to it." />
+                        <Label Grid.Row="4" Padding="0,5" Target="{Binding ElementName=PrivilegeText}" Content="Privilege disclosure" />
+                        <TextBox x:Name="PrivilegeText" Grid.Row="4" Grid.Column="1" Margin="0,0,0,8" Padding="6" IsReadOnly="True" TextWrapping="Wrap" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="PrerequisitePrivilegeDisclosure" AutomationProperties.Name="Prerequisite privilege disclosure" />
+                        <Label Grid.Row="5" Padding="0,5" Target="{Binding ElementName=DetailsText}" Content="Read-only detail" />
+                        <TextBox x:Name="DetailsText" Grid.Row="5" Grid.Column="1" MinHeight="90" Padding="6" IsReadOnly="True" IsReadOnlyCaretVisible="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="PrerequisiteReadOnlyDetails" AutomationProperties.Name="Read-only prerequisite detail" />
+                    </Grid>
+                </GroupBox>
+
+                <CheckBox x:Name="TermsAcknowledgementBox"
+                          Margin="0,16,0,0"
+                          IsChecked="False"
+                          FontWeight="SemiBold"
+                          Style="{StaticResource VisibleFocusStyle}"
+                          AutomationProperties.AutomationId="PrerequisiteTermsAcknowledgement"
+                          AutomationProperties.Name="Acknowledge the displayed prerequisite terms"
+                          AutomationProperties.HelpText="Unchecked by default. This acknowledges only the displayed terms URI for this prerequisite; it does not approve installation."
+                          Checked="OnConsentChanged"
+                          Unchecked="OnConsentChanged">
+                    <AccessText Text="I have reviewed the displayed _terms for this prerequisite." TextWrapping="Wrap" />
+                </CheckBox>
+
+                <CheckBox x:Name="InstallApprovalBox"
+                          Margin="0,10,0,0"
+                          IsChecked="False"
+                          FontWeight="SemiBold"
+                          Style="{StaticResource VisibleFocusStyle}"
+                          AutomationProperties.AutomationId="PrerequisiteInstallApproval"
+                          AutomationProperties.Name="Approve an external installation for this prerequisite"
+                          AutomationProperties.HelpText="Unchecked by default. This records item-specific consent only; this window cannot download, install, elevate, or invoke PowerShell."
+                          Checked="OnConsentChanged"
+                          Unchecked="OnConsentChanged">
+                    <AccessText Text="_I approve an external installation of this exact prerequisite." TextWrapping="Wrap" />
+                </CheckBox>
+
+                <WrapPanel Margin="0,18,0,0">
+                    <Button x:Name="DeclineButton"
+                            MinWidth="130"
+                            MinHeight="38"
+                            Margin="0,0,8,8"
+                            Content="_Decline"
+                            Style="{StaticResource VisibleFocusStyle}"
+                            AutomationProperties.AutomationId="PrerequisiteDeclineButton"
+                            AutomationProperties.Name="Decline this prerequisite installation"
+                            AutomationProperties.HelpText="Records a decline for this prerequisite only. No download or installation occurs."
+                            Click="OnDeclineClick" />
+                    <Button x:Name="RetryButton"
+                            MinWidth="130"
+                            MinHeight="38"
+                            Margin="0,0,8,8"
+                            Content="_Retry review"
+                            Style="{StaticResource VisibleFocusStyle}"
+                            AutomationProperties.AutomationId="PrerequisiteRetryButton"
+                            AutomationProperties.Name="Retry this prerequisite review"
+                            AutomationProperties.HelpText="Clears the current review decision and reevaluates the supplied read-only detection result. It cannot detect, download, or install software."
+                            Click="OnRetryClick" />
+                    <Button x:Name="ContinueButton"
+                            MinWidth="130"
+                            MinHeight="38"
+                            Margin="0,0,8,8"
+                            Content="_Continue"
+                            Style="{StaticResource VisibleFocusStyle}"
+                            AutomationProperties.AutomationId="PrerequisiteContinueButton"
+                            AutomationProperties.Name="Continue to the next prerequisite"
+                            AutomationProperties.HelpText="Available only after this item is ready, declined, or has separate terms and installation consent. This does not begin an installation."
+                            Click="OnContinueClick" />
+                    <Button x:Name="CloseButton"
+                            MinWidth="110"
+                            MinHeight="38"
+                            Margin="0,0,0,8"
+                            Content="C_lose"
+                            Style="{StaticResource VisibleFocusStyle}"
+                            AutomationProperties.AutomationId="PrerequisiteCloseButton"
+                            AutomationProperties.Name="Close Windows prerequisite review"
+                            Click="OnCloseClick" />
+                </WrapPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>
