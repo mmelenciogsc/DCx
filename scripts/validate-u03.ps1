@@ -25,11 +25,21 @@ $fixtureProcessStarted = $false
 $dcxProcess = $null
 $validationFailure = $null
 $cleanupFailure = $null
+$manualGatesReported = $false
 $evidence = New-Object System.Collections.Generic.List[string]
 
 function Add-Evidence([string]$line) {
     $script:evidence.Add($line)
     Write-Output $line
+}
+
+function Add-ManualGateBlocks {
+    if ($script:manualGatesReported) { return }
+
+    $script:manualGatesReported = $true
+    Add-Evidence "BLOCKED: Manual user editing, takeover, and hand-back require an attended foreground Windows session and were not automated."
+    Add-Evidence "BLOCKED: Keyboard-focus-path validation requires a human foreground observation and was not claimed by UI Automation."
+    Add-Evidence "BLOCKED: Screen-reader observations (Narrator, NVDA, and JAWS) require a human assistive-technology validation session and were not claimed."
 }
 
 function Wait-For([scriptblock]$condition, [string]$failureMessage, [int]$attempts = 40) {
@@ -124,6 +134,10 @@ if ($null -eq (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "Docker CLI is unavailable."
 }
 
+if ($null -eq (Get-Command git -ErrorAction SilentlyContinue)) {
+    throw "Git is unavailable; the U03 source revision cannot be captured."
+}
+
 & docker info *> $null
 if ($LASTEXITCODE -ne 0) {
     throw "Docker daemon is unavailable."
@@ -133,6 +147,11 @@ $null = Invoke-U03Compose @("version")
 $renderedCompose = (Invoke-U03Compose @("config")) -join "`n"
 if ([string]::IsNullOrWhiteSpace($renderedCompose)) {
     throw "The U03 fixture Compose configuration was empty."
+}
+
+$sourceRevision = (& git -C $repoRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceRevision -notmatch '^[0-9a-f]{40}$') {
+    throw "The U03 source revision was unavailable."
 }
 
 $existingResources = @(Get-U03ExistingResources)
@@ -146,7 +165,9 @@ $env:DCX_DOWNLOAD_ROOT = Join-Path $runRoot "downloads"
 
 try {
     Add-Evidence "compose-file=$composeFile"
+    Add-Evidence "source-revision=$sourceRevision"
     Add-Evidence "compose-config-sha256=$(Get-Sha256Text $renderedCompose)"
+    Add-Evidence "dcx-executable-sha256=$((Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLowerInvariant())"
     Add-Evidence "fixture-source-sha256=$((Get-FileHash -Algorithm SHA256 -LiteralPath $fixtureFile).Hash.ToLowerInvariant())"
 
     # Set before up so a partially created project is also removed by the finally block.
@@ -237,9 +258,6 @@ try {
     Add-Evidence "uia-status-after-navigation=$($status.Current.Name)"
     Add-Evidence "uia-window-title-after-navigation=$($window.Current.Name)"
     Add-Evidence "uia-agent-controls=PASS"
-    Add-Evidence "BLOCKED: Manual user editing, takeover, and hand-back require an attended foreground Windows session and were not automated."
-    Add-Evidence "BLOCKED: Keyboard-focus-path validation requires a human foreground observation and was not claimed by UI Automation."
-    Add-Evidence "BLOCKED: Narrator, NVDA, and JAWS observations require a human assistive-technology validation session and were not claimed."
     Add-Evidence "U03 automated fixture validation=PASS (Docker lifecycle, HTTP health, and observable host UIA only)."
 }
 catch {
@@ -268,6 +286,8 @@ finally {
 
     $env:DCX_DATA_ROOT = $previousDataRoot
     $env:DCX_DOWNLOAD_ROOT = $previousDownloadRoot
+
+    Add-ManualGateBlocks
 
     if (Test-Path -LiteralPath $runRoot -PathType Container) {
         $evidence | Set-Content -LiteralPath $evidenceFile -Encoding UTF8
