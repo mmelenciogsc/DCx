@@ -137,7 +137,7 @@ if ([string]::IsNullOrWhiteSpace($renderedCompose)) {
 
 $existingResources = @(Get-U03ExistingResources)
 if ($existingResources.Count -ne 0) {
-    throw "Refusing to run because matching U03 Compose resources already exist for $projectName: $($existingResources -join ', ')"
+    throw "Refusing to run because matching U03 Compose resources already exist for ${projectName}: $($existingResources -join ', ')"
 }
 
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
@@ -219,7 +219,8 @@ try {
     $address.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($fixtureUrl)
     $goButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For {
-        $status.Current.Name -like "Page loaded in * profile."
+        $status.Current.Name -like "Page loaded in * profile." -and
+        $window.Current.Name -like "DCx U03 controlled fixture*"
     } "DCx did not report that the U03 fixture page loaded."
 
     $agentDrawer = Wait-For { Find-ById $window "AgentDrawerButton" } "The observable DCx agent-controls button was not exposed through UI Automation."
@@ -234,6 +235,7 @@ try {
     Add-Evidence "uia-address-control=PASS"
     Add-Evidence "uia-go-control=PASS"
     Add-Evidence "uia-status-after-navigation=$($status.Current.Name)"
+    Add-Evidence "uia-window-title-after-navigation=$($window.Current.Name)"
     Add-Evidence "uia-agent-controls=PASS"
     Add-Evidence "BLOCKED: Manual user editing, takeover, and hand-back require an attended foreground Windows session and were not automated."
     Add-Evidence "BLOCKED: Keyboard-focus-path validation requires a human foreground observation and was not claimed by UI Automation."
