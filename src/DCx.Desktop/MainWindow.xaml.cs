@@ -1,6 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -30,6 +33,7 @@ namespace DCx.Desktop;
 public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
 {
     private static readonly Uri StartPage = new("https://example.com/");
+    private static readonly Uri U03FixtureOrigin = new("http://127.0.0.1:43189/");
 
     private readonly IWebView2RuntimeProbe _webView2RuntimeProbe;
     private readonly IWebView2PrerequisiteHandoff _webView2PrerequisiteHandoff;
@@ -40,6 +44,7 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
     private readonly BrowserBookmarkStore _bookmarkStore;
     private readonly DownloadPathPolicy _downloadPathPolicy = new();
     private readonly BrowserControlCoordinator _controlCoordinator = new();
+    private readonly BrowserBridgeMessageDispatcher _browserBridgeDispatcher;
     private readonly BrowserDomAdapter _domAdapter;
     private readonly FacebookHistoricalPostPageInspector _facebookPostPageInspector = new();
     private WebVideoFrameDescriptionService? _webVideoFrameDescriptionService;
@@ -106,6 +111,7 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
         _globalRegistryEnrollmentStore = globalRegistryEnrollmentStore ??
             throw new ArgumentNullException(nameof(globalRegistryEnrollmentStore));
         _domAdapter = new BrowserDomAdapter(_controlCoordinator);
+        _browserBridgeDispatcher = new BrowserBridgeMessageDispatcher(_controlCoordinator);
         var metadataPaths = new BrowserMetadataPaths();
         _historyStore = new BrowserHistoryStore(metadataPaths.HistoryFile);
         _bookmarkStore = new BrowserBookmarkStore(metadataPaths.BookmarksFile);
@@ -397,14 +403,12 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
         core.DocumentTitleChanged += (_, _) => OnDocumentTitleChanged(tab);
         core.DownloadStarting += (_, args) => OnDownloadStarting(tab, args);
         core.NewWindowRequested += (_, args) => OnNewWindowRequested(tab, args);
-        core.WebMessageReceived += (_, args) => OnBrowserWebMessageReceived(args);
-        await core.AddScriptToExecuteOnDocumentCreatedAsync(
-            "document.addEventListener('keydown',()=>window.chrome.webview.postMessage('dcx:user-input'),true);" +
-            "document.addEventListener('pointerdown',()=>window.chrome.webview.postMessage('dcx:user-input'),true);");
+        core.WebMessageReceived += (_, args) => OnBrowserWebMessageReceived(tab, args);
     }
 
     private void OnNavigationStarting(BrowserTabState tab, CoreWebView2NavigationStartingEventArgs args)
     {
+        tab.BridgeValidator = null;
         if (ReferenceEquals(tab, _pausedWebVideoTab))
         {
             _pausedWebVideoTab = null;
@@ -470,6 +474,8 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
 
             return;
         }
+
+        ActivateU03BridgeForCompletedNavigation(tab);
 
         try
         {
@@ -565,20 +571,124 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
         await CreateTabAsync(tab.ProfileName, decision.Uri);
     }
 
-    private void OnBrowserWebMessageReceived(CoreWebView2WebMessageReceivedEventArgs args)
+    private void OnBrowserWebMessageReceived(BrowserTabState tab, CoreWebView2WebMessageReceivedEventArgs args)
+    {
+        BrowserBridgeMessageValidator? validator = tab.BridgeValidator;
+        if (validator is null ||
+            !Uri.TryCreate(args.Source, UriKind.Absolute, out var source) ||
+            !TryGetWebMessageUtf8(args, out var messageUtf8) ||
+            !validator.TryValidate(source, messageUtf8, out var message, out _))
+        {
+            RejectBridgeMessage(tab, "An invalid page bridge message revoked the agent lease.");
+            return;
+        }
+
+        try
+        {
+            var outcome = _browserBridgeDispatcher.Dispatch(message);
+            if (outcome.ControlRevoked)
+            {
+                if (_agentDemoStage is not AgentDemoStage.None and not AgentDemoStage.Completed and not AgentDemoStage.Cancelled)
+                {
+                    _agentDemoStage = AgentDemoStage.AwaitingUser;
+                    AgentUserInstruction.Text = "Your control. The agent lease was revoked. Hand back only if you want the approved task to continue.";
+                }
+
+                AddAgentLog(outcome.Reason);
+            }
+        }
+        catch (Exception)
+        {
+            RejectBridgeMessage(tab, "An invalid page bridge message revoked the agent lease.");
+        }
+    }
+
+    private void ActivateU03BridgeForCompletedNavigation(BrowserTabState tab)
+    {
+        var currentAddress = tab.Browser.Source;
+        if (currentAddress is null || !IsU03FixtureOrigin(currentAddress))
+        {
+            return;
+        }
+
+        var expiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(5);
+        var sessionId = CreateBridgeSessionId();
+        var validator = new BrowserBridgeMessageValidator(
+            U03FixtureOrigin,
+            sessionId,
+            tab.TabId,
+            tab.NavigationGeneration,
+            expiresAtUtc,
+            TimeProvider.System);
+        tab.BridgeValidator = validator;
+
+        try
+        {
+            tab.Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
+            {
+                version = 1,
+                sessionId,
+                tabId = tab.TabId.ToString("D"),
+                navigationGeneration = tab.NavigationGeneration,
+                expiresAtUtc,
+            }));
+        }
+        catch (Exception)
+        {
+            tab.BridgeValidator = null;
+            RejectBridgeMessage(tab, "The U03 fixture bridge could not be initialized; the agent lease was revoked.");
+        }
+    }
+
+    private static bool IsU03FixtureOrigin(Uri address)
     {
         try
         {
-            if (args.TryGetWebMessageAsString() == "dcx:user-input")
-            {
-                RegisterPhysicalUserInput("User input inside the live page revoked the agent lease.");
-            }
+            return address.IsLoopback &&
+                   string.Equals(
+                       BrowserOrigin.FromUri(address),
+                       BrowserOrigin.FromUri(U03FixtureOrigin),
+                       StringComparison.Ordinal);
         }
         catch (ArgumentException)
         {
-            // Non-string messages are untrusted page data and are intentionally ignored.
+            return false;
         }
     }
+
+    private static bool TryGetWebMessageUtf8(
+        CoreWebView2WebMessageReceivedEventArgs args,
+        out ReadOnlyMemory<byte> messageUtf8)
+    {
+        messageUtf8 = ReadOnlyMemory<byte>.Empty;
+        try
+        {
+            var messageJson = args.WebMessageAsJson;
+            if (string.IsNullOrEmpty(messageJson))
+            {
+                return false;
+            }
+
+            messageUtf8 = Encoding.UTF8.GetBytes(messageJson);
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private void RejectBridgeMessage(BrowserTabState tab, string reason)
+    {
+        tab.BridgeValidator = null;
+        RegisterPhysicalUserInput(reason);
+    }
+
+    private static string CreateBridgeSessionId() =>
+        Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
 
     private void NavigateFromAddressBar()
     {
@@ -1786,6 +1896,8 @@ public partial class MainWindow : Window, IFacebookHistoricalPostBrowserHost
         public bool IsLoading { get; set; }
 
         public long NavigationGeneration { get; set; }
+
+        public BrowserBridgeMessageValidator? BridgeValidator { get; set; }
     }
 
     private enum AgentDemoStage

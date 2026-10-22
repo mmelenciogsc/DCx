@@ -97,6 +97,12 @@ public sealed class BrowserControlCoordinator
     {
         lock (_sync)
         {
+            if (!TryGetHttpOrigin(currentAddress, out var currentOrigin))
+            {
+                rejectionReason = "The current page address is not an absolute HTTP or HTTPS URI.";
+                return false;
+            }
+
             if (!ValidateActiveLeaseUnsafe(leaseId, tabId, out rejectionReason))
             {
                 return false;
@@ -108,7 +114,7 @@ public sealed class BrowserControlCoordinator
                 return false;
             }
 
-            if (!string.Equals(_lease.AllowedOrigin, BrowserOrigin.FromUri(currentAddress), StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(_lease.AllowedOrigin, currentOrigin, StringComparison.OrdinalIgnoreCase))
             {
                 rejectionReason = "The current page origin is outside the approved agent scope.";
                 return false;
@@ -123,12 +129,18 @@ public sealed class BrowserControlCoordinator
     {
         lock (_sync)
         {
+            if (!TryGetHttpOrigin(target, out var targetOrigin))
+            {
+                rejectionReason = "The navigation target is not an absolute HTTP or HTTPS URI.";
+                return false;
+            }
+
             if (!ValidateActiveLeaseUnsafe(leaseId, tabId, out rejectionReason))
             {
                 return false;
             }
 
-            if (!string.Equals(_lease!.AllowedOrigin, BrowserOrigin.FromUri(target), StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(_lease!.AllowedOrigin, targetOrigin, StringComparison.OrdinalIgnoreCase))
             {
                 rejectionReason = "The target origin is outside the approved agent scope.";
                 return false;
@@ -277,12 +289,18 @@ public sealed class BrowserControlCoordinator
 
     private bool IsNavigationAllowedUnsafe(Guid leaseId, Guid tabId, Uri target, out string rejectionReason)
     {
+        if (!TryGetHttpOrigin(target, out var targetOrigin))
+        {
+            rejectionReason = "The navigation target is not an absolute HTTP or HTTPS URI.";
+            return false;
+        }
+
         if (!ValidateActiveLeaseUnsafe(leaseId, tabId, out rejectionReason))
         {
             return false;
         }
 
-        if (!string.Equals(_lease!.AllowedOrigin, BrowserOrigin.FromUri(target), StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(_lease!.AllowedOrigin, targetOrigin, StringComparison.OrdinalIgnoreCase))
         {
             rejectionReason = "The target origin is outside the approved agent scope.";
             return false;
@@ -290,6 +308,25 @@ public sealed class BrowserControlCoordinator
 
         rejectionReason = string.Empty;
         return true;
+    }
+
+    private static bool TryGetHttpOrigin(Uri? uri, out string origin)
+    {
+        origin = string.Empty;
+        if (uri is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            origin = BrowserOrigin.FromUri(uri);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     private bool ValidateActiveLeaseUnsafe(Guid leaseId, Guid tabId, out string rejectionReason)
@@ -354,4 +391,3 @@ public sealed class BrowserControlCoordinator
 
     private void Raise(BrowserControlChangedEventArgs args) => ModeChanged?.Invoke(this, args);
 }
-

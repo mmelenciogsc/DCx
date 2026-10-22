@@ -75,6 +75,48 @@ public sealed class BrowserControlCoordinatorTests
         Assert.Contains("outside", reason, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("file:///C:/fixture.html")]
+    [InlineData("ftp://fixture.example/proof")]
+    public void InvalidOrNonHttpAddressesAreDeniedWithoutThrowing(string address)
+    {
+        var coordinator = new BrowserControlCoordinator();
+        var tab = Guid.NewGuid();
+        var request = coordinator.RequestAgentControl("Navigate", ApprovedPage);
+        var lease = coordinator.ApproveAgentControl(request.RequestId, tab, 1);
+        var invalidAddress = new Uri(address);
+
+        Assert.False(coordinator.IsDomActionAllowed(
+            lease.LeaseId,
+            tab,
+            invalidAddress,
+            1,
+            out var domReason));
+        Assert.Contains("HTTP", domReason, StringComparison.OrdinalIgnoreCase);
+
+        Assert.False(coordinator.IsNavigationAllowed(
+            lease.LeaseId,
+            tab,
+            invalidAddress,
+            out var navigationReason));
+        Assert.Contains("HTTP", navigationReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(lease, coordinator.CurrentLease);
+    }
+
+    [Fact]
+    public void RelativeAddressesAreDeniedWithoutThrowing()
+    {
+        var coordinator = new BrowserControlCoordinator();
+        var tab = Guid.NewGuid();
+        var request = coordinator.RequestAgentControl("Navigate", ApprovedPage);
+        var lease = coordinator.ApproveAgentControl(request.RequestId, tab, 1);
+        var relativeAddress = new Uri("fixture", UriKind.Relative);
+
+        Assert.False(coordinator.IsDomActionAllowed(lease.LeaseId, tab, relativeAddress, 1, out _));
+        Assert.False(coordinator.IsNavigationAllowed(lease.LeaseId, tab, relativeAddress, out _));
+        Assert.Equal(lease, coordinator.CurrentLease);
+    }
+
     [Fact]
     public void PhysicalUserInputRevokesLeaseAndRequiresExplicitHandback()
     {
@@ -118,4 +160,3 @@ public sealed class BrowserControlCoordinatorTests
         Assert.Null(coordinator.CurrentLease);
     }
 }
-

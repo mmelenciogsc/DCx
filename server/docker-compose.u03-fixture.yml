@@ -1,0 +1,15 @@
+# This fixture is deliberately opt-in. It has no production service relationship.
+services:
+  u03-fixture:
+    profiles: [manual]
+    build:
+      context: ./u03-fixture
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:43189:8080"
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DCx U03 controlled fixture</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #1b1b1b; background: #fff; }
+    body { max-width: 48rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    fieldset, .status-panel { border: 2px solid currentColor; padding: 1rem; margin: 1rem 0; }
+    label, input, button { display: block; }
+    input { box-sizing: border-box; max-width: 28rem; width: 100%; padding: .5rem; margin: .25rem 0 1rem; }
+    button { margin: .75rem 0; padding: .55rem .75rem; }
+    .status-panel p { margin: .4rem 0; }
+    .notice { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main aria-labelledby="fixture-title">
+    <h1 id="fixture-title">DCx controlled shared-browser proof fixture</h1>
+    <p>This local, test-only page is not an external-login emulator and does not validate MFA.</p>
+
+    <section aria-labelledby="entry-heading">
+      <h2 id="entry-heading">Direct user editing</h2>
+      <p id="entry-note">These fields have no form, submit action, or storage. The fixture does not read their contents.</p>
+      <fieldset aria-describedby="entry-note">
+        <legend>Controlled test fields</legend>
+        <label for="fixture-text">Normal text field</label>
+        <input id="fixture-text" type="text" autocomplete="off">
+
+        <label for="fixture-password">Password field</label>
+        <input id="fixture-password" type="password" autocomplete="off">
+      </fieldset>
+    </section>
+
+    <section aria-labelledby="control-heading">
+      <h2 id="control-heading">Explicit control sequence</h2>
+      <ol>
+        <li>Approve the manual proof step.</li>
+        <li>Notify the host that the user requests takeover.</li>
+        <li>Request hand control back. Only the host may restore a lease.</li>
+      </ol>
+      <button id="approve-step" type="button">Approve manual proof step</button>
+      <button id="request-takeover" type="button">Request user takeover</button>
+      <button id="request-handback" type="button">Request hand control back</button>
+    </section>
+
+    <section class="status-panel" aria-labelledby="status-heading">
+      <h2 id="status-heading">Fixture status</h2>
+      <p id="fixture-status" role="status" aria-live="polite">Ready. Awaiting an explicit manual proof step.</p>
+      <p><span class="notice">State:</span> <span id="fixture-state">ready</span></p>
+      <p>This state is expressed in text and does not rely on colour.</p>
+    </section>
+  </main>
+
+  <noscript>This controlled fixture requires JavaScript only to post inert proof notifications.</noscript>
+  <script>
+    (() => {
+      "use strict";
+
+      const status = document.getElementById("fixture-status");
+      const state = document.getElementById("fixture-state");
+
+      function showStatus(nextState, message) {
+        state.textContent = nextState;
+        status.textContent = message;
+      }
+
+      let bridgeBinding = null;
+
+      // The page only echoes a host-supplied, opaque, per-run binding from memory. It never
+      // stores this binding and never reads field values, credentials, DOM content, or URLs.
+      function postInertMessage(type, payload) {
+        const webview = window.chrome && window.chrome.webview;
+        if (!webview || !bridgeBinding || typeof webview.postMessage !== "function") {
+          return false;
+        }
+
+        webview.postMessage({
+          version: 1,
+          sessionId: bridgeBinding.sessionId,
+          type: type,
+          tabId: bridgeBinding.tabId,
+          navigationGeneration: bridgeBinding.navigationGeneration,
+          payload: payload
+        });
+        return true;
+      }
+
+      function acceptBridgeBinding(event) {
+        const candidate = event.data;
+        if (!candidate || candidate.version !== 1 ||
+            typeof candidate.sessionId !== "string" ||
+            typeof candidate.tabId !== "string" ||
+            !Number.isSafeInteger(candidate.navigationGeneration) ||
+            candidate.navigationGeneration <= 0) {
+          return;
+        }
+
+        bridgeBinding = Object.freeze({
+          sessionId: candidate.sessionId,
+          tabId: candidate.tabId,
+          navigationGeneration: candidate.navigationGeneration
+        });
+        postInertMessage("fixture-ready", { ready: true });
+        postInertMessage("proof-status", { state: "ready" });
+      }
+
+      const webview = window.chrome && window.chrome.webview;
+      if (webview && typeof webview.addEventListener === "function") {
+        webview.addEventListener("message", acceptBridgeBinding);
+      }
+
+      document.getElementById("approve-step").addEventListener("click", () => {
+        postInertMessage("proof-status", { state: "manual-step-complete" });
+        showStatus("manual-step-complete", "Manual proof step recorded. Awaiting a user takeover request.");
+      });
+
+      document.getElementById("request-takeover").addEventListener("click", () => {
+        postInertMessage("user-input", { event: "take-control-requested" });
+        showStatus("takeover-requested", "User takeover was requested. The host decides whether to yield control.");
+      });
+
+      document.getElementById("request-handback").addEventListener("click", () => {
+        postInertMessage("user-input", { event: "hand-control-back" });
+        postInertMessage("proof-status", { state: "complete" });
+        showStatus("handback-requested", "Hand control back was requested. Only the host may restore its lease.");
+      });
+    })();
+  </script>
+</body>
+</html>
