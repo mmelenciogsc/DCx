@@ -74,8 +74,10 @@ try {
     $env:DCX_PREREQUISITE_REVIEW_FIXTURE = "1"
     $process = Start-Process $executable -ArgumentList "--prerequisite-review-fixture" -PassThru
     $window = Wait-For { Get-Window $process.Id } "The U02 prerequisite-review window did not start."
-    if ($window.Current.AutomationId -ne "PrerequisiteReviewWindow" -or
-        $window.Current.Name -ne "Windows prerequisite review") {
+    # WPF does not consistently expose a Window-level AutomationProperties.AutomationId
+    # through the desktop UIA root. The title is the stable accessible identity; named
+    # child controls below prove the review surface itself.
+    if ($window.Current.Name -ne "Windows prerequisite review") {
         throw "The prerequisite-review window identity was not stable."
     }
 
