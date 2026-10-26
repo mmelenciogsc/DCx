@@ -1,6 +1,6 @@
 # Ubuntu–Windows development handoff
 
-Updated: 2026-10-22
+Updated: 2026-10-27
 
 ## Scope and authority
 
@@ -90,6 +90,7 @@ When U16 has an approved Windows validation packet, use an existing repository v
 
 ## Current blockers
 
+- U02 now has a review-only Windows prerequisite UI and an exact official-resource-handoff Core policy (ADR 0124).  It grants no download, installer, package-manager, or elevation authority.  A separately packaged bootstrapper with vendor-owned terms/elevation, clean-VM lifecycle evidence, and formal human AT results is still required before Docker, WSL, or WebView2 installation can be described as installer-managed.
 - No Docker-managed Debian UI/backend/agentic continuation architecture or typed Windows–Debian bridge has been implemented or proven.
 - U03 has an accepted origin-bound proof design ([ADR 0123](architecture/adr/0123-u03-origin-bound-shared-browser-proof.md)). Its U03-A Core validator is implemented and Linux-tested, but it is not yet composed into WebView2/lease revocation; no Docker fixture or common live user/agent session has been implemented or proven.
 - Full U16 cross-host evidence has not been rerun: no checksum-bound Windows build/test result has been captured for this branch, and no JAWS/NVDA/Narrator, installer, device, GPU passthrough, login/MFA, camera/microphone, Bluetooth, or removable-storage manual acceptance was performed.

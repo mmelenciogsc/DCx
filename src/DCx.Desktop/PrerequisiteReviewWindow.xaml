@@ -66,13 +66,13 @@
                         BorderBrush="#606060"
                         BorderThickness="1">
                     <StackPanel>
-                        <TextBlock FontWeight="SemiBold" Text="Review-only security boundary" />
+                        <TextBlock FontWeight="SemiBold" Text="Consent-bound official-resource handoff boundary" />
                         <TextBlock x:Name="BoundaryText"
                                    Margin="0,6,0,0"
                                    TextWrapping="Wrap"
-                                   Text="This review can record a decision for one prerequisite at a time. It cannot download source files, install software, start an installer or package manager, request elevation, or invoke PowerShell."
+                                   Text="This review records one prerequisite decision at a time. Only after a confirmed missing result and both separate consents, Open official resource can hand your configured browser to the exact reviewed official HTTPS URI. It cannot download source files, install software, start an installer or package manager, request elevation, or invoke PowerShell."
                                    AutomationProperties.AutomationId="PrerequisiteReviewBoundary"
-                                   AutomationProperties.Name="Review-only security boundary" />
+                                   AutomationProperties.Name="Consent-bound official-resource handoff boundary" />
                     </StackPanel>
                 </Border>
 
@@ -99,7 +99,7 @@
                         <Label Grid.Row="1" Padding="0,5" Target="{Binding ElementName=PublisherText}" Content="Publisher" />
                         <TextBox x:Name="PublisherText" Grid.Row="1" Grid.Column="1" Margin="0,0,0,8" Padding="6" IsReadOnly="True" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="PrerequisitePublisher" AutomationProperties.Name="Prerequisite publisher" />
                         <Label Grid.Row="2" Padding="0,5" Target="{Binding ElementName=OfficialUriText}" Content="Official website URI" />
-                        <TextBox x:Name="OfficialUriText" Grid.Row="2" Grid.Column="1" Margin="0,0,0,8" Padding="6" IsReadOnly="True" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="PrerequisiteOfficialUri" AutomationProperties.Name="Official prerequisite website URI" AutomationProperties.HelpText="Read-only reviewed official HTTPS URI. This window cannot open, download from, or navigate to it." />
+                        <TextBox x:Name="OfficialUriText" Grid.Row="2" Grid.Column="1" Margin="0,0,0,8" Padding="6" IsReadOnly="True" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="PrerequisiteOfficialUri" AutomationProperties.Name="Official prerequisite website URI" AutomationProperties.HelpText="Read-only reviewed official HTTPS URI. After confirmed missing detection and both separate consents, Open official resource can hand your configured browser to this exact URI only. It cannot download or install software." />
                         <Label Grid.Row="3" Padding="0,5" Target="{Binding ElementName=TermsUriText}" Content="Terms URI" />
                         <TextBox x:Name="TermsUriText" Grid.Row="3" Grid.Column="1" Margin="0,0,0,8" Padding="6" IsReadOnly="True" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="PrerequisiteTermsUri" AutomationProperties.Name="Prerequisite terms URI" AutomationProperties.HelpText="Read-only reviewed terms HTTPS URI. This window cannot open, download from, or navigate to it." />
                         <Label Grid.Row="4" Padding="0,5" Target="{Binding ElementName=PrivilegeText}" Content="Privilege disclosure" />
@@ -129,7 +129,7 @@
                           Style="{StaticResource VisibleFocusStyle}"
                           AutomationProperties.AutomationId="PrerequisiteInstallApproval"
                           AutomationProperties.Name="Approve an external installation for this prerequisite"
-                          AutomationProperties.HelpText="Unchecked by default. This records item-specific consent only; this window cannot download, install, elevate, or invoke PowerShell."
+                          AutomationProperties.HelpText="Unchecked by default. This records item-specific one-use approval. With the separate terms acknowledgement and a confirmed missing result, it can enable an official-resource browser handoff only; it cannot download, install, elevate, or invoke PowerShell."
                           Checked="OnConsentChanged"
                           Unchecked="OnConsentChanged">
                     <AccessText Text="_I approve an external installation of this exact prerequisite." TextWrapping="Wrap" />
@@ -156,6 +156,17 @@
                             AutomationProperties.Name="Retry this prerequisite review"
                             AutomationProperties.HelpText="Clears the current review decision and reevaluates the supplied read-only detection result. It cannot detect, download, or install software."
                             Click="OnRetryClick" />
+                    <Button x:Name="OpenOfficialResourceButton"
+                            MinWidth="190"
+                            MinHeight="38"
+                            Margin="0,0,8,8"
+                            IsEnabled="False"
+                            Content="Open _official resource"
+                            Style="{StaticResource VisibleFocusStyle}"
+                            AutomationProperties.AutomationId="PrerequisiteOpenOfficialResourceButton"
+                            AutomationProperties.Name="Open official resource for this prerequisite"
+                            AutomationProperties.HelpText="Disabled until this exact prerequisite is confirmed missing and both separate consents are selected. When enabled, it hands the configured browser to the exact policy-reviewed official URI only. It cannot download, install, start a package manager, request elevation, or invoke PowerShell."
+                            Click="OnOpenOfficialResourceClick" />
                     <Button x:Name="ContinueButton"
                             MinWidth="130"
                             MinHeight="38"

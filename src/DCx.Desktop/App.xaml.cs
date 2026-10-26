@@ -383,7 +383,9 @@ public partial class App : Application
                     prerequisite,
                     PrerequisiteDetectionStatus.Missing))
                 .ToArray();
-            MainWindow = new PrerequisiteReviewWindow(items);
+            MainWindow = new PrerequisiteReviewWindow(
+                items,
+                new RecordingFixturePrerequisiteExternalResourceHandoff());
             MainWindow.Show();
         }
         catch

@@ -49,6 +49,20 @@ public sealed record PrerequisiteBootstrapDecision(
     bool ElevationAuthorized);
 
 /// <summary>
+/// Represents a handoff to the reviewed publisher resource only. A permitted handoff is
+/// deliberately not authority for DCx to acquire, install, execute, or elevate anything.
+/// </summary>
+public sealed record PrerequisiteExternalResourceHandoffDecision(
+    bool Permitted,
+    string Code,
+    PrerequisiteBootstrapItem Item,
+    Uri? OfficialResourceUri,
+    bool DownloadAuthorized,
+    bool InstallerExecutionAuthorized,
+    bool PackageManagerAuthorized,
+    bool ElevationAuthorized);
+
+/// <summary>
 /// Defines the U02 prerequisite-review boundary. It records a per-item decision only;
 /// it cannot download, install, invoke a package manager, or request elevation.
 /// </summary>
@@ -189,6 +203,34 @@ public static class PrerequisiteBootstrapPolicy
             installApproved: true,
             $"{item.Prerequisite.DisplayName} is still missing. Consent is recorded for this item only.",
             NoAuthorityHelpText);
+    }
+
+    /// <summary>
+    /// Decides whether the caller may hand the user to the exact reviewed official resource.
+    /// This is intentionally narrower than installation authority: DCx never downloads,
+    /// executes an installer or package manager, or requests elevation from this decision.
+    /// </summary>
+    public static PrerequisiteExternalResourceHandoffDecision EvaluateExternalResourceHandoff(
+        PrerequisiteBootstrapItem item,
+        PrerequisiteBootstrapConsent? consent = null)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(item.Prerequisite);
+
+        var bootstrapDecision = Evaluate(item, consent);
+        var permitted = bootstrapDecision.State == PrerequisiteBootstrapDecisionState.Missing &&
+                        bootstrapDecision.Code == "prerequisite_missing_external_install_required" &&
+                        IsKnownSafePrerequisite(item.Prerequisite);
+
+        return new PrerequisiteExternalResourceHandoffDecision(
+            Permitted: permitted,
+            Code: permitted ? "official_resource_handoff_permitted" : bootstrapDecision.Code,
+            Item: item,
+            OfficialResourceUri: permitted ? item.Prerequisite.OfficialUri : null,
+            DownloadAuthorized: false,
+            InstallerExecutionAuthorized: false,
+            PackageManagerAuthorized: false,
+            ElevationAuthorized: false);
     }
 
     private static PrerequisiteBootstrapDecision Decision(

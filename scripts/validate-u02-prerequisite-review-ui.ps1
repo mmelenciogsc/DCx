@@ -94,15 +94,16 @@ try {
     $install = Wait-For { Find-ById $window "PrerequisiteInstallApproval" } "The installation approval was not exposed."
     $decline = Wait-For { Find-ById $window "PrerequisiteDeclineButton" } "The decline button was not exposed."
     $retry = Wait-For { Find-ById $window "PrerequisiteRetryButton" } "The retry button was not exposed."
+    $openOfficial = Wait-For { Find-ById $window "PrerequisiteOpenOfficialResourceButton" } "The official-resource handoff button was not exposed."
     $continue = Wait-For { Find-ById $window "PrerequisiteContinueButton" } "The continue button was not exposed."
     $status = Wait-For { Find-ById $window "PrerequisiteReviewStatus" } "The prerequisite-review live status was not exposed."
 
     if ($heading.Current.Name -ne "Review Windows prerequisite" -or
         $position.Current.Name -ne "Prerequisite 1 of 3" -or
-        $boundary.Current.Name -ne "Review-only security boundary" -or
+        $boundary.Current.Name -ne "Consent-bound official-resource handoff boundary" -or
         $boundary.Current.HelpText -ne "" -or
         $boundary.Current.Name -eq "" -or
-        $boundary.Current.Name -notlike "Review-only*") {
+        $boundary.Current.Name -notlike "Consent-bound*") {
         throw "The first prerequisite review disclosure was not exact."
     }
     if ((Get-Value $name) -ne "Microsoft Edge WebView2 Runtime" -or
@@ -110,7 +111,7 @@ try {
         (Get-Value $officialUri) -ne "https://developer.microsoft.com/microsoft-edge/webview2/consumer/" -or
         (Get-Value $termsUri) -ne "https://www.microsoft.com/servicesagreement" -or
         (Get-Value $privilege) -notlike "The reviewed prerequisite does not require elevation*" -or
-        (Get-Value $details) -notlike "Identifier: webview2-runtime*Downloads authorized: no*Installer execution authorized: no*Elevation authorized: no*PowerShell invocation authorized: no") {
+        (Get-Value $details) -notlike "Identifier: webview2-runtime*External official resource handoff authorized: no*Downloads authorized: no*Installer execution authorized: no*Package manager authorized: no*Elevation authorized: no*PowerShell invocation authorized: no") {
         throw "The first prerequisite did not expose its exact read-only review data."
     }
 
@@ -118,17 +119,33 @@ try {
     $installToggle = [Windows.Automation.TogglePattern]$install.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
     if ($termsToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::Off -or
         $installToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::Off -or
-        $continue.Current.IsEnabled) {
-        throw "Separate prerequisite consents did not begin unchecked with continue disabled."
+        $continue.Current.IsEnabled -or
+        $openOfficial.Current.IsEnabled) {
+        throw "Separate prerequisite consents did not begin unchecked with bounded actions disabled."
     }
-    $accessKeys = @($terms.Current.AccessKey, $install.Current.AccessKey, $decline.Current.AccessKey, $retry.Current.AccessKey, $continue.Current.AccessKey)
+    $accessKeys = @($terms.Current.AccessKey, $install.Current.AccessKey, $decline.Current.AccessKey, $retry.Current.AccessKey, $openOfficial.Current.AccessKey, $continue.Current.AccessKey)
     if ($accessKeys -contains "" -or @($accessKeys | Select-Object -Unique).Count -ne $accessKeys.Count) {
         throw "Prerequisite consent and action access keys are absent or not distinct."
     }
     $childrenBefore = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($process.Id)").Count
     $termsToggle.Toggle()
     $installToggle.Toggle()
-    $null = Wait-For { $continue.Current.IsEnabled } "Continue was not enabled after both separate consents."
+    $null = Wait-For { $continue.Current.IsEnabled -and $openOfficial.Current.IsEnabled } "Bounded actions were not enabled after both separate consents."
+    $openOfficial.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $handoffStatus = "Fixture recorded the exact reviewed official-resource handoff without opening an external application. The one-use installation approval was reset. DCx did not download source files, install software, start an installer or package manager, request elevation, or invoke PowerShell."
+    $null = Wait-For {
+        $candidate = Find-ById $window "PrerequisiteReviewStatus"
+        $candidate.Current.Name -eq $handoffStatus
+    } "The fixture official-resource handoff status was not exposed."
+    $openOfficial = Find-ById $window "PrerequisiteOpenOfficialResourceButton"
+    $install = Find-ById $window "PrerequisiteInstallApproval"
+    $installToggle = [Windows.Automation.TogglePattern]$install.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
+    if ($installToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::Off -or
+        $openOfficial.Current.IsEnabled) {
+        throw "The fixture official-resource handoff did not consume the one-use approval."
+    }
+    $installToggle.Toggle()
+    $null = Wait-For { $continue.Current.IsEnabled } "Continue was not re-enabled after a fresh one-use installation approval."
     $continue.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For { (Get-Value $name) -eq "Docker Desktop for Windows" } "Continue did not move to exactly one next prerequisite."
     $position = Find-ById $window "PrerequisiteReviewPosition"
@@ -164,7 +181,7 @@ try {
     (Find-ById $window "PrerequisiteContinueButton").GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Wait-For {
         $candidate = Find-ById $window "PrerequisiteReviewStatus"
-        $candidate.Current.Name -eq "Prerequisite review is complete. Decisions were recorded for review only. Downloads 0. Installers started 0. Elevation requests 0. PowerShell invocations 0."
+        $candidate.Current.Name -eq "Prerequisite review is complete. Decisions were recorded. Official resources handed off: 1. Downloads 0. Installers started 0. Elevation requests 0. PowerShell invocations 0."
     } "The completed review did not report its inert authority boundary."
     $childrenAfter = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($process.Id)").Count
     if ($childrenAfter -ne $childrenBefore) {
@@ -181,6 +198,8 @@ try {
         install_approval_initially_unchecked = $true
         distinct_access_keys = $accessKeys
         decline_and_retry_validated = $true
+        official_resource_handoff_fixture_recorded = $true
+        official_resource_handoff_status = $handoffStatus
         external_child_processes_started = 0
         downloads_authorized = $false
         installers_started = 0

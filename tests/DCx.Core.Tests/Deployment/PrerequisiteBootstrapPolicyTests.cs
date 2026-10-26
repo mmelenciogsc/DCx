@@ -167,6 +167,100 @@ public sealed class PrerequisiteBootstrapPolicyTests
         AssertNoInstallAuthority(licenseDecision);
     }
 
+    [Fact]
+    public void ExternalResourceHandoff_PermitsOnlyTheExactCatalogOfficialResourceAfterFullConsent()
+    {
+        foreach (var prerequisite in PrerequisiteBootstrapPolicy.RequiredPrerequisites)
+        {
+            var item = new PrerequisiteBootstrapItem(prerequisite, PrerequisiteDetectionStatus.Missing);
+            var consent = new PrerequisiteBootstrapConsent(
+                prerequisite.Id,
+                TermsAcknowledged: true,
+                InstallApproved: true,
+                Declined: false);
+
+            var decision = PrerequisiteBootstrapPolicy.EvaluateExternalResourceHandoff(item, consent);
+
+            Assert.True(decision.Permitted);
+            Assert.Equal("official_resource_handoff_permitted", decision.Code);
+            Assert.Same(item, decision.Item);
+            Assert.Equal(prerequisite.OfficialUri, decision.OfficialResourceUri);
+            Assert.Equal(prerequisite.OfficialUri.AbsoluteUri, decision.OfficialResourceUri!.AbsoluteUri);
+            AssertNoInstallAuthority(decision);
+        }
+    }
+
+    [Theory]
+    [InlineData(PrerequisiteDetectionStatus.Unknown, "prerequisite_detection_unavailable")]
+    [InlineData(PrerequisiteDetectionStatus.Failed, "prerequisite_detection_unavailable")]
+    [InlineData(PrerequisiteDetectionStatus.Ready, "prerequisite_ready")]
+    public void ExternalResourceHandoff_RequiresAConfirmedMissingDetection(
+        PrerequisiteDetectionStatus detectionStatus,
+        string expectedCode)
+    {
+        var prerequisite = PrerequisiteBootstrapPolicy.RequiredPrerequisites[0];
+        var decision = PrerequisiteBootstrapPolicy.EvaluateExternalResourceHandoff(
+            new PrerequisiteBootstrapItem(prerequisite, detectionStatus),
+            new PrerequisiteBootstrapConsent(
+                prerequisite.Id,
+                TermsAcknowledged: true,
+                InstallApproved: true,
+                Declined: false));
+
+        Assert.False(decision.Permitted);
+        Assert.Equal(expectedCode, decision.Code);
+        Assert.Null(decision.OfficialResourceUri);
+        AssertNoInstallAuthority(decision);
+    }
+
+    [Fact]
+    public void ExternalResourceHandoff_RequiresExactItemTermsAndInstallConsentWithoutDecline()
+    {
+        var prerequisite = PrerequisiteBootstrapPolicy.RequiredPrerequisites[0];
+        var otherPrerequisite = PrerequisiteBootstrapPolicy.RequiredPrerequisites[1];
+        var item = new PrerequisiteBootstrapItem(prerequisite, PrerequisiteDetectionStatus.Missing);
+        var deniedCases = new (PrerequisiteBootstrapConsent? Consent, string Code)[]
+        {
+            (null, "prerequisite_terms_acknowledgement_required"),
+            (new PrerequisiteBootstrapConsent(otherPrerequisite.Id, true, true, false), "prerequisite_consent_item_mismatch"),
+            (new PrerequisiteBootstrapConsent(prerequisite.Id, false, true, false), "prerequisite_terms_acknowledgement_required"),
+            (new PrerequisiteBootstrapConsent(prerequisite.Id, true, false, false), "prerequisite_install_approval_required"),
+            (new PrerequisiteBootstrapConsent(prerequisite.Id, true, true, true), "prerequisite_install_declined"),
+        };
+
+        foreach (var (consent, expectedCode) in deniedCases)
+        {
+            var decision = PrerequisiteBootstrapPolicy.EvaluateExternalResourceHandoff(item, consent);
+
+            Assert.False(decision.Permitted);
+            Assert.Equal(expectedCode, decision.Code);
+            Assert.Null(decision.OfficialResourceUri);
+            AssertNoInstallAuthority(decision);
+        }
+    }
+
+    [Fact]
+    public void ExternalResourceHandoff_RejectsAnUnsafeOrUnreviewedDefinition()
+    {
+        var prerequisite = PrerequisiteBootstrapPolicy.RequiredPrerequisites[0];
+        var alteredDefinition = prerequisite with
+        {
+            OfficialUri = new Uri("https://developer.microsoft.com/microsoft-edge/webview2/consumer/?redirect=unreviewed", UriKind.Absolute),
+        };
+        var decision = PrerequisiteBootstrapPolicy.EvaluateExternalResourceHandoff(
+            new PrerequisiteBootstrapItem(alteredDefinition, PrerequisiteDetectionStatus.Missing),
+            new PrerequisiteBootstrapConsent(
+                alteredDefinition.Id,
+                TermsAcknowledged: true,
+                InstallApproved: true,
+                Declined: false));
+
+        Assert.False(decision.Permitted);
+        Assert.Equal("prerequisite_definition_unsafe", decision.Code);
+        Assert.Null(decision.OfficialResourceUri);
+        AssertNoInstallAuthority(decision);
+    }
+
     private static PrerequisiteBootstrapDecision Evaluate(
         PrerequisiteBootstrapPrerequisite prerequisite,
         PrerequisiteBootstrapConsent? consent = null) =>
@@ -178,6 +272,14 @@ public sealed class PrerequisiteBootstrapPolicyTests
     {
         Assert.False(decision.DownloadAuthorized);
         Assert.False(decision.InstallerExecutionAuthorized);
+        Assert.False(decision.ElevationAuthorized);
+    }
+
+    private static void AssertNoInstallAuthority(PrerequisiteExternalResourceHandoffDecision decision)
+    {
+        Assert.False(decision.DownloadAuthorized);
+        Assert.False(decision.InstallerExecutionAuthorized);
+        Assert.False(decision.PackageManagerAuthorized);
         Assert.False(decision.ElevationAuthorized);
     }
 }
