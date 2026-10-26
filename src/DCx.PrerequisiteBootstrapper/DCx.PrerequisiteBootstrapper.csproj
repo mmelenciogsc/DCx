@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>DCx.PrerequisiteBootstrapper</AssemblyName>
+    <RootNamespace>DCx.PrerequisiteBootstrapper</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DCx.Core\DCx.Core.csproj" />
+    <ProjectReference Include="..\DCx.PrerequisiteBootstrapper.Core\DCx.PrerequisiteBootstrapper.Core.csproj" />
+  </ItemGroup>
+</Project>

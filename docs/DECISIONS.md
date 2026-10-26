@@ -126,5 +126,6 @@
 | [0122](architecture/adr/0122-ubuntu-windows-continuation-handoff.md) | Separate Ubuntu continuation development from Windows product validation | Accepted for continuation planning and U00/U16 handoff | 2026-10-22 |
 | [0123](architecture/adr/0123-u03-origin-bound-shared-browser-proof.md) | Prove one origin-bound shared WebView2 session before continuation UI expansion | Accepted for U03 design and bounded implementation | 2026-10-22 |
 | [0124](architecture/adr/0124-consent-bound-prerequisite-external-handoff.md) | Bind prerequisite consent to an exact official external-resource handoff | Accepted for U02 policy foundation; installer composition blocked | 2026-10-27 |
+| [0125](architecture/adr/0125-separate-accessible-prerequisite-bootstrapper.md) | Separate accessible prerequisite bootstrapper from DCx MSIX | Accepted for source-only construction; release/live installation blocked | 2026-10-27 |
 
 Decisions are revisited only when measured constraints or authoritative requirements change. Superseded ADRs remain in the repository.

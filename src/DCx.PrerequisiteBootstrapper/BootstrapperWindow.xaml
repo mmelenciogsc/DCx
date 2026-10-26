@@ -1,0 +1,204 @@
+<Window x:Class="DCx.PrerequisiteBootstrapper.BootstrapperWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DCx prerequisite bootstrapper"
+        Width="920"
+        Height="820"
+        MinWidth="720"
+        MinHeight="620"
+        AutomationProperties.AutomationId="PrerequisiteBootstrapperWindow"
+        AutomationProperties.Name="DCx prerequisite bootstrapper">
+    <Window.Resources>
+        <Style x:Key="VisibleFocusStyle" TargetType="{x:Type Control}">
+            <Setter Property="FocusVisualStyle">
+                <Setter.Value>
+                    <Style TargetType="{x:Type Control}">
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate>
+                                    <Border Margin="-3"
+                                            BorderBrush="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"
+                                            BorderThickness="3" />
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel Margin="24"
+               Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}">
+        <Border DockPanel.Dock="Bottom"
+                Margin="0,16,0,0"
+                Padding="12"
+                Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                BorderBrush="{DynamicResource {x:Static SystemColors.WindowFrameBrushKey}}"
+                BorderThickness="1">
+            <TextBlock x:Name="StatusText"
+                       Focusable="True"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                       AutomationProperties.AutomationId="BootstrapperLiveStatus"
+                       AutomationProperties.Name="Bootstrapper status"
+                       AutomationProperties.LiveSetting="Assertive" />
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock x:Name="HeadingText"
+                           FontSize="28"
+                           FontWeight="SemiBold"
+                           Focusable="True"
+                           Text="Windows prerequisite bootstrapper"
+                           AutomationProperties.AutomationId="BootstrapperHeading"
+                           AutomationProperties.Name="Windows prerequisite bootstrapper" />
+                <TextBlock Margin="0,8,0,0"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                           Text="This review tool is not a terms acceptance. Vendor/Microsoft-owned terms, installation interaction, elevation, and restart decisions remain outside DCx. This packet does not launch any process."
+                           AutomationProperties.AutomationId="BootstrapperBoundaryNotice"
+                           AutomationProperties.Name="Bootstrapper authority boundary" />
+
+                <GroupBox Margin="0,16,0,0"
+                          Header="One prerequisite at a time"
+                          Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                          AutomationProperties.AutomationId="BootstrapperPrerequisiteGroup"
+                          AutomationProperties.Name="One prerequisite at a time">
+                    <StackPanel Margin="12,8">
+                        <Label Padding="0,0,0,4" Target="{Binding ElementName=PrerequisiteBox}" Content="_Prerequisite" />
+                        <ComboBox x:Name="PrerequisiteBox"
+                                  MinHeight="32"
+                                  Style="{StaticResource VisibleFocusStyle}"
+                                  AutomationProperties.AutomationId="BootstrapperPrerequisite"
+                                  AutomationProperties.Name="Selected prerequisite"
+                                  SelectionChanged="OnPrerequisiteChanged" />
+
+                        <Grid Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Label Grid.Row="0" Padding="0,5" Target="{Binding ElementName=OfficialUriText}" Content="Official _URI" />
+                            <TextBox x:Name="OfficialUriText" Grid.Row="0" Grid.Column="1" Margin="0,0,0,8" Padding="6" IsReadOnly="True" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="BootstrapperOfficialUri" AutomationProperties.Name="Official URI" />
+                            <Label Grid.Row="1" Padding="0,5" Target="{Binding ElementName=TermsUriText}" Content="_Terms URI" />
+                            <TextBox x:Name="TermsUriText" Grid.Row="1" Grid.Column="1" Margin="0,0,0,8" Padding="6" IsReadOnly="True" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="BootstrapperTermsUri" AutomationProperties.Name="Terms URI" />
+                            <Label Grid.Row="2" Padding="0,5" Target="{Binding ElementName=DetectionStatusText}" Content="Detection _status" />
+                            <TextBox x:Name="DetectionStatusText" Grid.Row="2" Grid.Column="1" Margin="0,0,0,8" Padding="6" IsReadOnly="True" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="BootstrapperDetectionStatus" AutomationProperties.Name="Fresh detection status" />
+                            <Label Grid.Row="3" Padding="0,5" Target="{Binding ElementName=DetectionTimestampText}" Content="Detection _timestamp (UTC)" />
+                            <TextBox x:Name="DetectionTimestampText" Grid.Row="3" Grid.Column="1" Margin="0,0,0,8" Padding="6" IsReadOnly="True" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="BootstrapperDetectionTimestamp" AutomationProperties.Name="Fresh detection timestamp" />
+                            <Label Grid.Row="4" Padding="0,5" Target="{Binding ElementName=PlannedCommandText}" Content="Planned _WSL command" />
+                            <TextBox x:Name="PlannedCommandText" Grid.Row="4" Grid.Column="1" Padding="6" IsReadOnly="True" Style="{StaticResource VisibleFocusStyle}" AutomationProperties.AutomationId="BootstrapperPlannedWslCommand" AutomationProperties.Name="Exact planned WSL command" />
+                        </Grid>
+                    </StackPanel>
+                </GroupBox>
+
+                <WrapPanel Margin="0,16,0,0">
+                    <Button x:Name="RefreshButton"
+                            MinWidth="150"
+                            MinHeight="38"
+                            Margin="0,0,8,8"
+                            Content="Refresh _status"
+                            Style="{StaticResource VisibleFocusStyle}"
+                            AutomationProperties.AutomationId="BootstrapperRefreshStatusButton"
+                            AutomationProperties.Name="Refresh detection status"
+                            AutomationProperties.HelpText="Refreshes only the composition-provided evidence. Normal composition has no detector."
+                            Click="OnRefreshClick" />
+                    <Button x:Name="ViewTermsButton"
+                            MinWidth="170"
+                            MinHeight="38"
+                            Margin="0,0,8,8"
+                            Content="_View official terms"
+                            Style="{StaticResource VisibleFocusStyle}"
+                            AutomationProperties.AutomationId="BootstrapperViewTermsButton"
+                            AutomationProperties.Name="View official terms"
+                            AutomationProperties.HelpText="Shows the exact terms URI in the status area. It does not open a browser in this packet."
+                            Click="OnViewTermsClick" />
+                    <Button x:Name="SelectArtifactButton"
+                            MinWidth="170"
+                            MinHeight="38"
+                            Margin="0,0,8,8"
+                            Content="Select _artifact"
+                            Style="{StaticResource VisibleFocusStyle}"
+                            AutomationProperties.AutomationId="BootstrapperSelectArtifactButton"
+                            AutomationProperties.Name="Select reviewed vendor artifact"
+                            AutomationProperties.HelpText="For WebView2 or Docker only. Normal composition refuses selection until a real selected-artifact verifier is implemented. The guarded fixture selects a prevalidated synthetic record only."
+                            Click="OnSelectArtifactClick" />
+                </WrapPanel>
+
+                <CheckBox x:Name="TermsAcknowledgementBox"
+                          Margin="0,16,0,0"
+                          IsChecked="False"
+                          Style="{StaticResource VisibleFocusStyle}"
+                          AutomationProperties.AutomationId="BootstrapperTermsAcknowledgement"
+                          AutomationProperties.Name="Acknowledge reviewing displayed terms"
+                          AutomationProperties.HelpText="Initially unchecked. This does not accept any vendor or Microsoft terms."
+                          Checked="OnConsentChanged"
+                          Unchecked="OnConsentChanged">
+                    <AccessText Text="I have _reviewed the exact displayed terms URI for this prerequisite." TextWrapping="Wrap" />
+                </CheckBox>
+                <CheckBox x:Name="StartApprovalBox"
+                          Margin="0,10,0,0"
+                          IsChecked="False"
+                          Style="{StaticResource VisibleFocusStyle}"
+                          AutomationProperties.AutomationId="BootstrapperStartApproval"
+                          AutomationProperties.Name="Approve starting interactive vendor or Microsoft installation"
+                          AutomationProperties.HelpText="Initially unchecked. This is separate from reviewing terms and does not accept terms or authorize silent installation."
+                          Checked="OnConsentChanged"
+                          Unchecked="OnConsentChanged">
+                    <AccessText Text="I approve starting the _interactive vendor or Microsoft installation flow for this exact prerequisite." TextWrapping="Wrap" />
+                </CheckBox>
+
+                <Border Margin="0,16,0,0"
+                        Padding="12"
+                        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                        BorderBrush="{DynamicResource {x:Static SystemColors.WindowFrameBrushKey}}"
+                        BorderThickness="1">
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="Policy launch plan" />
+                        <TextBox x:Name="PlanText"
+                                 Margin="0,6,0,0"
+                                 MinHeight="70"
+                                 Padding="6"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"
+                                 AcceptsReturn="True"
+                                 Style="{StaticResource VisibleFocusStyle}"
+                                 AutomationProperties.AutomationId="BootstrapperLaunchPlan"
+                                 AutomationProperties.Name="Data-only policy launch plan" />
+                    </StackPanel>
+                </Border>
+
+                <WrapPanel Margin="0,16,0,0">
+                    <Button x:Name="StartButton"
+                            MinWidth="220"
+                            MinHeight="42"
+                            Margin="0,0,8,8"
+                            IsEnabled="False"
+                            Content="Start reviewed _flow"
+                            Style="{StaticResource VisibleFocusStyle}"
+                            AutomationProperties.AutomationId="BootstrapperStartButton"
+                            AutomationProperties.Name="Start reviewed vendor or Microsoft flow"
+                            AutomationProperties.HelpText="Enabled only when the data-only policy permits the exact plan. This packet has no launcher, so activation never starts a process."
+                            Click="OnStartClick" />
+                    <Button MinWidth="110"
+                            MinHeight="42"
+                            Margin="0,0,8,8"
+                            Content="C_lose"
+                            Style="{StaticResource VisibleFocusStyle}"
+                            AutomationProperties.AutomationId="BootstrapperCloseButton"
+                            AutomationProperties.Name="Close prerequisite bootstrapper"
+                            Click="OnCloseClick" />
+                </WrapPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

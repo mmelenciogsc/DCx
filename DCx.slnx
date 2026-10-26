@@ -2,6 +2,8 @@
   <Folder Name="/src/">
     <Project Path="src/DCx.Core/DCx.Core.csproj" />
     <Project Path="src/DCx.Desktop/DCx.Desktop.csproj" />
+    <Project Path="src/DCx.PrerequisiteBootstrapper.Core/DCx.PrerequisiteBootstrapper.Core.csproj" />
+    <Project Path="src/DCx.PrerequisiteBootstrapper/DCx.PrerequisiteBootstrapper.csproj" />
   </Folder>
   <Folder Name="/server/">
     <Project Path="server/DCx.GlobalService/DCx.GlobalService.csproj" />
@@ -10,6 +12,7 @@
     <Project Path="tests/DCx.BossBenchmark/DCx.BossBenchmark.csproj" />
     <Project Path="tests/DCx.CareFixtureSeeder/DCx.CareFixtureSeeder.csproj" />
     <Project Path="tests/DCx.Core.Tests/DCx.Core.Tests.csproj" />
+    <Project Path="tests/DCx.PrerequisiteBootstrapper.Tests/DCx.PrerequisiteBootstrapper.Tests.csproj" />
     <Project Path="tests/DCx.FakeCodexAppServer/DCx.FakeCodexAppServer.csproj" />
     <Project Path="tests/DCx.FakeOllamaServer/DCx.FakeOllamaServer.csproj" />
     <Project Path="tests/DCx.FakeWhisperCli/DCx.FakeWhisperCli.csproj" />
