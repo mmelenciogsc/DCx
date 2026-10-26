@@ -33,13 +33,13 @@
         <Border DockPanel.Dock="Bottom"
                 Margin="0,16,0,0"
                 Padding="12"
-                Background="{DynamicResource {x:Static SystemColors.InfoBrushKey}}"
+                Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
                 BorderBrush="{DynamicResource {x:Static SystemColors.WindowFrameBrushKey}}"
                 BorderThickness="1">
             <TextBlock x:Name="StatusText"
                        Focusable="True"
                        TextWrapping="Wrap"
-                       Foreground="{DynamicResource {x:Static SystemColors.InfoTextBrushKey}}"
+                       Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
                        AutomationProperties.AutomationId="PrerequisiteReviewStatus"
                        AutomationProperties.Name="Prerequisite review status"
                        AutomationProperties.LiveSetting="Assertive" />
