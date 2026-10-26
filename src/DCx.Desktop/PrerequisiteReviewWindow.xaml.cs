@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using DCx.Core.Deployment;
 
 namespace DCx.Desktop;
@@ -162,6 +163,12 @@ public partial class PrerequisiteReviewWindow : Window
     {
         StatusText.Text = message;
         AutomationProperties.SetName(StatusText, message);
+        StatusText.Dispatcher.BeginInvoke(() =>
+        {
+            var peer = UIElementAutomationPeer.FromElement(StatusText) ??
+                       UIElementAutomationPeer.CreatePeerForElement(StatusText);
+            peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        });
     }
 
     private static string FormatDetails(PrerequisiteBootstrapItem item) => string.Join(
