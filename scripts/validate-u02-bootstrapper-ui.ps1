@@ -104,10 +104,46 @@ function Assert-ToggleOff($element, [string]$description) {
     return $toggle
 }
 
+function Assert-AssertiveLiveSetting($element) {
+    $liveSettingProperty = [Windows.Automation.AutomationElementIdentifiers]::LiveSettingProperty
+    if ($null -eq $liveSettingProperty) {
+        throw "The UI Automation LiveSetting property identifier is unavailable."
+    }
+
+    $rawLiveSetting = $element.GetCurrentPropertyValue($liveSettingProperty)
+    if ($null -eq $rawLiveSetting) {
+        throw "The bootstrapper status does not expose a UI Automation live setting."
+    }
+    if ($rawLiveSetting -eq [Windows.Automation.AutomationElement]::NotSupported) {
+        throw "The bootstrapper status reports its UI Automation live setting as unsupported."
+    }
+
+    $assertiveValue = [int][Windows.Automation.AutomationLiveSetting]::Assertive
+    if ([string]::Equals([string]$rawLiveSetting, "Assertive", [StringComparison]::OrdinalIgnoreCase)) {
+        return $assertiveValue
+    }
+
+    try {
+        # UIA providers may marshal AutomationLiveSetting as either its enum or its integral value.
+        $actualValue = [Convert]::ToInt32($rawLiveSetting, [Globalization.CultureInfo]::InvariantCulture)
+    }
+    catch {
+        throw "The bootstrapper status live setting is not provider-compatible assertive data: type '$($rawLiveSetting.GetType().FullName)', value '$rawLiveSetting'."
+    }
+
+    if ($actualValue -ne $assertiveValue) {
+        throw "The bootstrapper status live setting was '$actualValue', not assertive '$assertiveValue'."
+    }
+
+    return $actualValue
+}
+
 $previousFixture = $env:DCX_BOOTSTRAPPER_FIXTURE
 $deniedProcess = $null
 $process = $null
 $normalProcess = $null
+$liveRegionSignal = $null
+$liveRegionHandler = $null
 try {
     # The fixture mode must fail closed when its explicit environment gate is absent.
     $env:DCX_BOOTSTRAPPER_FIXTURE = $null
@@ -169,15 +205,7 @@ try {
     if ($accessKeys -contains "" -or @($accessKeys | Select-Object -Unique).Count -ne $accessKeys.Count) {
         throw "The bootstrapper access keys are absent or not distinct."
     }
-    $liveSettingProperty = [Windows.Automation.AutomationElementIdentifiers]::LiveSettingProperty
-    if ($null -eq $liveSettingProperty) {
-        throw "The UI Automation LiveSetting property identifier is unavailable."
-    }
-    $liveSetting = $status.GetCurrentPropertyValue($liveSettingProperty)
-    if ($liveSetting -isnot [Windows.Automation.AutomationLiveSetting] -or
-        $liveSetting -ne [Windows.Automation.AutomationLiveSetting]::Assertive) {
-        throw "The bootstrapper status does not expose an assertive UI Automation live setting."
-    }
+    $assertiveLiveSettingValue = Assert-AssertiveLiveSetting $status
 
     $childrenBefore = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($process.Id)").Count
     Invoke-Element $selectArtifact
@@ -190,11 +218,34 @@ try {
     if ((Get-Value (Find-ById $window "BootstrapperLaunchPlan")) -notlike "Permitted data-only plan: C:\Fixture\prevalidated-synthetic-installer.exe*Process execution authorized: no*") {
         throw "The selected synthetic artifact did not produce the expected data-only plan."
     }
+    $liveRegionSignal = [Threading.AutoResetEvent]::new($false)
+    $liveRegionHandler = [Windows.Automation.AutomationEventHandler]{
+        param($sender, $eventArgs)
+        if ($sender.Current.ProcessId -eq $process.Id -and
+            $sender.Current.AutomationId -eq "BootstrapperLiveStatus") {
+            $null = $liveRegionSignal.Set()
+        }
+    }
+    [Windows.Automation.Automation]::AddAutomationEventHandler(
+        [Windows.Automation.AutomationElementIdentifiers]::LiveRegionChangedEvent,
+        $status,
+        [Windows.Automation.TreeScope]::Element,
+        $liveRegionHandler)
     Invoke-Element (Find-ById $window "BootstrapperStartButton")
     $expectedNoLaunchStatus = "The policy plan is permitted, but real launch is unavailable pending a separately reviewed verifier and launcher. No process, browser, UAC prompt, download, package manager, PowerShell, winget, reboot, or installer was started. Vendor/Microsoft remains responsible for its own terms and elevation."
     $null = Wait-For {
         (Find-ById $window "BootstrapperLiveStatus").Current.Name -eq $expectedNoLaunchStatus
     } "The assertive no-launch Start status was not exposed."
+    if (-not $liveRegionSignal.WaitOne(5000)) {
+        throw "The assertive no-launch status did not raise a UI Automation LiveRegionChanged event."
+    }
+    [Windows.Automation.Automation]::RemoveAutomationEventHandler(
+        [Windows.Automation.AutomationElementIdentifiers]::LiveRegionChangedEvent,
+        $status,
+        $liveRegionHandler)
+    $liveRegionHandler = $null
+    $liveRegionSignal.Dispose()
+    $liveRegionSignal = $null
 
     Select-ComboItem $window $prerequisiteBox "Docker Desktop for Windows"
     $null = Wait-For { (Get-Value (Find-ById $window "BootstrapperOfficialUri")) -eq "https://www.docker.com/products/docker-desktop/" } "The next prerequisite was not selected."
@@ -276,6 +327,7 @@ try {
         first_detection_status = "Missing"
         first_official_uri = "https://developer.microsoft.com/microsoft-edge/webview2/consumer/"
         first_terms_uri = "https://www.microsoft.com/servicesagreement"
+        assertive_live_setting_value = $assertiveLiveSettingValue
         terms_initially_unchecked = $true
         start_approval_initially_unchecked = $true
         distinct_access_keys = $accessKeys
@@ -299,6 +351,13 @@ try {
     [pscustomobject]$result
 }
 finally {
+    if ($null -ne $liveRegionHandler -and $null -ne $status) {
+        [Windows.Automation.Automation]::RemoveAutomationEventHandler(
+            [Windows.Automation.AutomationElementIdentifiers]::LiveRegionChangedEvent,
+            $status,
+            $liveRegionHandler)
+    }
+    if ($null -ne $liveRegionSignal) { $liveRegionSignal.Dispose() }
     if ($null -ne $process -and -not $process.HasExited) {
         $null = $process.CloseMainWindow()
         if (-not $process.WaitForExit(5000)) { $process.Kill() }
