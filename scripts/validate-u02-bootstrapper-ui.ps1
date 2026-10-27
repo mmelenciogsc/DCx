@@ -169,9 +169,14 @@ try {
     if ($accessKeys -contains "" -or @($accessKeys | Select-Object -Unique).Count -ne $accessKeys.Count) {
         throw "The bootstrapper access keys are absent or not distinct."
     }
-    $liveSetting = $status.GetCurrentPropertyValue([Windows.Automation.AutomationElement]::LiveSettingProperty)
-    if ($liveSetting -ne [Windows.Automation.AutomationLiveSetting]::Assertive) {
-        throw "The bootstrapper status is not assertive."
+    $liveSettingProperty = [Windows.Automation.AutomationElementIdentifiers]::LiveSettingProperty
+    if ($null -eq $liveSettingProperty) {
+        throw "The UI Automation LiveSetting property identifier is unavailable."
+    }
+    $liveSetting = $status.GetCurrentPropertyValue($liveSettingProperty)
+    if ($liveSetting -isnot [Windows.Automation.AutomationLiveSetting] -or
+        $liveSetting -ne [Windows.Automation.AutomationLiveSetting]::Assertive) {
+        throw "The bootstrapper status does not expose an assertive UI Automation live setting."
     }
 
     $childrenBefore = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($process.Id)").Count
